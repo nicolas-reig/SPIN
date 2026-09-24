@@ -1,0 +1,64 @@
+import {
+    validateSnapshot
+} from './domain.js';
+export class Api {
+    async request(url = 'api.php', options = {}) {
+        let response;
+        try {
+            response = await fetch(url, {
+                cache: 'no-store',
+                ...options
+            });
+        } catch {
+            throw Object.assign(Error('offline'), {
+                key: 'offline'
+            });
+        }
+        let result;
+        try {
+            result = await response.json();
+        } catch {
+            throw Object.assign(Error('storage'), {
+                key: 'storage'
+            });
+        }
+        if (!response.ok) throw Object.assign(Error(result.error), {
+            key: result.error,
+            details: result.details,
+            status: response.status
+        });
+        return result;
+    }
+    async load() {
+        return validateSnapshot(await this.request());
+    }
+    async save(payload) {
+        const r = await this.request('api.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Hub-Request': '1'
+            },
+            body: JSON.stringify(payload)
+        });
+        validateSnapshot(r.snapshot);
+        return r;
+    }
+    async upload(file, kind, signature, id, dimensions = null) {
+        const f = new FormData();
+        f.set('file', file);
+        f.set('kind', kind);
+        f.set('signature', signature);
+        f.set('requestId', id);
+        f.set('name', file.name);
+        if (dimensions) f.set('dimensions', JSON.stringify(dimensions));
+        return this.request('api.php', {
+            method: 'POST',
+            headers: {
+                'X-Hub-Request': '1'
+            },
+            body: f
+        });
+    }
+}
+export const uid = () => crypto.randomUUID();

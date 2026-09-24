@@ -96,7 +96,7 @@ export function validateSnapshot(s) {
     return s;
 }
 export function structural(record, kind) {
-    const keys = kind === 'floors' ? ['id', 'names', 'order', 'elevation', 'modelId', 'transform', 'camera'] : ['id', 'name', 'location', 'floorId', 'modelId', 'transform', 'placed'];
+    const keys = kind === 'floors' ? ['id', 'names', 'order', 'elevation', 'modelId', 'transform', 'camera'] : ['id', 'name', 'location', 'floorId', 'modelId', 'transform', 'placed', 'status'];
     return Object.fromEntries(keys.map(k => [k, structuredClone(record[k])]));
 }
 export class EditSession {
@@ -132,7 +132,8 @@ export class EditSession {
                     changes.push({
                         kind,
                         op: 'restore',
-                        id: r.id
+                        id: r.id,
+                        record: structural(r, kind)
                     });
                     continue;
                 }

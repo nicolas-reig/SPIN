@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <meta name="color-scheme" content="light">
+        <title>BMW Welt · Service</title>
+        <link rel="stylesheet" href="css/app.css">
+        <script type="importmap">
+            {
+                "imports": {
+                    "three": "./vendor/three/build/three.webgpu.js",
+                    "three/webgpu": "./vendor/three/build/three.webgpu.js",
+                    "three/tsl": "./vendor/three/build/three.tsl.js",
+                    "three/addons/": "./vendor/three/examples/jsm/"
+                }
+            }
+        </script>
+        <script type="module" src="js/app.js"></script>
+    </head>
+    <body>
+        <header id="header"></header>
+        <div id="editbar" hidden></div>
+        <main id="workspace">
+            <aside id="sidebar" aria-label="Exponate"></aside>
+            <section id="map-panel">
+                <div id="map-heading"></div>
+                <div id="map-stage">
+                    <div id="map-canvas"></div>
+                    <div id="flat-map"></div>
+                    <div id="map-message" role="status"></div>
+                </div>
+                <div id="map-controls"></div>
+            </section>
+            <div id="resizer" role="separator" tabindex="0" aria-orientation="vertical"></div>
+            <aside id="inspector"></aside>
+        </main>
+        <nav id="mobile-nav"></nav>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <dialog id="dialog"></dialog>
+        <noscript>
+            This application requires JavaScript. Diese Anwendung benötigt JavaScript.
+        </noscript>
+    </body>
+</html>

@@ -12,6 +12,8 @@ import {
     TransformControls
 } from 'three/addons/controls/TransformControls.js';
 
+import { cameraOffset } from './camera.js';
+
 const radians = v => v * Math.PI / 180;
 
 function applyTransform(object, t) {
@@ -69,6 +71,7 @@ export class MapView {
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.05;
         await this.renderer.init();
+        this.renderer.domElement.dataset.renderer = this.renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
         this.container.append(this.renderer.domElement);
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
@@ -77,6 +80,7 @@ export class MapView {
         this.controls.maxPolarAngle = Math.PI / 2 - .045;
         this.controls.minPolarAngle = .02;
         this.controls.addEventListener('change', () => this.requestRender());
+        this.controls.addEventListener('start', () => cancelAnimationFrame(this.cameraFrame));
         this.transform = new TransformControls(this.camera, this.renderer.domElement);
         this.scene.add(this.transform.getHelper());
         this.transform.addEventListener('dragging-changed', e => {
@@ -95,6 +99,8 @@ export class MapView {
         this.observer.observe(this.container);
         const canvas = this.renderer.domElement;
         canvas.addEventListener('pointerdown', e => {
+            e.preventDefault();
+            getSelection()?.removeAllRanges();
             this.down = [e.clientX, e.clientY];
         });
         canvas.addEventListener('pointerup', e => {
@@ -138,6 +144,8 @@ export class MapView {
         this.frame = requestAnimationFrame(async () => {
             this.frame = 0;
             try {
+                const offset = this.camera.position.clone().sub(this.controls.target);
+                this.renderer.domElement.dataset.cameraOffset = offset.toArray().join(',');
                 await this.renderer.renderAsync(this.scene, this.camera);
             } catch (e) {
                 this.onState('mapUnavailable');
@@ -157,8 +165,15 @@ export class MapView {
         this.editing = editing;
         const floor = data.floors.find(f => f.id === floorId);
         if (!floor) return;
-        const key = JSON.stringify([floor, data.exhibits.filter(e => e.floorId === floorId).map(e => [e.id, e.modelId, e.transform, e.placed, e.status])]);
+        const key = JSON.stringify([floor, data.exhibits.filter(e => e.floorId === floorId).map(e => [e.id, e.modelId, e.transform, e.placed])]);
         if (key === this.key) {
+            for (const exhibit of data.exhibits) {
+                const object = this.objects.get(exhibit.id);
+                if (!object) continue;
+                object.userData.status = exhibit.status;
+                const marker = object.children.find(child => child.userData.statusMarker);
+                if (marker) marker.material.color.set(({ ok: '#227247', problem: '#b87b16', retired: '#5a6572' })[exhibit.status]);
+            }
             this.highlight(selected);
             return;
         }
@@ -188,17 +203,28 @@ export class MapView {
             for (const exhibit of data.exhibits.filter(e => e.floorId === floorId && e.placed)) {
                 const group = new THREE.Group();
                 group.userData.exhibitId = exhibit.id;
+                group.userData.status = exhibit.status;
                 applyTransform(group, exhibit.transform);
                 if (exhibit.modelId) group.add(await this.model(data.assets.find(a => a.id === exhibit.modelId)));
+                group.traverse(mesh => {
+                    if (!mesh.isMesh) return;
+                    const prepare = material => {
+                        const copy = material.clone();
+                        copy.userData.baseColor = copy.color?.clone();
+                        return copy;
+                    };
+                    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(prepare) : prepare(mesh.material);
+                });
                 const bounds = new THREE.Box3().setFromObject(group);
                 const height = Number.isFinite(bounds.max.y) ? Math.max(.5, bounds.max.y - group.position.y) : 1;
                 const markerMaterial = new THREE.MeshBasicNodeMaterial();
-                markerMaterial.colorNode = color(({
+                markerMaterial.color.set(({
                     ok: '#227247',
-                    problem: '#b03d3e',
+                    problem: '#b87b16',
                     retired: '#5a6572'
                 })[exhibit.status]);
                 const marker = new THREE.Mesh(new THREE.SphereGeometry(.25, 12, 8), markerMaterial);
+                marker.userData.statusMarker = true;
                 marker.position.set(0, height + .6, 0);
                 group.add(marker);
                 next.add(group);
@@ -225,20 +251,31 @@ export class MapView {
     }
     highlight(id) {
         this.selected = id;
-        if (this.outline) {
-            this.scene.remove(this.outline);
-            this.outline.geometry.dispose();
-            this.outline.material.dispose();
-            this.outline = null;
+        const colors = { ok: '#64a77a', problem: '#dba542', retired: '#7b8792' };
+        cancelAnimationFrame(this.tintFrame);
+        const transitions = [];
+        for (const [exhibitId, group] of this.objects) {
+            group.traverse(mesh => {
+                if (!mesh.isMesh || mesh.userData.statusMarker) return;
+                for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+                    if (!material.color || !material.userData.baseColor) continue;
+                    const target = material.userData.baseColor.clone().lerp(new THREE.Color(colors[group.userData.status]), .38);
+                    if (exhibitId === id) target.lerp(new THREE.Color(this.editing ? '#865de0' : '#2089fa'), .72);
+                    transitions.push({ material, start: material.color.clone(), target });
+                }
+            });
         }
+        const started = performance.now();
+        const animate = () => {
+            const progress = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.min(1, (performance.now() - started) / 160);
+            for (const item of transitions) item.material.color.copy(item.start).lerp(item.target, progress);
+            this.requestRender();
+            if (progress < 1) this.tintFrame = requestAnimationFrame(animate);
+        };
+        animate();
         const object = this.objects.get(id);
-        if (object) {
-            this.root.updateMatrixWorld(true);
-            this.outline = new THREE.BoxHelper(object, 0x0876d9);
-            this.scene.add(this.outline);
-            if (this.editing && this.tool) this.transform?.attach(object);
-            else this.transform?.detach();
-        } else this.transform?.detach();
+        if (object && this.editing && this.tool) this.transform?.attach(object);
+        else this.transform?.detach();
         this.requestRender();
     }
     setTool(tool, snap = false) {
@@ -252,48 +289,51 @@ export class MapView {
         this.transform.setScaleSnap(snap ? .1 : null);
         this.highlight(this.selected);
     }
+    frameTarget(center, distance, span, animate = true) {
+        cancelAnimationFrame(this.cameraFrame);
+        const offset = new THREE.Vector3(...cameraOffset(this.mode, distance));
+        const startTarget = this.controls.target.clone();
+        const startPosition = this.camera.position.clone();
+        const endPosition = center.clone().add(offset);
+        const startSpan = this.orthoSpan || span;
+        const startZoom = this.camera.zoom;
+        const started = performance.now();
+        const step = () => {
+            const p = !animate || matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.min(1, (performance.now() - started) / 220);
+            const ease = 1 - Math.pow(1 - p, 3);
+            this.controls.target.copy(startTarget).lerp(center, ease);
+            this.camera.position.copy(startPosition).lerp(endPosition, ease);
+            this.orthoSpan = startSpan + (span - startSpan) * ease;
+            this.camera.zoom = startZoom + (1 - startZoom) * ease;
+            this.resize();
+            this.controls.update();
+            if (p < 1) this.cameraFrame = requestAnimationFrame(step);
+        };
+        step();
+    }
     home() {
-        const p = this.floor?.camera?.position || [28, 27, 33];
-        this.controls.target.copy(new THREE.Vector3(0, 1, 0).applyMatrix4(this.root.matrixWorld));
-        this.camera.position.copy(this.controls.target).add(new THREE.Vector3(...p));
-        this.camera.zoom = 1;
-        this.camera.updateProjectionMatrix();
-        this.controls.update();
-        this.requestRender();
+        this.root.updateMatrixWorld(true);
+        const center = new THREE.Vector3(0, 1, 0).applyMatrix4(this.root.matrixWorld);
+        const distance = new THREE.Vector3(...(this.floor?.camera?.position || [28, 27, 33])).length();
+        this.frameTarget(center, distance, distance * .36);
     }
     fit() {
         const box = new THREE.Box3().setFromObject(this.root);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         const span = Math.max(size.x, size.z, 10);
-        this.controls.target.copy(center);
-        this.camera.position.copy(center).add(new THREE.Vector3(span * .6, span * .85, span * .8));
-        if (this.camera.isOrthographicCamera) {
-            this.orthoSpan = span * .65;
-            this.camera.zoom = 1;
-            this.resize();
-        }
-        this.controls.update();
-        this.requestRender();
+        this.frameTarget(center, span * 1.6, span * .65);
     }
     focus() {
         const obj = this.objects.get(this.selected);
         if (!obj) return;
         const box = new THREE.Box3().setFromObject(obj);
         const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const d = Math.max(9, size.length() * 1.4);
-        this.controls.target.copy(center);
-        this.camera.position.copy(center).add(new THREE.Vector3(d * .65, d * .75, d));
-        if (this.camera.isOrthographicCamera) {
-            this.orthoSpan = d;
-            this.camera.zoom = 1;
-            this.resize();
-        }
-        this.controls.update();
-        this.requestRender();
+        const distance = Math.max(9, box.getSize(new THREE.Vector3()).length() * 1.4);
+        this.frameTarget(center, distance, distance * .55);
     }
     setView(mode) {
+        cancelAnimationFrame(this.cameraFrame);
         const target = this.controls.target.clone();
         const distance = this.camera.position.distanceTo(target);
         this.mode = mode;
@@ -304,6 +344,9 @@ export class MapView {
         if (mode === 'iso') this.camera.position.copy(target).add(new THREE.Vector3(.65, .8, 1).normalize().multiplyScalar(distance));
         this.controls.object = this.camera;
         this.controls.enableRotate = mode !== 'top';
+        this.controls.minPolarAngle = mode === 'top' ? 0 : .02;
+        this.renderer.domElement.dataset.view = mode;
+        this.renderer.domElement.dataset.projection = this.camera.isOrthographicCamera ? 'orthographic' : 'perspective';
         this.transform.camera = this.camera;
         this.resize();
         this.controls.update();
@@ -324,7 +367,7 @@ export class MapView {
                 this.camera.position.copy(this.controls.target).add(v);
             }
         }
-        if (action === 'rotate') {
+        if (action === 'rotate' && this.mode !== 'top') {
             const offset = this.camera.position.clone().sub(this.controls.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 12);
             this.camera.position.copy(this.controls.target).add(offset);
         }
@@ -342,6 +385,13 @@ export class MapView {
         this.controls.update();
         this.requestRender();
     }
+    setAxis(axis) {
+        if (!this.transform) return;
+        this.transform.showX = !axis || axis === 'X';
+        this.transform.showY = !axis || axis === 'Y';
+        this.transform.showZ = !axis || axis === 'Z';
+        this.requestRender();
+    }
     async preview(asset) {
         const model = await this.model(asset);
         this.scene.remove(this.root);
@@ -353,6 +403,8 @@ export class MapView {
     destroy() {
         this.generation++;
         cancelAnimationFrame(this.frame);
+        cancelAnimationFrame(this.cameraFrame);
+        cancelAnimationFrame(this.tintFrame);
         this.observer?.disconnect();
         this.controls?.dispose();
         this.transform?.dispose();

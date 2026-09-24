@@ -27,16 +27,17 @@ let snapshot = null,
     tab = 'notes',
     edit = null,
     map = null,
+    mapPromise = null,
+    submitStructure = null,
     mapState = 'mapLoading',
     view = 'list',
-    expanded = false,
-    flat = matchMedia('(max-width:860px)').matches,
     query = '',
     scope = 'nameLocation',
     floorFilter = '',
     statusFilter = '',
     mapMode = 'iso',
     gizmo = '',
+    axisConstraint = '',
     snap = false,
     noticeTimer, dialogCleanup = null;
 let drafts = {};
@@ -48,6 +49,7 @@ const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const floor = () => data()?.floors.find(f => f.id === floorId);
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id;
+const trashIcon = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg>';
 const icon = {
     ok: '✓',
     problem: '!',
@@ -93,6 +95,7 @@ function persistEdit() {
 }
 
 function setView(value) {
+    collapseEmptyDraft();
     view = value;
     document.body.dataset.view = value;
     renderMobile();
@@ -112,6 +115,62 @@ function floorLabel(record) {
     return ['source-level', 'demo-gallery'].includes(record.id) ? record.names[lang()].split(' · ')[0] : record.names[lang()];
 }
 
+function collapseEmptyDraft() {
+    const draft = drafts[selected];
+    if (draft && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length) {
+        draft.open = false;
+        draft.signing = false;
+        persistDrafts();
+    }
+}
+
+function trashExhibit(id) {
+    if (!edit) return;
+    edit.change(state => {
+        const record = state.exhibits.find(e => e.id === id);
+        if (!record) return;
+        state.exhibits = state.exhibits.filter(e => e.id !== id);
+        state.trash.push({ ...record, deleted: { signature: '', at: new Date().toISOString() } });
+    });
+    changed();
+}
+
+function showStructureForm(kind, title, content, onSubmit) {
+    if (kind === 'floors') return showDialog(title, content, onSubmit);
+    $('#structure-slot').innerHTML = `<form id="structure-form" novalidate>${content}<div class="error" id="structure-error" role="alert" hidden></div></form>`;
+    submitStructure = async () => {
+        try {
+            await onSubmit(new FormData($('#structure-form')));
+            return true;
+        } catch (error) {
+            $('#structure-error').hidden = false;
+            $('#structure-error').textContent = errorText(error);
+            return false;
+        }
+    };
+    $('#structure-form').addEventListener('submit', event => {
+        event.preventDefault();
+        submitStructure();
+    });
+    return $('#structure-form');
+}
+
+function deleteNoteDialog(noteId) {
+    const record = structuredClone(exhibit());
+    const note = record.notes.find(n => n.id === noteId);
+    if (!note || note.deleted) return;
+    const requestId = uid();
+    showDialog('deleteNote', `<p>${esc(t('noteBy'))} ${esc(note.author)} · ${esc(date(note.at))}</p><p class="muted small" style="margin:12px 0 20px">${esc(t('deleteNoteHint'))}</p>${signatureField()}${footer('deleteNote')}`, async form => {
+        const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, requestId, signature: requireSignature(form) });
+        if (drafts[record.id]?.noteId === noteId) delete drafts[record.id];
+        persistDrafts();
+        closeDialog();
+        acceptSnapshot(result.snapshot);
+        announce(t('saved'));
+    });
+    $('#dialog button[type=submit]').className = 'danger';
+}
+
 function renderHeader() {
     $('#header').innerHTML = '';
 }
@@ -123,7 +182,7 @@ function renderSidebar() {
     ];
     $('#sidebar').setAttribute('aria-label', t('exhibits'));
     $('#sidebar').innerHTML = `
-        <div class="sidebar-title"><h2>${esc(t('exhibits'))}</h2></div>
+        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', '+') : ''}</div>
         <div class="search-row">
             <div class="searchbox">
                 <span class="search-icon" aria-hidden="true">⌕</span>
@@ -183,37 +242,41 @@ function renderList() {
     const q = query.trim().toLocaleLowerCase(lang());
     const records = data().exhibits.filter(e => {
         if (floorFilter && e.floorId !== floorFilter || statusFilter && e.status !== statusFilter) return false;
-        const text = scope === 'notes' ? e.notes.map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + e.location + ' ' + titleFloor(e.floorId);
+        const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + e.location + ' ' + titleFloor(e.floorId);
         return text.toLocaleLowerCase(lang()).includes(q);
     });
     const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameLocation');
     $('.active-filters').hidden = !filtered;
     $('#filter-description').textContent = [scope !== 'nameLocation' ? t(scope) : '', floorFilter ? titleFloor(floorFilter) : '', statusFilter ? t(statusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
     $('#exhibit-list').innerHTML = records.length ? records.map(e => `
-        <button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + e.location + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
+        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + e.location + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
             <span class="exhibit-name">${esc(displayName(e))}</span>
             <span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}">${icon[e.status]}</span>
-        </button>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
+        </button>${edit ? `<button class="icon-button danger exhibit-trash" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}">${trashIcon}</button>` : ''}</div>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
 }
 
 function renderMapUI() {
-    $('#map-heading').innerHTML = `
-        <div class="floor-pill" title="${esc(floor()?.names[lang()] || '')}">
-            <span aria-hidden="true">▱</span>
-            <select id="map-floor" aria-label="${esc(t('floor'))}">
-                ${options(data().floors.map(f => [f.id, floorLabel(f)]), floorId)}
-            </select>
-        </div>`;
-    $('#map-floor').addEventListener('change', e => changeFloor(e.target.value));
+    $('#map-heading').innerHTML = `<nav class="floor-selector" aria-label="${esc(t('floor'))}">
+        ${[...data().floors].sort((a, b) => b.order - a.order).map(f => `<button data-floor="${esc(f.id)}" aria-current="${floorId === f.id ? 'true' : 'false'}" title="${esc(f.names[lang()])}">${esc(f.id === 'source-level' ? t('sourceFloor') : f.id === 'demo-gallery' ? t('galleryFloor') : floorLabel(f))}</button>`).join('')}
+    </nav>`;
+    $('.floor-selector').addEventListener('keydown', event => {
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const buttons = [...$('.floor-selector').querySelectorAll('button')];
+        const index = buttons.indexOf(event.target);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        changeFloor(buttons[next].dataset.floor);
+        $('.floor-selector').querySelectorAll('button')[next].focus();
+    });
     $('#map-controls').innerHTML = `
         <div class="map-toolbar" aria-label="${esc(t('keyboardMap'))}">
             <select id="camera-view" aria-label="${esc(t('cameraView'))}" title="${esc(t('cameraView'))}">
-                ${options([['flat', '2D'], ['iso', t('iso')], ['top', t('top')], ['perspective', t('perspective')]], flat ? 'flat' : mapMode)}
+                ${options([['iso', t('iso')], ['top', t('top')], ['perspective', t('perspective')]], mapMode)}
             </select>
             <span class="toolbar-divider"></span>
             ${iconButton('focus', 'focus', '⌖')}
             ${iconButton('home', 'camera:home', '⌂')}
-            ${!flat ? iconButton('zoomOut', 'camera:zoomOut', '−') + iconButton('zoomIn', 'camera:zoomIn', '+') : ''}
+            ${iconButton('zoomOut', 'camera:zoomOut', '−') + iconButton('zoomIn', 'camera:zoomIn', '+')}
             <details class="camera-menu">
                 <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary>
                 <div class="popover">
@@ -226,44 +289,35 @@ function renderMapUI() {
         </div>`;
     $('#camera-view').addEventListener('change', async e => {
         const value = e.target.value;
-        flat = value === 'flat';
-        if (!flat) {
-            mapMode = value;
-            await ensureMap();
-            map?.setView(value);
-        }
+        mapMode = value;
+        await ensureMap();
+        map?.setView(mapMode);
+        syncUrl();
         renderMapUI();
     });
-    $('#map-canvas').hidden = flat;
-    $('#flat-map').hidden = !flat;
-    $('#map-message').textContent = flat || mapState === 'mapReady' ? '' : t(mapState);
-    renderFlat();
+    $('#map-message').textContent = mapState === 'mapReady' ? '' : t(mapState);
     map?.resize();
 }
 
-function renderFlat() {
-    const records = data().exhibits.filter(e => e.floorId === floorId && e.placed);
-    const xs = records.map(e => e.transform.position[0]),
-        zs = records.map(e => e.transform.position[2]);
-    const minX = Math.min(-15, ...xs) - 5,
-        maxX = Math.max(15, ...xs) + 5,
-        minZ = Math.min(-15, ...zs) - 5,
-        maxZ = Math.max(15, ...zs) + 5;
-    const w = maxX - minX,
-        h = maxZ - minZ;
-    $('#flat-map').innerHTML = `<svg viewBox="${minX} ${minZ-8} ${w} ${h+24}" role="group" aria-label="${esc(t('map'))}"><defs><pattern id="grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#c8d3dc" stroke-width=".06"/></pattern></defs><rect x="${minX}" y="${minZ}" width="${w}" height="${h}" fill="url(#grid)"/>${records.map(e=>{const x=e.transform.position[0],z=e.transform.position[2];return `<g class="flat-marker" role="button" tabindex="0" data-select="${esc(e.id)}" aria-label="${esc(e.name+' · '+t(e.status))}" transform="translate(${x} ${z})"><circle r="${selected===e.id?1:0.7}" fill="${({ok:'#227247',problem:'#b03d3e',retired:'#5a6572'})[e.status]}" stroke="${selected===e.id?'#086aca':'white'}" stroke-width=".25"/><text y="2.5" text-anchor="middle" style="font-size:1.1px;stroke-width:.25px">${esc(e.name)}</text></g>`;}).join('')}</svg>`;
-}
 async function ensureMap() {
+    if (mapPromise) return mapPromise;
     if (map) return;
+    mapPromise = initializeMap();
+    try { await mapPromise; } finally { mapPromise = null; }
+}
+
+async function initializeMap() {
+    let instance;
     try {
         const {
             MapView
         } = await import('./map.js');
-        const instance = new MapView($('#map-canvas'), {
+        instance = new MapView($('#map-canvas'), {
             onSelect: select,
             onState: key => {
                 mapState = key;
-                $('#map-message').textContent = flat || key === 'mapReady' ? '' : t(key);
+                $('#map-canvas').classList.toggle('floor-loading', key === 'mapLoading');
+                $('#map-message').textContent = key === 'mapReady' ? '' : t(key);
             },
             onTransform: (id, transform) => {
                 if (!edit) return;
@@ -273,7 +327,7 @@ async function ensureMap() {
                 });
                 persistEdit();
                 renderEditBar();
-                renderFlat();
+                renderInspector();
             }
         });
         await instance.init();
@@ -281,6 +335,8 @@ async function ensureMap() {
         await updateMap(true);
         map.setView(mapMode);
     } catch (e) {
+        instance?.destroy();
+        map = null;
         mapState = 'mapUnavailable';
         $('#map-message').textContent = t(mapState);
     }
@@ -289,10 +345,10 @@ async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
         reset
     });
-    renderFlat();
 }
 
 function select(id) {
+    collapseEmptyDraft();
     const e = data().exhibits.find(x => x.id === id);
     if (!e) return;
     const changed = floorId !== e.floorId;
@@ -302,11 +358,13 @@ function select(id) {
     renderInspector();
     renderMapUI();
     updateMap(changed);
+    syncUrl();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
     if (matchMedia('(max-width:860px)').matches) setView('detail');
 }
 
 function changeFloor(id) {
+    collapseEmptyDraft();
     floorId = id;
     const e = exhibit();
     if (e?.floorId !== id) selected = data().exhibits.find(x => x.floorId === id)?.id || null;
@@ -314,16 +372,28 @@ function changeFloor(id) {
     renderList();
     renderInspector();
     updateMap(true);
+    syncUrl();
 }
 
+function syncUrl() {
+    const url = new URL(location.href);
+    url.searchParams.set('floor', floorId);
+    if (selected) url.searchParams.set('exhibit', selected);
+    else url.searchParams.delete('exhibit');
+    url.searchParams.set('view', mapMode);
+    history.replaceState(null, '', url);
+}
 
 function noteHTML(n) {
     const author = n.id.startsWith('sample-') ? n.author.replace(' · Demo', '') : n.author;
     const body = n.id === 'sample-repair' ? n.body.replace('**Beispielnotiz — keine Betriebsdaten.**\n\n', '') : n.body;
+    if (n.deleted) return `<article class="note tombstone"><p>${esc(t('noteBy'))} <strong>${esc(author)}</strong></p><p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p><time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time></article>`;
     const shortDate = new Intl.DateTimeFormat(lang() === 'de' ? 'de-DE' : 'en-GB', {
         day: '2-digit',
         month: '2-digit',
-        year: '2-digit'
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
     }).format(new Date(n.at));
     return `
         <article class="note">
@@ -334,13 +404,18 @@ function noteHTML(n) {
             <div class="note-body">${markdown(body)}</div>
             ${n.images.map(id => `<a href="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" target="_blank" rel="noopener"><img class="note-image" src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}" loading="lazy"></a>`).join('')}
             <div class="note-footer">
-                <span class="muted small" title="${n.corrections?.length ? esc(n.corrections.at(-1).signature + ' · ' + date(n.corrections.at(-1).at)) : ''}">${n.corrections?.length ? esc(t('edited')) : ''}</span>
-                <button class="icon-button note-edit" data-correct="${esc(n.id)}" aria-label="${esc(t('correct'))}" title="${esc(t('correct'))}">✎</button>
+                ${n.corrections?.length ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(n.corrections.at(-1).signature)} · ${esc(date(n.corrections.at(-1).at))}</p></details>` : '<span></span>'}
+                <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${esc(t('correct'))}</button><button type="button" class="danger" data-delete-note="${esc(n.id)}">${esc(t('deleteNote'))}</button></div></details>
             </div>
         </article>`;
 }
 
 function renderInspector() {
+    submitStructure = null;
+    if (edit) {
+        renderEditInspector();
+        return;
+    }
     const e = exhibit();
     if (!e) {
         $('#inspector').innerHTML = `<div class="panel-content empty">${esc(t('noSelection'))}</div>`;
@@ -350,7 +425,6 @@ function renderInspector() {
         <div class="inspector-header">
             <div class="inspector-tools">
                 <h1 title="${esc(e.location + ' · ' + titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
-                ${iconButton(expanded ? 'collapse' : 'expand', 'expand', expanded ? '↙' : '↗')}
             </div>
             <button class="compact-status" data-action="status" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" title="${esc(e.statusChanged.signature + ' · ' + date(e.statusChanged.at))}">
                 ${statusHTML(e.status)}<span aria-hidden="true">⌄</span>
@@ -376,7 +450,7 @@ function renderPanel() {
     if (!e) return;
     const el = $('#inspector-content');
     if (tab === 'notes') {
-        el.innerHTML = `<div id="composer-slot"></div>${e.notes.map(noteHTML).join('')}`;
+        el.innerHTML = `<div id="composer-slot"></div>${e.notes.filter(n => drafts[e.id]?.noteId !== n.id || drafts[e.id]?.readOnly).map(noteHTML).join('')}`;
         if (!drafts[e.id]) {
             drafts[e.id] = newDraft(e);
             drafts[e.id].open = false;
@@ -416,10 +490,14 @@ function renderComposer() {
     const e = exhibit(),
         d = drafts[e.id];
     if (!d) return;
+    if (d.readOnly) {
+        $('#composer-slot').innerHTML = button('continueEdit', 'resumeNote', 'quiet');
+        return;
+    }
     const active = d.open || Boolean(d.body || d.images.length || d.noteId);
     $('#composer-slot').innerHTML = `
         <form class="composer ${active ? 'composing' : ''}" id="note-form" novalidate>
-            ${d.noteId ? `<div class="composer-correction">${esc(t('correct'))}</div>` : ''}
+            ${d.noteId ? `<div class="composer-correction row between">${button('backToNote', 'backToNote', 'quiet')}${button('cancel', 'discardDraft', 'quiet')}</div>` : ''}
             <label class="sr-only" for="note-body">${esc(t('noteBody'))}</label>
             <textarea id="note-body" rows="2" placeholder="${esc(t('writeNote'))}" ${d.preview ? 'hidden' : ''}>${esc(d.body)}</textarea>
             <div class="note-body" id="note-preview" ${d.preview ? '' : 'hidden'}>${markdown(d.body)}</div>
@@ -428,7 +506,7 @@ function renderComposer() {
                     ${d.existingImages.map(id => `<div class="attachment"><img src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}"><button type="button" data-remove-existing="${esc(id)}" aria-label="${esc(t('remove'))}">×</button></div>`).join('')}
                     ${d.images.map((im, i) => `<div class="attachment"><img src="${esc(im.data)}" alt="${esc(im.name)}"><button type="button" data-remove-image="${i}" aria-label="${esc(t('remove'))}">×</button></div>`).join('')}
                 </div>
-                <div class="composer-tools">
+                <div class="composer-tools" ${d.signing ? 'hidden' : ''}>
                     <div class="toolbar">
                         <button type="button" class="icon-button" data-format="bold" aria-label="${esc(t('bold'))}" title="${esc(t('bold'))}"><strong>B</strong></button>
                         <button type="button" class="icon-button" data-format="list" aria-label="${esc(t('list'))}" title="${esc(t('list'))}">≡</button>
@@ -438,34 +516,52 @@ function renderComposer() {
                     </div>
                     <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : 'postShort'))}</button>
                 </div>
-                <div class="composer-secondary">
+                <div class="composer-secondary" ${d.signing ? 'hidden' : ''}>
                     <span class="draft-label" title="${esc(t('draftScope'))}">${esc(t('draftShort'))}</span>
-                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">···</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('close', 'closeComposer', 'quiet')}</div></details>
+                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">···</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
                 </div>
             </div>
             ${d.signing ? `
                 <div class="signature-step">
                     <label for="note-signature">${esc(t('signature'))}</label>
                     <input id="note-signature" autocomplete="off" maxlength="120" value="${esc(d.signature)}" aria-describedby="note-error" placeholder="${esc(t('yourName'))}">
-                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : 'publish'))}</button></div>
+                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : 'publish'))}</button></div>
                 </div>` : ''}
             <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(t(d.error)) : ''}</div>
             ${d.conflict ? button('reviewConflict', 'noteConflict', 'quiet') : ''}
         </form>`;
     const form = $('#note-form');
+    const grow = () => {
+        const input = $('#note-body');
+        input.style.height = 'auto';
+        input.style.height = Math.min(360, Math.max(d.open ? 90 : 52, input.scrollHeight)) + 'px';
+    };
+    grow();
+    form.addEventListener('focusout', () => {
+        setTimeout(() => {
+            if (!form.isConnected || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing) return;
+            d.open = false;
+            delete d.error;
+            persistDrafts();
+            renderComposer();
+        }, 0);
+    });
     if (d.saving) form.querySelectorAll('input, textarea, select, button').forEach(control => { control.disabled = true; });
     $('#note-body').addEventListener('focus', () => {
         d.open = true;
         form.classList.add('composing');
         form.querySelector('.composer-expanded').hidden = false;
+        grow();
     });
     $('#note-body').addEventListener('input', ev => {
         d.body = ev.target.value;
+        grow();
         delete d.error;
         persistDrafts();
     });
     $('#note-signature')?.addEventListener('input', ev => {
         d.signature = ev.target.value;
+        $('[data-action=confirmNote]').disabled = !d.signature.trim();
         persistDrafts();
     });
     $('#note-signature')?.addEventListener('keydown', ev => {
@@ -603,12 +699,21 @@ async function postNote(id) {
 
 function acceptSnapshot(value) {
     snapshot = value;
+    for (const record of value.exhibits) {
+        const draft = drafts[record.id];
+        if (draft && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.noteId) draft.baseRevision = record.revision;
+    }
     if (edit) {
         for (const kind of ['exhibits', 'floors'])
             for (const r of edit.value[kind]) {
                 const live = value[kind].find(x => x.id === r.id);
                 if (live && kind === 'exhibits') {
-                    for (const k of ['notes', 'links', 'status', 'statusChanged']) r[k] = structuredClone(live[k]);
+                    for (const k of ['notes', 'links']) r[k] = structuredClone(live[k]);
+                    const base = edit.base.exhibits.find(x => x.id === r.id);
+                    if (r.status === base?.status) {
+                        r.status = live.status;
+                        r.statusChanged = structuredClone(live.statusChanged);
+                    }
                 }
             }
     }
@@ -624,7 +729,23 @@ function renderEditBar() {
     el.hidden = !edit;
     if (!edit) return;
     const count = edit.changes().length;
-    el.innerHTML = `<span class="edit-label">${esc(t('editing'))} · ${count} ${esc(t('changes'))}</span><div class="row">${button('editExhibit','editExhibit','',exhibit()?'':'disabled')}${button('editFloor','editFloor')}${button('newExhibit','newExhibit')}${button('newFloor','newFloor')}${button('undo','undo','',edit.undoStack.length?'':'disabled')}${button('redo','redo','',edit.redoStack.length?'':'disabled')}${button('trash','trash')}${button('models','models')}<select id="gizmo" aria-label="${esc(t('gizmo'))}" style="width:auto;max-width:140px;min-height:36px">${options([['',t('gizmo')],['translate',t('move')],['rotate',t('rotate')],['scale',t('scaleTool')]],gizmo)}</select><label class="check small" style="margin:0"><input type="checkbox" id="snap" ${snap?'checked':''}>${esc(t('snap'))}</label>${button('saveExit','saveExit','primary')}</div>`;
+    el.innerHTML = `<span class="edit-label">${esc(t('editContext'))} · ${count}</span><div class="row">${button('undo', 'undo', '', edit.undoStack.length ? '' : 'disabled')}${button('redo', 'redo', '', edit.redoStack.length ? '' : 'disabled')}${button('saveExit', 'saveExit', 'primary')}</div>`;
+}
+
+function renderEditInspector() {
+    const record = exhibit();
+    $('#inspector').innerHTML = `<div class="inspector-header"><p class="edit-context">${esc(t('editContext'))}</p><h1>${esc(record ? displayName(record) : t('newExhibit'))}</h1></div><div class="panel-content" id="structure-panel">
+        <div class="spatial-tools">
+            <label for="gizmo">${esc(t('gizmo'))}</label><select id="gizmo">${options([['', t('gizmo')], ['translate', t('move')], ['rotate', t('rotate')], ['scale', t('scaleTool')]], gizmo)}</select>
+            <div class="row"><label class="check"><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><select id="axis" aria-label="${esc(t('axis'))}">${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div>
+        </div>
+        <div id="structure-slot"></div>
+        <div class="edit-resources row">${button('editFloor', 'editFloor', 'quiet')}${button('newFloor', 'newFloor', 'quiet')}${button('models', 'models', 'quiet')}${button('trash', 'trash', 'quiet')}</div>
+    </div>`;
+    $('#axis').addEventListener('change', e => {
+        axisConstraint = e.target.value;
+        map?.setAxis(axisConstraint);
+    });
     $('#gizmo').addEventListener('change', e => {
         gizmo = e.target.value;
         map?.setTool(gizmo, snap);
@@ -633,9 +754,12 @@ function renderEditBar() {
         snap = e.target.checked;
         map?.setTool(gizmo, snap);
     });
+    if (record) structureDialog('exhibits');
+    else $('#structure-slot').innerHTML = button('newExhibit', 'newExhibit', 'primary');
 }
 
 function render() {
+    document.body.classList.toggle('editing', Boolean(edit));
     renderHeader();
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
@@ -755,15 +879,14 @@ function enterEdit() {
     if (edit) return;
     edit = new EditSession(snapshot);
     persistEdit();
-    renderEditBar();
-    renderHeader();
-    updateMap();
+    render();
 }
 
 function changed() {
     persistEdit();
     render();
     map?.setTool(gizmo, snap);
+    map?.setAxis(axisConstraint);
 }
 
 function structureDialog(kind, isNew = false) {
@@ -803,19 +926,49 @@ function structureDialog(kind, isNew = false) {
         links: []
     }) : structuredClone(source);
     const isFloor = kind === 'floors';
+    if (isNew && !isFloor) {
+        $('#inspector h1').textContent = t('newExhibit');
+        map?.setTool('');
+    }
     let transform = structuredClone(record.transform);
     let locked = true;
     const modelOptions = options([...(isFloor ? [] : [
         ['', t('noModel')]
     ]), ...data().assets.map(a => [a.id, a.name])], record.modelId || '');
-    showDialog(isNew ? (isFloor ? 'newFloor' : 'newExhibit') : (isFloor ? 'editFloor' : 'editExhibit'), `
- ${isFloor?`<p class="small muted" style="margin-bottom:16px">${esc(t('floorAlignHint'))}</p><div class="grid2"><div class="field"><label for="name-de">${esc(t('nameDe'))}</label><input name="nameDe" id="name-de" value="${esc(record.names.de)}"></div><div class="field"><label for="name-en">${esc(t('nameEn'))}</label><input name="nameEn" id="name-en" value="${esc(record.names.en)}"></div></div><div class="grid2"><div class="field"><label for="order">${esc(t('order'))}</label><input type="number" name="order" id="order" value="${record.order}"></div><div class="field"><label for="elevation">${esc(t('elevation'))}</label><input type="number" name="elevation" id="elevation" step="any" value="${record.elevation}"></div></div>`:`<div class="field"><label for="ex-name">${esc(t('name'))}</label><input id="ex-name" name="name" maxlength="200" value="${esc(record.name)}"></div><div class="field"><label for="ex-location">${esc(t('location'))}</label><input id="ex-location" name="location" value="${esc(record.location)}"></div><div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select name="floorId" id="ex-floor">${options(data().floors.map(f=>[f.id,f.names[lang()]]),record.floorId)}</select></div>${isNew?`<div class="field"><label for="initial-status">${esc(t('status'))}</label><select name="status" id="initial-status">${statusOptions(record.status)}</select></div>`:''}`}
+    const formRoot = showStructureForm(kind, isNew ? (isFloor ? 'newFloor' : 'newExhibit') : (isFloor ? 'editFloor' : 'editExhibit'), `
+ ${isFloor?`<p class="small muted" style="margin-bottom:16px">${esc(t('floorAlignHint'))}</p><div class="grid2"><div class="field"><label for="name-de">${esc(t('nameDe'))}</label><input name="nameDe" id="name-de" value="${esc(record.names.de)}"></div><div class="field"><label for="name-en">${esc(t('nameEn'))}</label><input name="nameEn" id="name-en" value="${esc(record.names.en)}"></div></div><div class="grid2"><div class="field"><label for="order">${esc(t('order'))}</label><input type="number" name="order" id="order" value="${record.order}"></div><div class="field"><label for="elevation">${esc(t('elevation'))}</label><input type="number" name="elevation" id="elevation" step="any" value="${record.elevation}"></div></div>`:`<div class="field"><label for="ex-name">${esc(t('name'))}</label><input id="ex-name" name="name" maxlength="200" value="${esc(record.name)}"></div><div class="field"><label for="ex-location">${esc(t('location'))}</label><input id="ex-location" name="location" value="${esc(record.location)}"></div><div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select name="floorId" id="ex-floor">${options(data().floors.map(f=>[f.id,f.names[lang()]]),record.floorId)}</select></div>${`<div class="field"><label for="initial-status">${esc(t('status'))}</label><select name="status" id="initial-status">${statusOptions(record.status)}</select></div>`}`}
  <div class="field"><label for="model-choice">${esc(t('model'))}</label><select id="model-choice" name="modelId">${modelOptions}</select></div>
  ${!isFloor?`<label class="check"><input type="checkbox" name="placed" ${record.placed?'checked':''}>${esc(t('placed'))}</label>`:''}
  ${['position','rotation','scale'].map(key=>`<div class="vector"><h3>${esc(t(key))}</h3><div class="grid3">${['X','Y','Z'].map((axis,i)=>`<div><label for="${key}-${i}">${axis}</label><input type="number" step="any" data-vector="${key}" data-axis="${i}" id="${key}-${i}" value="${Number(transform[key][i].toFixed(4))}"></div>`).join('')}</div></div>`).join('')}
  <label class="check"><input type="checkbox" id="locked" checked>${esc(t('lockProportions'))}</label><div class="vector"><h3>${esc(t('dimensions'))}</h3><div class="grid3">${['X','Y','Z'].map((axis,i)=>`<div><label for="dim-${i}">${axis}</label><input type="number" step="any" min="0.001" data-dimension="${i}" id="dim-${i}"></div>`).join('')}</div><p class="small muted">${esc(t('dimensionHint'))}</p></div>
- <div class="row">${button('resetTransform','resetFormTransform')}${!isFloor&&!isNew?button('deleteExhibit','deleteCurrent','danger'):''}</div>${!isFloor&&!isNew?`<p class="small muted" style="margin-top:10px">${esc(t('deleteHint'))}</p>`:''}${footer('apply')}`,
+ <div class="row">${button('resetTransform','resetFormTransform')}${!isFloor&&!isNew?button('deleteExhibit','deleteCurrent','danger'):''}</div>${!isFloor&&!isNew?`<p class="small muted" style="margin-top:10px">${esc(t('deleteHint'))}</p>`:''}${isFloor ? footer('apply') : `<div class="dialog-footer">${button('duplicate', 'duplicateExhibit', 'quiet', isNew ? 'disabled' : '')}${button('cancel', 'cancelStructure', 'quiet')}<button type="submit" class="primary">${esc(t('apply'))}</button></div>`}`,
         async form => {
+            const selectedAsset = data().assets.find(asset => asset.id === form.get('modelId'));
+            const pendingDimensions = selectedAsset ? [0, 1, 2].filter(axis => {
+                const input = field('#dim-' + axis);
+                return !input.disabled && Number(input.value) !== Number((selectedAsset.dimensions[axis] * transform.scale[axis]).toFixed(4));
+            }).map(axis => [axis, Number(field('#dim-' + axis).value)]) : [];
+            const beforeInput = structuredClone(transform);
+            for (const key of ['position', 'rotation', 'scale']) {
+                for (let axis = 0; axis < 3; axis++) {
+                    const input = field('#' + key + '-' + axis);
+                    if (!input.value.trim()) throw Error('invalidTransform');
+                    let value = Number(input.value);
+                    if (!Number.isFinite(value) || key === 'scale' && value <= 0) throw Error('invalidTransform');
+                    if (value === Number(beforeInput[key][axis].toFixed(4))) continue;
+                    if (snap && key === 'position') value = Math.round(value);
+                    if (snap && key === 'rotation') value = Math.round(value / 15) * 15;
+                    if (key === 'scale' && locked) {
+                        const ratio = value / transform.scale[axis];
+                        transform.scale = transform.scale.map(component => component * ratio);
+                    } else {
+                        transform[key][axis] = value;
+                    }
+                }
+            }
+            for (const [axis, size] of pendingDimensions) {
+                transform = new MapPlacement(transform).resize(selectedAsset.dimensions, axis, size, locked).toJSON();
+            }
             new MapPlacement(transform);
             record.transform = transform;
             record.modelId = form.get('modelId') || null;
@@ -833,7 +986,12 @@ function structureDialog(kind, isNew = false) {
                 record.location = String(form.get('location')).trim();
                 record.floorId = form.get('floorId');
                 record.placed = form.has('placed');
-                if (isNew) record.status = form.get('status');
+                record.status = form.get('status');
+            }
+            const previous = data()[kind].find(x => x.id === record.id);
+            if (previous && JSON.stringify(structural(previous, kind)) === JSON.stringify(structural(record, kind))) {
+                if (isFloor) closeDialog();
+                return;
             }
             edit.change(s => {
                 const index = s[kind].findIndex(x => x.id === record.id);
@@ -847,22 +1005,31 @@ function structureDialog(kind, isNew = false) {
             closeDialog();
             changed();
         });
+    if (isFloor) {
+        for (const input of formRoot.querySelectorAll('input[id], select[id]')) {
+            const originalId = input.id;
+            input.id = 'floor-' + originalId;
+            const label = formRoot.querySelector('label[for="' + originalId + '"]');
+            if (label) label.htmlFor = input.id;
+        }
+    }
+    const field = selector => formRoot.querySelector(isFloor && selector.startsWith('#') ? '#floor-' + selector.slice(1) : selector);
     const syncDimensions = () => {
-        const asset = data().assets.find(a => a.id === $('#model-choice').value);
+        const asset = data().assets.find(a => a.id === field('#model-choice').value);
         for (let i = 0; i < 3; i++) {
-            const field = $('#dim-' + i);
-            field.disabled = !asset || !asset.dimensions[i];
-            field.value = asset ? Number((asset.dimensions[i] * transform.scale[i]).toFixed(4)) : '';
+            const dimensionInput = field('#dim-' + i);
+            dimensionInput.disabled = !asset || !asset.dimensions[i];
+            dimensionInput.value = asset ? Number((asset.dimensions[i] * transform.scale[i]).toFixed(4)) : '';
         }
     };
     const syncVectors = () => {
         for (const k of ['position', 'rotation', 'scale'])
-            for (let i = 0; i < 3; i++) $('#' + k + '-' + i).value = Number(transform[k][i].toFixed(4));
+            for (let i = 0; i < 3; i++) field('#' + k + '-' + i).value = Number(transform[k][i].toFixed(4));
         syncDimensions();
     };
-    $('#locked').addEventListener('change', e => locked = e.target.checked);
-    $('#model-choice').addEventListener('change', syncDimensions);
-    document.querySelectorAll('[data-vector]').forEach(input => input.addEventListener('change', () => {
+    field('#locked').addEventListener('change', e => locked = e.target.checked);
+    field('#model-choice').addEventListener('change', syncDimensions);
+    formRoot.querySelectorAll('[data-vector]').forEach(input => input.addEventListener('change', () => {
         const k = input.dataset.vector,
             i = Number(input.dataset.axis);
         let v = Number(input.value);
@@ -878,20 +1045,20 @@ function structureDialog(kind, isNew = false) {
         } else transform[k][i] = v;
         syncVectors();
     }));
-    document.querySelectorAll('[data-dimension]').forEach(input => input.addEventListener('change', () => {
+    formRoot.querySelectorAll('[data-dimension]').forEach(input => input.addEventListener('change', () => {
         try {
-            const asset = data().assets.find(a => a.id === $('#model-choice').value);
+            const asset = data().assets.find(a => a.id === field('#model-choice').value);
             transform = new MapPlacement(transform).resize(asset.dimensions, Number(input.dataset.dimension), Number(input.value), locked).toJSON();
             syncVectors();
         } catch {
             syncVectors();
         }
     }));
-    $('[data-action=resetFormTransform]').onclick = () => {
+    field('[data-action=resetFormTransform]').onclick = () => {
         transform = identity();
         syncVectors();
     };
-    $('[data-action=deleteCurrent]')?.addEventListener('click', () => {
+    field('[data-action=deleteCurrent]')?.addEventListener('click', () => {
         edit.change(s => {
             s.exhibits = s.exhibits.filter(x => x.id !== record.id);
             s.trash.push({
@@ -909,8 +1076,9 @@ function structureDialog(kind, isNew = false) {
     syncDimensions();
 }
 
-function saveExit() {
+async function saveExit() {
     if (!edit) return;
+    if (submitStructure && $('#structure-form') && !await submitStructure()) return;
     const changes = edit.changes();
     if (!changes.length) {
         edit = null;
@@ -1071,7 +1239,7 @@ async function structureConflict() {
                 } else if (change.op === 'restore') {
                     const record = state.trash.find(e => e.id === change.id);
                     if (!record || state.exhibits.some(e => e.id === change.id)) throw Error('conflict');
-                    state.exhibits.push(record);
+                    state.exhibits.push({ ...record, ...change.record });
                     state.trash = state.trash.filter(e => e.id !== change.id);
                 }
             }
@@ -1108,6 +1276,23 @@ function recoverDraft() {
 const actions = {
     refresh,
     enterEdit,
+    resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },
+    backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
+    discardDraft: () => { delete drafts[selected]; persistDrafts(); renderPanel(); },
+    cancelStructure: () => renderEditInspector(),
+    duplicateExhibit: () => {
+        if (!edit || !exhibit()) return;
+        const copy = structuredClone(exhibit());
+        copy.id = uid();
+        copy.name += ' (2)';
+        copy.transform.position[0] += 2;
+        copy.notes = [];
+        copy.links = [];
+        copy.revision = 0;
+        edit.change(state => state.exhibits.push(copy));
+        selected = copy.id;
+        changed();
+    },
     cancelSignature: () => {
         drafts[selected].signing = false;
         persistDrafts();
@@ -1128,12 +1313,6 @@ const actions = {
     status: statusDialog,
     addLink: () => linkDialog(),
     closeDialog,
-    expand: () => {
-        expanded = !expanded;
-        document.body.classList.toggle('expanded', expanded);
-        renderInspector();
-        map?.resize();
-    },
     clear: () => {
         query = '';
         floorFilter = '';
@@ -1143,13 +1322,13 @@ const actions = {
     },
     focus: async () => {
         if (!exhibit()?.placed) { announce(t('unplaced')); return; }
-        if (!flat) { await ensureMap(); map?.focus(); }
+        await ensureMap();
+        map?.focus();
         setView('map');
-        renderFlat();
-    },
+        },
     editExhibit: () => structureDialog('exhibits'),
     editFloor: () => structureDialog('floors'),
-    newExhibit: () => structureDialog('exhibits', true),
+    newExhibit: () => { setView('detail'); structureDialog('exhibits', true); },
     newFloor: () => structureDialog('floors', true),
     undo: () => { edit?.undo(); changed(); },
     redo: () => { edit?.redo(); changed(); },
@@ -1165,9 +1344,12 @@ document.addEventListener('click', async event => {
     const element = event.target.closest('button,[data-select]');
     if (!element) return;
     try {
+        if (element.dataset.floor) { changeFloor(element.dataset.floor); return; }
+        if (element.dataset.trashExhibit) { trashExhibit(element.dataset.trashExhibit); return; }
+        if (element.dataset.deleteNote) { deleteNoteDialog(element.dataset.deleteNote); return; }
         if (element.dataset.language) { setLanguage(element.dataset.language); render(); return; }
         if (element.dataset.select) { select(element.dataset.select); return; }
-        if (element.dataset.tab) { tab = element.dataset.tab; renderInspector(); return; }
+        if (element.dataset.tab) { collapseEmptyDraft(); tab = element.dataset.tab; renderInspector(); return; }
         if (element.dataset.correct) {
             const record = exhibit();
             if (drafts[record.id]?.body || drafts[record.id]?.images.length) {
@@ -1176,9 +1358,12 @@ document.addEventListener('click', async event => {
                 announce(t('draft'));
                 return;
             }
-            drafts[record.id] = newDraft(record, record.notes.find(n => n.id === element.dataset.correct));
+            const note = record.notes.find(n => n.id === element.dataset.correct);
+            if (!note || note.deleted) return;
+            drafts[record.id] = newDraft(record, note);
             persistDrafts();
-            renderComposer();
+            renderPanel();
+            $('#note-body').focus();
             return;
         }
         if (element.dataset.editLink) { linkDialog(element.dataset.editLink); return; }
@@ -1217,6 +1402,7 @@ document.addEventListener('click', async event => {
             const command = action.split(':')[1];
             if (['iso', 'top', 'perspective'].includes(command)) mapMode = command;
             map?.command(command);
+            syncUrl();
             renderMapUI();
             return;
         }
@@ -1233,12 +1419,29 @@ document.addEventListener('keydown', event => {
 
 $('#dialog').addEventListener('cancel', () => { dialogCleanup?.(); dialogCleanup = null; });
 const resizer = $('#resizer');
-resizer.addEventListener('pointerdown', event => resizer.setPointerCapture(event.pointerId));
+resizer.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    getSelection()?.removeAllRanges();
+    resizer.setPointerCapture(event.pointerId);
+    resizer.focus({ preventScroll: true });
+    document.body.classList.add('resizing');
+});
 resizer.addEventListener('pointermove', event => {
     if (!resizer.hasPointerCapture(event.pointerId)) return;
+    event.preventDefault();
+    getSelection()?.removeAllRanges();
     const width = Math.min(innerWidth * .6, Math.max(320, innerWidth - event.clientX));
     document.documentElement.style.setProperty('--reader', width + 'px');
+    resizer.setAttribute('aria-valuenow', Math.round(width));
 });
+const endResize = event => {
+    if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+    document.body.classList.remove('resizing');
+};
+resizer.addEventListener('pointerup', endResize);
+resizer.addEventListener('pointercancel', endResize);
+resizer.addEventListener('lostpointercapture', () => document.body.classList.remove('resizing'));
+resizer.addEventListener('dragstart', event => event.preventDefault());
 resizer.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
@@ -1255,9 +1458,15 @@ $('#sidebar').innerHTML = '<p>' + esc(t('loading')) + '</p>';
 try {
     snapshot = await api.load();
     if (!snapshot.exhibits.some(e => e.id === selected)) selected = snapshot.exhibits[0]?.id || null;
-    floorId = exhibit()?.floorId || snapshot.floors[0]?.id;
+    const params = new URLSearchParams(location.search);
+    const requestedFloor = snapshot.floors.find(f => f.id === params.get('floor'));
+    const requestedExhibit = snapshot.exhibits.find(e => e.id === params.get('exhibit') && (!requestedFloor || e.floorId === requestedFloor.id));
+    floorId = requestedFloor?.id || requestedExhibit?.floorId || exhibit()?.floorId || snapshot.floors[0]?.id;
+    selected = requestedExhibit?.id || snapshot.exhibits.find(e => e.floorId === floorId)?.id || null;
+    if (['iso', 'top', 'perspective'].includes(params.get('view'))) mapMode = params.get('view');
+    syncUrl();
     render();
-    if (!flat) ensureMap();
+    ensureMap();
     recoverDraft();
 } catch (error) {
     $('#sidebar').innerHTML = '<div class="error">' + esc(errorText(error)) + '</div>' + button('refresh', 'refresh');

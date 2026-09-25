@@ -1,4 +1,6 @@
 export const STATUSES = ['ok', 'problem', 'retired'];
+export const STATUS_COLORS = { ok: '#31975c', problem: '#d99a22', retired: '#798491' };
+export const SELECTION_COLORS = { normal: '#1684ef', edit: '#8056cb' };
 export const identity = () => ({
     position: [0, 0, 0],
     rotation: [0, 0, 0],

@@ -7,6 +7,7 @@ import {
     identity,
     MapPlacement,
     STATUSES,
+    STATUS_COLORS,
     structural
 } from './domain.js';
 import {
@@ -19,6 +20,7 @@ import {
     escape as esc,
     markdown
 } from './markdown.js';
+import { readNoteImage } from './images.js';
 const $ = s => document.querySelector(s),
     api = new Api();
 let snapshot = null,
@@ -43,19 +45,15 @@ let snapshot = null,
 let drafts = {};
 try {
     drafts = JSON.parse(localStorage.getItem('hub-drafts') || '{}');
-    Object.values(drafts).forEach(draft => { draft.saving = false; });
+    Object.values(drafts).forEach(draft => { draft.saving = false; draft.readingImages = false; });
 } catch {}
 const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const floor = () => data()?.floors.find(f => f.id === floorId);
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id;
 const trashIcon = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg>';
-const icon = {
-    ok: '✓',
-    problem: '!',
-    retired: '⏻'
-};
-const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true">${icon[status]}</span>${esc(t(status))}</span>`;
+for (const [status, value] of Object.entries(STATUS_COLORS)) document.documentElement.style.setProperty('--status-' + status, value);
+const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
 const button = (label, action, cls = '', extra = '') => `<button type="button" data-action="${action}" class="${cls}" ${extra}>${esc(t(label))}</button>`;
 const options = (rows, value) => rows.map(([id, label]) => `<option value="${esc(id)}" ${id===value?'selected':''}>${esc(label)}</option>`).join('');
 const statusOptions = (value, keep = false) => options([...(keep ? [
@@ -74,7 +72,7 @@ function errorText(e) {
 
 function persistDrafts() {
     try {
-        localStorage.setItem('hub-drafts', JSON.stringify(drafts, (key, value) => key === 'saving' ? undefined : value));
+        localStorage.setItem('hub-drafts', JSON.stringify(drafts, (key, value) => ['saving', 'readingImages'].includes(key) ? undefined : value));
         return true;
     } catch {
         announce(t('draftFailed'));
@@ -251,7 +249,7 @@ function renderList() {
     $('#exhibit-list').innerHTML = records.length ? records.map(e => `
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + e.location + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
             <span class="exhibit-name">${esc(displayName(e))}</span>
-            <span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}">${icon[e.status]}</span>
+            <span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>
         </button>${edit ? `<button class="icon-button danger exhibit-trash" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}">${trashIcon}</button>` : ''}</div>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
 }
 
@@ -425,15 +423,19 @@ function renderInspector() {
         <div class="inspector-header">
             <div class="inspector-tools">
                 <h1 title="${esc(e.location + ' · ' + titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
+                <div class="status-picker">
+                    <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" title="${esc(t(e.status))}">${statusHTML(e.status)}<span class="status-chevron" aria-hidden="true"></span></button>
+                    <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
+                        ${STATUSES.map(status => `<button type="button" class="status-choice" data-status-choice="${status}" role="menuitemradio" tabindex="-1" aria-label="${esc(t(status))}" aria-checked="${status === e.status}">${statusHTML(status)}</button>`).join('')}
+                    </div>
+                </div>
             </div>
-            <button class="compact-status" data-action="status" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" title="${esc(e.statusChanged.signature + ' · ' + date(e.statusChanged.at))}">
-                ${statusHTML(e.status)}<span aria-hidden="true">⌄</span>
-            </button>
         </div>
         <div class="tabs" role="tablist" aria-label="${esc(t('detail'))}">
             ${['notes', 'documentation'].map(key => `<button role="tab" id="tab-${key}" aria-controls="inspector-content" aria-selected="${tab === key}" tabindex="${tab === key ? 0 : -1}" data-tab="${key}">${esc(t(key))}</button>`).join('')}
         </div>
         <div class="panel-content" id="inspector-content" role="tabpanel" aria-labelledby="tab-${tab}"></div>`;
+    bindStatusPicker();
     renderPanel();
     $('#inspector').querySelector('[role=tablist]').addEventListener('keydown', ev => {
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) {
@@ -444,6 +446,65 @@ function renderInspector() {
         }
     });
 }
+
+function closeStatusPicker(returnFocus = false) {
+    const picker = $('.status-picker');
+    if (!picker) return;
+    picker.classList.remove('open');
+    picker.querySelector('.status-toggle').setAttribute('aria-expanded', 'false');
+    picker.querySelector('.status-menu').inert = true;
+    picker.querySelector('.status-menu').setAttribute('aria-hidden', 'true');
+    if (returnFocus) picker.querySelector('.status-toggle').focus();
+}
+
+function bindStatusPicker() {
+    const picker = $('.status-picker');
+    const toggle = picker.querySelector('.status-toggle');
+    const menu = picker.querySelector('.status-menu');
+    const choices = [...menu.querySelectorAll('button')];
+    const open = () => {
+        picker.classList.add('open');
+        toggle.setAttribute('aria-expanded', 'true');
+        menu.inert = false;
+        menu.setAttribute('aria-hidden', 'false');
+    };
+    toggle.addEventListener('click', () => {
+        if (picker.classList.contains('open')) closeStatusPicker();
+        else {
+            open();
+            choices.find(choice => choice.getAttribute('aria-checked') === 'true')?.focus();
+        }
+    });
+    picker.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); closeStatusPicker(true); return; }
+        if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        open();
+        const index = choices.indexOf(document.activeElement);
+        const backwards = ['ArrowUp', 'ArrowLeft'].includes(event.key);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : index < 0 ? (backwards ? choices.length - 1 : 0) : (index + (backwards ? -1 : 1) + choices.length) % choices.length;
+        choices[next].focus();
+    });
+    picker.addEventListener('focusout', () => {
+        setTimeout(() => { if (picker.isConnected && !picker.contains(document.activeElement)) closeStatusPicker(); }, 0);
+    });
+    for (const choice of choices) choice.addEventListener('click', () => {
+        const status = choice.dataset.statusChoice;
+        closeStatusPicker();
+        if (status !== exhibit().status) statusDialog(status);
+        else toggle.focus();
+    });
+}
+
+document.addEventListener('pointerdown', event => {
+    if (!event.target.closest('.status-picker')) closeStatusPicker();
+    const form = $('#note-form');
+    const draft = drafts[selected];
+    if (form && !form.contains(event.target) && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
+        collapseEmptyDraft();
+        renderComposer();
+    }
+});
 
 function renderPanel() {
     const e = exhibit();
@@ -511,8 +572,8 @@ function renderComposer() {
                         <button type="button" class="icon-button" data-format="bold" aria-label="${esc(t('bold'))}" title="${esc(t('bold'))}"><strong>B</strong></button>
                         <button type="button" class="icon-button" data-format="list" aria-label="${esc(t('list'))}" title="${esc(t('list'))}">≡</button>
                         <button type="button" class="icon-button" data-action="notePreview" aria-label="${esc(t(d.preview ? 'write' : 'preview'))}" title="${esc(t(d.preview ? 'write' : 'preview'))}">◉</button>
-                        <label class="icon-button photo-button" for="note-image" title="${esc(t('photoHint'))}"><span aria-hidden="true">⊕</span><span class="sr-only">${esc(t('photo'))}</span></label>
-                        <input class="file-input" type="file" id="note-image" aria-label="${esc(t('photo'))}" accept="image/png,image/jpeg,image/webp" multiple>
+                        <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 6-6 4 4 3-3 4 5"/></svg></button>
+                        <input type="file" id="note-image" hidden accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple>
                     </div>
                     <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : 'postShort'))}</button>
                 </div>
@@ -521,6 +582,7 @@ function renderComposer() {
                     <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">···</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
                 </div>
             </div>
+            ${d.readingImages ? `<p class="muted small" role="status">${esc(t('addingImages'))}</p>` : ''}
             ${d.signing ? `
                 <div class="signature-step">
                     <label for="note-signature">${esc(t('signature'))}</label>
@@ -531,15 +593,17 @@ function renderComposer() {
             ${d.conflict ? button('reviewConflict', 'noteConflict', 'quiet') : ''}
         </form>`;
     const form = $('#note-form');
+    let choosingImage = false;
     const grow = () => {
         const input = $('#note-body');
         input.style.height = 'auto';
         input.style.height = Math.min(360, Math.max(d.open ? 90 : 52, input.scrollHeight)) + 'px';
     };
     grow();
-    form.addEventListener('focusout', () => {
+    form.addEventListener('focusout', event => {
+        if (!event.relatedTarget || form.contains(event.relatedTarget)) return;
         setTimeout(() => {
-            if (!form.isConnected || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing) return;
+            if (!form.isConnected || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing || choosingImage || d.readingImages) return;
             d.open = false;
             delete d.error;
             persistDrafts();
@@ -574,7 +638,23 @@ function renderComposer() {
         d.status = ev.target.value;
         persistDrafts();
     });
-    $('#note-image').addEventListener('change', ev => addImages([...ev.target.files], e.id));
+    const fileInput = $('#note-image');
+    $('#add-note-image').addEventListener('pointerdown', () => { choosingImage = true; });
+    $('#add-note-image').addEventListener('click', () => {
+        choosingImage = true;
+        fileInput.value = '';
+        fileInput.click();
+    });
+    fileInput.addEventListener('change', event => {
+        choosingImage = false;
+        const files = [...event.target.files];
+        if (files.length) addImages(files, e.id);
+        else $('#note-body')?.focus();
+    });
+    fileInput.addEventListener('cancel', () => {
+        choosingImage = false;
+        $('#note-body')?.focus();
+    });
     form.addEventListener('paste', ev => {
         const files = [...(ev.clipboardData?.files || [])];
         if (files.length) {
@@ -590,6 +670,7 @@ function renderComposer() {
     });
     form.addEventListener('submit', ev => {
         ev.preventDefault();
+        if (d.readingImages) return;
         if (!d.body.trim() && !d.images.length && !d.existingImages.length) {
             d.error = 'bodyRequired';
             renderComposer();
@@ -604,38 +685,34 @@ function renderComposer() {
 }
 
 async function addImages(files, id) {
-    const d = drafts[id];
-    for (const file of files) {
-        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-            d.error = 'invalidImage';
-            break;
+    const draft = drafts[id];
+    if (!draft || draft.saving || draft.readingImages) return;
+    draft.open = true;
+    draft.readingImages = true;
+    delete draft.error;
+    const redraw = () => {
+        if (drafts[id] === draft && selected === id && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
+    };
+    redraw();
+    try {
+        for (const file of files) {
+            if (draft.images.length + draft.existingImages.length >= 8) throw Error('tooManyImages');
+            const image = await readNoteImage(file);
+            if (drafts[id] !== draft) return;
+            draft.images.push({ ...image, id: uid() });
+            persistDrafts();
         }
-        if (file.size > 8 * 1024 * 1024) {
-            d.error = 'fileTooLarge';
-            break;
-        }
-        if (d.images.length + d.existingImages.length >= 8) {
-            d.error = 'invalidImage';
-            break;
-        }
-        const data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-        d.images.push({
-            name: file.name,
-            data,
-            id: uid()
-        });
+    } catch (error) {
+        draft.error = error.message || 'invalidImage';
+    } finally {
+        draft.readingImages = false;
+        persistDrafts();
+        redraw();
     }
-    persistDrafts();
-    if (selected === id) renderComposer();
 }
 async function postNote(id) {
     const d = drafts[id];
-    if (d.saving) return;
+    if (d.saving || d.readingImages) return;
     if (!d.signing) return;
     if (!d.signature.trim()) {
         d.error = 'signatureRequired';
@@ -817,10 +894,10 @@ function requireSignature(form) {
     return value;
 }
 
-function statusDialog() {
+function statusDialog(chosenStatus = exhibit().status) {
     const e = structuredClone(exhibit()),
         requestId = uid();
-    showDialog('changeStatus', `<p style="margin-bottom:18px">${esc(e.name)}</p><div class="field"><label for="new-status">${esc(t('status'))}</label><select id="new-status" name="status">${statusOptions(e.status)}</select></div>${signatureField()}${footer()}`, async form => {
+    showDialog('changeStatus', `<p style="margin-bottom:18px">${esc(e.name)}</p><p class="chosen-status">${statusHTML(chosenStatus)}</p>${signatureField()}${footer()}`, async form => {
         const signature = requireSignature(form);
         const result = await api.save({
             action: 'status',
@@ -828,7 +905,7 @@ function statusDialog() {
             baseRevision: e.revision,
             requestId,
             signature,
-            status: form.get('status')
+            status: chosenStatus
         });
         closeDialog();
         acceptSnapshot(result.snapshot);

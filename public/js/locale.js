@@ -1,5 +1,7 @@
 export const dictionary = {
     de: {
+        addingImages: 'Bilder werden hinzugefügt …',
+        tooManyImages: 'Bis zu 8 Bilder pro Notiz.',
         galleryFloor: 'Galerie',
         sourceFloor: 'Modell',
         editContext: 'Bearbeiten',
@@ -199,6 +201,8 @@ export const dictionary = {
         no: 'Nein'
     },
     en: {
+        addingImages: 'Adding images …',
+        tooManyImages: 'Up to 8 images per note.',
         galleryFloor: 'Gallery',
         sourceFloor: 'Model',
         editContext: 'Editing',

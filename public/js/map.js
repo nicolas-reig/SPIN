@@ -13,6 +13,7 @@ import {
 } from 'three/addons/controls/TransformControls.js';
 
 import { cameraOffset } from './camera.js';
+import { STATUS_COLORS, SELECTION_COLORS } from './domain.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -68,8 +69,8 @@ export class MapView {
             forceWebGL: new URLSearchParams(location.search).has('webgl')
         });
         this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.05;
+        this.renderer.toneMapping = THREE.NeutralToneMapping;
+        this.renderer.toneMappingExposure = 1;
         await this.renderer.init();
         this.renderer.domElement.dataset.renderer = this.renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
         this.container.append(this.renderer.domElement);
@@ -172,7 +173,7 @@ export class MapView {
                 if (!object) continue;
                 object.userData.status = exhibit.status;
                 const marker = object.children.find(child => child.userData.statusMarker);
-                if (marker) marker.material.color.set(({ ok: '#227247', problem: '#b87b16', retired: '#5a6572' })[exhibit.status]);
+                if (marker) marker.material.color.set(STATUS_COLORS[exhibit.status]);
             }
             this.highlight(selected);
             return;
@@ -210,7 +211,8 @@ export class MapView {
                     if (!mesh.isMesh) return;
                     const prepare = material => {
                         const copy = material.clone();
-                        copy.userData.baseColor = copy.color?.clone();
+                        copy.color?.set(STATUS_COLORS[exhibit.status]);
+                        copy.userData.statusTint = true;
                         return copy;
                     };
                     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(prepare) : prepare(mesh.material);
@@ -218,11 +220,8 @@ export class MapView {
                 const bounds = new THREE.Box3().setFromObject(group);
                 const height = Number.isFinite(bounds.max.y) ? Math.max(.5, bounds.max.y - group.position.y) : 1;
                 const markerMaterial = new THREE.MeshBasicNodeMaterial();
-                markerMaterial.color.set(({
-                    ok: '#227247',
-                    problem: '#b87b16',
-                    retired: '#5a6572'
-                })[exhibit.status]);
+                markerMaterial.color.set(STATUS_COLORS[exhibit.status]);
+                markerMaterial.toneMapped = false;
                 const marker = new THREE.Mesh(new THREE.SphereGeometry(.25, 12, 8), markerMaterial);
                 marker.userData.statusMarker = true;
                 marker.position.set(0, height + .6, 0);
@@ -251,16 +250,15 @@ export class MapView {
     }
     highlight(id) {
         this.selected = id;
-        const colors = { ok: '#64a77a', problem: '#dba542', retired: '#7b8792' };
         cancelAnimationFrame(this.tintFrame);
         const transitions = [];
         for (const [exhibitId, group] of this.objects) {
             group.traverse(mesh => {
                 if (!mesh.isMesh || mesh.userData.statusMarker) return;
                 for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-                    if (!material.color || !material.userData.baseColor) continue;
-                    const target = material.userData.baseColor.clone().lerp(new THREE.Color(colors[group.userData.status]), .38);
-                    if (exhibitId === id) target.lerp(new THREE.Color(this.editing ? '#865de0' : '#2089fa'), .72);
+                    if (!material.color || !material.userData.statusTint) continue;
+                    const selectedColor = this.editing ? SELECTION_COLORS.edit : SELECTION_COLORS.normal;
+                    const target = new THREE.Color(exhibitId === id ? selectedColor : STATUS_COLORS[group.userData.status]);
                     transitions.push({ material, start: material.color.clone(), target });
                 }
             });

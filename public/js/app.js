@@ -21,10 +21,16 @@ import {
     markdown
 } from './markdown.js';
 import { readNoteImage } from './images.js';
+import { createNoteEditor } from './editor.js';
+import { installSelects } from './select.js';
+import { safeUrl } from './domain.js';
+let noteEditor = null;
+installSelects();
 const $ = s => document.querySelector(s),
     api = new Api();
 let snapshot = null,
-    selected = 'charging',
+    selected = null,
+    areaId = '',
     floorId = 'source-level',
     tab = 'notes',
     edit = null,
@@ -93,6 +99,7 @@ function persistEdit() {
 }
 
 function setView(value) {
+    if (value === 'detail' && !exhibit() && !edit) value = 'map';
     collapseEmptyDraft();
     view = value;
     document.body.dataset.view = value;
@@ -183,7 +190,7 @@ function renderSidebar() {
         <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', '+') : ''}</div>
         <div class="search-row">
             <div class="searchbox">
-                <span class="search-icon" aria-hidden="true">⌕</span>
+                <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
                 <input id="search" type="search" value="${esc(query)}" placeholder="${esc(t('searchShort'))}" aria-label="${esc(t('search'))}" autocomplete="off">
             </div>
             <details class="filter-menu">
@@ -239,7 +246,7 @@ function renderSidebar() {
 function renderList() {
     const q = query.trim().toLocaleLowerCase(lang());
     const records = data().exhibits.filter(e => {
-        if (floorFilter && e.floorId !== floorFilter || statusFilter && e.status !== statusFilter) return false;
+        if (floorFilter && e.floorId !== floorFilter || statusFilter && e.status !== statusFilter || areaId && !e.areaIds?.includes(areaId)) return false;
         const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + e.location + ' ' + titleFloor(e.floorId);
         return text.toLocaleLowerCase(lang()).includes(q);
     });
@@ -272,8 +279,8 @@ function renderMapUI() {
                 ${options([['iso', t('iso')], ['top', t('top')], ['perspective', t('perspective')]], mapMode)}
             </select>
             <span class="toolbar-divider"></span>
-            ${iconButton('focus', 'focus', '⌖')}
-            ${iconButton('home', 'camera:home', '⌂')}
+            ${iconButton('focus', 'focus', '⌖', !selected && !areaId ? 'disabled' : '')}
+            <select id="area-selector" aria-label="${esc(t('area'))}">${options([['', t('allAreas')], ...data().areas.map(area => [area.id, area.name])], areaId)}</select>
             ${iconButton('zoomOut', 'camera:zoomOut', '−') + iconButton('zoomIn', 'camera:zoomIn', '+')}
             <details class="camera-menu">
                 <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary>
@@ -285,11 +292,13 @@ function renderMapUI() {
                 </div>
             </details>
         </div>`;
+    $('#area-selector').addEventListener('change', event => changeArea(event.target.value));
     $('#camera-view').addEventListener('change', async e => {
         const value = e.target.value;
         mapMode = value;
         await ensureMap();
         map?.setView(mapMode);
+        if (areaId && !selected) map?.focusArea(areaId);
         syncUrl();
         renderMapUI();
     });
@@ -312,6 +321,7 @@ async function initializeMap() {
         } = await import('./map.js');
         instance = new MapView($('#map-canvas'), {
             onSelect: select,
+            onMode: mode => { mapMode = mode; syncUrl(); renderMapUI(); },
             onState: key => {
                 mapState = key;
                 $('#map-canvas').classList.toggle('floor-loading', key === 'mapLoading');
@@ -332,6 +342,7 @@ async function initializeMap() {
         map = instance;
         await updateMap(true);
         map.setView(mapMode);
+        if (areaId) map.focusArea(areaId);
     } catch (e) {
         instance?.destroy();
         map = null;
@@ -345,17 +356,23 @@ async function updateMap(reset = false) {
     });
 }
 
-function select(id) {
+async function select(id) {
     collapseEmptyDraft();
     const e = data().exhibits.find(x => x.id === id);
-    if (!e) return;
+    if (!e) {
+        selected = null;
+        renderList(); renderInspector(); updateMap(); syncUrl();
+        return;
+    }
+    if (areaId && !e.areaIds?.includes(areaId)) areaId = '';
     const changed = floorId !== e.floorId;
     selected = id;
     floorId = e.floorId;
     renderList();
     renderInspector();
     renderMapUI();
-    updateMap(changed);
+    await updateMap(changed);
+    if (!edit) map?.focus(true);
     syncUrl();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
     if (matchMedia('(max-width:860px)').matches) setView('detail');
@@ -365,7 +382,8 @@ function changeFloor(id) {
     collapseEmptyDraft();
     floorId = id;
     const e = exhibit();
-    if (e?.floorId !== id) selected = data().exhibits.find(x => x.floorId === id)?.id || null;
+    if (e?.floorId !== id) selected = null;
+    if (data().areas.find(area => area.id === areaId)?.floorId !== id) areaId = '';
     renderMapUI();
     renderList();
     renderInspector();
@@ -373,9 +391,24 @@ function changeFloor(id) {
     syncUrl();
 }
 
+async function changeArea(id) {
+    collapseEmptyDraft();
+    areaId = id;
+    const area = data().areas.find(area => area.id === id);
+    if (area) floorId = area.floorId;
+    selected = null;
+    renderList(); renderInspector(); renderMapUI();
+    await ensureMap();
+    await updateMap();
+    map?.focusArea(id);
+    syncUrl();
+}
+
 function syncUrl() {
     const url = new URL(location.href);
     url.searchParams.set('floor', floorId);
+    if (areaId) url.searchParams.set('area', areaId);
+    else url.searchParams.delete('area');
     if (selected) url.searchParams.set('exhibit', selected);
     else url.searchParams.delete('exhibit');
     url.searchParams.set('view', mapMode);
@@ -409,6 +442,19 @@ function noteHTML(n) {
 }
 
 function renderInspector() {
+    const visible = Boolean(exhibit() || edit);
+    document.body.classList.toggle('inspector-hidden', !visible);
+    $('#inspector').inert = !visible;
+    $('#inspector').setAttribute('aria-hidden', String(!visible));
+    $('#resizer').inert = !visible;
+    $('#resizer').setAttribute('aria-hidden', String(!visible));
+    if (!visible) {
+        if (view === 'detail') setView('map');
+        renderMobile();
+        return;
+    }
+    noteEditor?.destroy();
+    noteEditor = null;
     submitStructure = null;
     if (edit) {
         renderEditInspector();
@@ -500,7 +546,7 @@ document.addEventListener('pointerdown', event => {
     if (!event.target.closest('.status-picker')) closeStatusPicker();
     const form = $('#note-form');
     const draft = drafts[selected];
-    if (form && !form.contains(event.target) && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
+    if (form && !form.contains(event.target) && !event.target.closest('dialog, .selection-menu') && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
         collapseEmptyDraft();
         renderComposer();
     }
@@ -532,6 +578,17 @@ function renderPanel() {
     }
 }
 
+function noteLinkDialog() {
+    if (!noteEditor) return;
+    const editor = noteEditor, link = editor.link();
+    showDialog('link', `<div class="field"><label for="note-link-url">URL</label><input id="note-link-url" name="url" type="url" value="${esc(link.url)}" placeholder="https://"></div>${link.text ? '' : `<div class="field"><label for="note-link-text">${esc(t('title'))}</label><input id="note-link-text" name="text"></div>`}${footer('apply')}`, async form => {
+        const url = String(form.get('url')).trim();
+        if (url && !safeUrl(url)) throw Error('invalidUrl');
+        closeDialog();
+        editor.setLink(url, String(form.get('text') || ''));
+    });
+}
+
 function newDraft(e, n = null) {
     return {
         body: n?.body || '',
@@ -548,6 +605,8 @@ function newDraft(e, n = null) {
 
 
 function renderComposer() {
+    noteEditor?.destroy();
+    noteEditor = null;
     const e = exhibit(),
         d = drafts[e.id];
     if (!d) return;
@@ -559,9 +618,7 @@ function renderComposer() {
     $('#composer-slot').innerHTML = `
         <form class="composer ${active ? 'composing' : ''}" id="note-form" novalidate>
             ${d.noteId ? `<div class="composer-correction row between">${button('backToNote', 'backToNote', 'quiet')}${button('cancel', 'discardDraft', 'quiet')}</div>` : ''}
-            <label class="sr-only" for="note-body">${esc(t('noteBody'))}</label>
-            <textarea id="note-body" rows="2" placeholder="${esc(t('writeNote'))}" ${d.preview ? 'hidden' : ''}>${esc(d.body)}</textarea>
-            <div class="note-body" id="note-preview" ${d.preview ? '' : 'hidden'}>${markdown(d.body)}</div>
+            <div id="note-editor" class="note-body"></div>
             <div class="composer-expanded" ${active ? '' : 'hidden'}>
                 <div class="attachments">
                     ${d.existingImages.map(id => `<div class="attachment"><img src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}"><button type="button" data-remove-existing="${esc(id)}" aria-label="${esc(t('remove'))}">×</button></div>`).join('')}
@@ -569,9 +626,7 @@ function renderComposer() {
                 </div>
                 <div class="composer-tools" ${d.signing ? 'hidden' : ''}>
                     <div class="toolbar">
-                        <button type="button" class="icon-button" data-format="bold" aria-label="${esc(t('bold'))}" title="${esc(t('bold'))}"><strong>B</strong></button>
-                        <button type="button" class="icon-button" data-format="list" aria-label="${esc(t('list'))}" title="${esc(t('list'))}">≡</button>
-                        <button type="button" class="icon-button" data-action="notePreview" aria-label="${esc(t(d.preview ? 'write' : 'preview'))}" title="${esc(t(d.preview ? 'write' : 'preview'))}">◉</button>
+                        ${[['bold', '<strong>B</strong>'], ['italic', '<em>I</em>'], ['heading', 'H'], ['list', '1.'], ['link', '↗']].map(([key, icon]) => `<button type="button" class="icon-button" data-format="${key}" aria-label="${esc(t(key === 'list' ? 'numberedList' : key))}" title="${esc(t(key === 'list' ? 'numberedList' : key))}">${icon}</button>`).join('')}
                         <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 6-6 4 4 3-3 4 5"/></svg></button>
                         <input type="file" id="note-image" hidden accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple>
                     </div>
@@ -594,16 +649,23 @@ function renderComposer() {
         </form>`;
     const form = $('#note-form');
     let choosingImage = false;
-    const grow = () => {
-        const input = $('#note-body');
-        input.style.height = 'auto';
-        input.style.height = Math.min(360, Math.max(d.open ? 90 : 52, input.scrollHeight)) + 'px';
-    };
-    grow();
+    noteEditor = createNoteEditor($('#note-editor'), {
+        value: d.body, label: t('noteBody'), placeholder: t('writeNote'), disabled: Boolean(d.saving),
+        onChange: value => { d.body = value; delete d.error; persistDrafts(); },
+        onFocus: () => {
+            d.open = true;
+            form.classList.add('composing');
+            form.querySelector('.composer-expanded').hidden = false;
+        },
+        onLink: noteLinkDialog
+    });
+    form.querySelector('.toolbar').addEventListener('pointerdown', event => {
+        if (event.target.closest('[data-format]')) event.preventDefault();
+    });
     form.addEventListener('focusout', event => {
-        if (!event.relatedTarget || form.contains(event.relatedTarget)) return;
+        if (!event.relatedTarget || form.contains(event.relatedTarget) || event.relatedTarget.closest('dialog, .selection-menu')) return;
         setTimeout(() => {
-            if (!form.isConnected || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing || choosingImage || d.readingImages) return;
+            if (!form.isConnected || $('#dialog').open || document.activeElement?.closest('.selection-menu') || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing || choosingImage || d.readingImages) return;
             d.open = false;
             delete d.error;
             persistDrafts();
@@ -611,18 +673,6 @@ function renderComposer() {
         }, 0);
     });
     if (d.saving) form.querySelectorAll('input, textarea, select, button').forEach(control => { control.disabled = true; });
-    $('#note-body').addEventListener('focus', () => {
-        d.open = true;
-        form.classList.add('composing');
-        form.querySelector('.composer-expanded').hidden = false;
-        grow();
-    });
-    $('#note-body').addEventListener('input', ev => {
-        d.body = ev.target.value;
-        grow();
-        delete d.error;
-        persistDrafts();
-    });
     $('#note-signature')?.addEventListener('input', ev => {
         d.signature = ev.target.value;
         $('[data-action=confirmNote]').disabled = !d.signature.trim();
@@ -798,7 +848,7 @@ function acceptSnapshot(value) {
 }
 
 function renderMobile() {
-    $('#mobile-nav').innerHTML = ['list', 'map', 'detail'].map(key => button(key === 'list' ? 'exhibits' : key, 'view:' + key, view === key ? 'active' : '', `aria-current="${view===key?'page':'false'}"`)).join('');
+    $('#mobile-nav').innerHTML = ['list', 'map', 'detail'].map(key => button(key === 'list' ? 'exhibits' : key, 'view:' + key, view === key ? 'active' : '', `aria-current="${view===key?'page':'false'}" ${key === 'detail' && !exhibit() && !edit ? 'disabled' : ''}`)).join('');
 }
 
 function renderEditBar() {
@@ -817,8 +867,9 @@ function renderEditInspector() {
             <div class="row"><label class="check"><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><select id="axis" aria-label="${esc(t('axis'))}">${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div>
         </div>
         <div id="structure-slot"></div>
-        <div class="edit-resources row">${button('editFloor', 'editFloor', 'quiet')}${button('newFloor', 'newFloor', 'quiet')}${button('models', 'models', 'quiet')}${button('trash', 'trash', 'quiet')}</div>
+        <div class="edit-resources"><div class="row">${button('newArea', 'newArea', 'quiet')}<select id="edit-area" aria-label="${esc(t('editArea'))}">${options([['', t('editArea')], ...data().areas.map(area => [area.id, area.name])], '')}</select></div><div class="row">${button('editFloor', 'editFloor', 'quiet')}${button('newFloor', 'newFloor', 'quiet')}${button('models', 'models', 'quiet')}${button('trash', 'trash', 'quiet')}</div></div>
     </div>`;
+    $('#edit-area').addEventListener('change', event => { if (event.target.value) areaDialog(event.target.value); });
     $('#axis').addEventListener('change', e => {
         axisConstraint = e.target.value;
         map?.setAxis(axisConstraint);
@@ -840,7 +891,8 @@ function render() {
     renderHeader();
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
-    if (!data().exhibits.some(e => e.id === selected)) selected = data().exhibits.find(e => e.floorId === floorId)?.id || null;
+    if (!data().exhibits.some(e => e.id === selected)) selected = null;
+    if (!data().areas.some(area => area.id === areaId)) areaId = '';
     renderSidebar();
     renderInspector();
     renderMapUI();
@@ -928,7 +980,7 @@ function linkDialog(id = null) {
             } catch {
                 throw Error('invalidUrl');
             }
-            if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) throw Error('invalidUrl');
+            if (!safeUrl(url)) throw Error('invalidUrl');
             const title = String(form.get('title')).trim();
             if (!title) throw Error('invalidInput');
             links.push({
@@ -1014,6 +1066,7 @@ function structureDialog(kind, isNew = false) {
     ]), ...data().assets.map(a => [a.id, a.name])], record.modelId || '');
     const formRoot = showStructureForm(kind, isNew ? (isFloor ? 'newFloor' : 'newExhibit') : (isFloor ? 'editFloor' : 'editExhibit'), `
  ${isFloor?`<p class="small muted" style="margin-bottom:16px">${esc(t('floorAlignHint'))}</p><div class="grid2"><div class="field"><label for="name-de">${esc(t('nameDe'))}</label><input name="nameDe" id="name-de" value="${esc(record.names.de)}"></div><div class="field"><label for="name-en">${esc(t('nameEn'))}</label><input name="nameEn" id="name-en" value="${esc(record.names.en)}"></div></div><div class="grid2"><div class="field"><label for="order">${esc(t('order'))}</label><input type="number" name="order" id="order" value="${record.order}"></div><div class="field"><label for="elevation">${esc(t('elevation'))}</label><input type="number" name="elevation" id="elevation" step="any" value="${record.elevation}"></div></div>`:`<div class="field"><label for="ex-name">${esc(t('name'))}</label><input id="ex-name" name="name" maxlength="200" value="${esc(record.name)}"></div><div class="field"><label for="ex-location">${esc(t('location'))}</label><input id="ex-location" name="location" value="${esc(record.location)}"></div><div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select name="floorId" id="ex-floor">${options(data().floors.map(f=>[f.id,f.names[lang()]]),record.floorId)}</select></div>${`<div class="field"><label for="initial-status">${esc(t('status'))}</label><select name="status" id="initial-status">${statusOptions(record.status)}</select></div>`}`}
+ ${!isFloor ? `<fieldset class="area-membership"><legend>${esc(t('areas'))}</legend>${data().areas.filter(area => area.floorId === record.floorId).map(area => `<label class="check"><input type="checkbox" name="areaIds" value="${esc(area.id)}" ${record.areaIds?.includes(area.id) ? 'checked' : ''}>${esc(area.name)}</label>`).join('')}<p class="small muted">${esc(t('secondaryComponent'))}</p></fieldset><div class="view-presets"><h3>${esc(t('defaultViews'))}</h3>${['top', 'three'].map(key => `<div class="row"><span>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span><button type="button" class="quiet" data-capture-exhibit="${key}">${esc(t('useCurrentView'))}</button>${record.views?.[key] ? `<button type="button" class="icon-button" data-clear-view="${key}" aria-label="${esc(t('automatic'))}">×</button>` : `<span class="small muted">${esc(t('automatic'))}</span>`}</div>`).join('')}</div>` : ''}
  <div class="field"><label for="model-choice">${esc(t('model'))}</label><select id="model-choice" name="modelId">${modelOptions}</select></div>
  ${!isFloor?`<label class="check"><input type="checkbox" name="placed" ${record.placed?'checked':''}>${esc(t('placed'))}</label>`:''}
  ${['position','rotation','scale'].map(key=>`<div class="vector"><h3>${esc(t(key))}</h3><div class="grid3">${['X','Y','Z'].map((axis,i)=>`<div><label for="${key}-${i}">${axis}</label><input type="number" step="any" data-vector="${key}" data-axis="${i}" id="${key}-${i}" value="${Number(transform[key][i].toFixed(4))}"></div>`).join('')}</div></div>`).join('')}
@@ -1062,6 +1115,8 @@ function structureDialog(kind, isNew = false) {
                 if (!record.name) throw Error('invalidInput');
                 record.location = String(form.get('location')).trim();
                 record.floorId = form.get('floorId');
+                record.areaIds = form.getAll('areaIds').filter(id => data().areas.some(area => area.id === id && area.floorId === record.floorId));
+                record.views ||= {};
                 record.placed = form.has('placed');
                 record.status = form.get('status');
             }
@@ -1151,6 +1206,49 @@ function structureDialog(kind, isNew = false) {
         changed();
     });
     syncDimensions();
+}
+
+async function areaDialog(id = null) {
+    if (!edit) return;
+    if (submitStructure && !await submitStructure()) return;
+    await ensureMap();
+    if (!map) throw Error('mapUnavailable');
+    const area = structuredClone(data().areas.find(area => area.id === id) || {
+        id: uid(), name: '', floorId, revision: 0,
+        views: { top: map.captureView('top'), three: map.captureView(mapMode === 'top' ? 'perspective' : mapMode) }
+    });
+    showDialog(id ? 'editArea' : 'newArea', `<div class="field"><label for="area-name">${esc(t('name'))}</label><input id="area-name" name="name" value="${esc(area.name)}"></div><p class="small muted">${esc(titleFloor(area.floorId))}</p><div class="view-presets"><h3>${esc(t('defaultViews'))}</h3>${['top', 'three'].map(key => `<div class="row"><span>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span><button type="button" class="quiet" data-area-capture="${key}">${esc(t('useCurrentView'))}</button><button type="button" class="quiet" data-area-view="${key}">${esc(t('showView'))}</button></div>`).join('')}</div><p class="small muted">${esc(t('areaViewHint'))}</p>${id ? `<button type="button" class="danger quiet" id="delete-area">${esc(t('deleteArea'))}</button>` : ''}${footer('apply')}`, async form => {
+        area.name = String(form.get('name')).trim();
+        if (!area.name) throw Error('invalidInput');
+        edit.change(state => {
+            const index = state.areas.findIndex(item => item.id === area.id);
+            if (index < 0) state.areas.push(area);
+            else state.areas[index] = area;
+        });
+        closeDialog(); changed();
+    });
+    $('#dialog').querySelectorAll('[data-area-capture]').forEach(button => button.addEventListener('click', () => {
+        if (floorId !== area.floorId) { announce(t('viewFloorMismatch')); return; }
+        const key = button.dataset.areaCapture;
+        area.views[key] = map.captureView(key === 'top' ? 'top' : mapMode === 'top' ? 'perspective' : mapMode);
+        announce(t('viewCaptured'));
+    }));
+    $('#dialog').querySelectorAll('[data-area-view]').forEach(button => button.addEventListener('click', async () => {
+        if (floorId !== area.floorId) selected = null;
+        floorId = area.floorId;
+        await updateMap();
+        syncUrl();
+        map.applyView(area.views[button.dataset.areaView]);
+        renderMapUI();
+    }));
+    $('#delete-area')?.addEventListener('click', () => {
+        edit.change(state => {
+            state.areas = state.areas.filter(item => item.id !== id);
+            state.exhibits.forEach(exhibit => { exhibit.areaIds = (exhibit.areaIds || []).filter(areaId => areaId !== id); });
+        });
+        if (areaId === id) areaId = '';
+        closeDialog(); changed();
+    });
 }
 
 async function saveExit() {
@@ -1312,7 +1410,7 @@ async function structureConflict() {
                     if (index < 0) state[change.kind].push(merged);
                     else state[change.kind][index] = merged;
                 } else if (change.op === 'delete') {
-                    state.exhibits = state.exhibits.filter(e => e.id !== change.id);
+                    state[change.kind] = state[change.kind].filter(e => e.id !== change.id);
                 } else if (change.op === 'restore') {
                     const record = state.trash.find(e => e.id === change.id);
                     if (!record || state.exhibits.some(e => e.id === change.id)) throw Error('conflict');
@@ -1382,10 +1480,6 @@ const actions = {
         persistDrafts();
         renderComposer();
     },
-    notePreview: () => {
-        drafts[selected].preview = !drafts[selected].preview;
-        renderComposer();
-    },
     noteConflict,
     status: statusDialog,
     addLink: () => linkDialog(),
@@ -1398,6 +1492,7 @@ const actions = {
         renderSidebar();
     },
     focus: async () => {
+        if (!selected && areaId) { await ensureMap(); map?.focusArea(areaId); setView('map'); return; }
         if (!exhibit()?.placed) { announce(t('unplaced')); return; }
         await ensureMap();
         map?.focus();
@@ -1407,6 +1502,7 @@ const actions = {
     editFloor: () => structureDialog('floors'),
     newExhibit: () => { setView('detail'); structureDialog('exhibits', true); },
     newFloor: () => structureDialog('floors', true),
+    newArea: () => areaDialog(),
     undo: () => { edit?.undo(); changed(); },
     redo: () => { edit?.redo(); changed(); },
     saveExit,
@@ -1458,11 +1554,25 @@ document.addEventListener('click', async event => {
             drafts[selected].existingImages = drafts[selected].existingImages.filter(id => id !== element.dataset.removeExisting);
             persistDrafts(); renderComposer(); return;
         }
+        if (element.dataset.captureExhibit || element.dataset.clearView) {
+            const key = element.dataset.captureExhibit || element.dataset.clearView;
+            if (submitStructure && !await submitStructure()) return;
+            await ensureMap();
+            if (!map) throw Error('mapUnavailable');
+            const preset = map.captureView(key === 'top' ? 'top' : mapMode === 'top' ? 'perspective' : mapMode);
+            edit.change(state => {
+                const record = state.exhibits.find(e => e.id === selected);
+                record.views ||= {};
+                if (element.dataset.clearView) delete record.views[key];
+                else record.views[key] = preset;
+            });
+            changed();
+            return;
+        }
         if (element.dataset.format) {
-            const text = $('#note-body'), start = text.selectionStart, end = text.selectionEnd, value = text.value;
-            const replacement = element.dataset.format === 'bold' ? '**' + value.slice(start, end) + '**' : '- ' + value.slice(start, end);
-            drafts[selected].body = value.slice(0, start) + replacement + value.slice(end);
-            persistDrafts(); renderComposer(); $('#note-body').focus(); return;
+            if (element.dataset.format === 'link') noteLinkDialog();
+            else noteEditor?.command(element.dataset.format);
+            return;
         }
         if (element.dataset.restore) {
             const id = element.dataset.restore;
@@ -1488,10 +1598,15 @@ document.addEventListener('click', async event => {
 });
 
 document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !$('#dialog').open && !event.target.closest('input, textarea, [contenteditable], .status-picker, .selection-menu')) select(null);
     if (event.target.matches('[data-select]') && ['Enter', ' '].includes(event.key)) {
         event.preventDefault();
         select(event.target.dataset.select);
     }
+});
+
+$('#workspace').addEventListener('transitionend', event => {
+    if (event.target === $('#workspace') && event.propertyName === 'grid-template-columns' && selected && !edit) map?.focus(true);
 });
 
 $('#dialog').addEventListener('cancel', () => { dialogCleanup?.(); dialogCleanup = null; });
@@ -1539,7 +1654,8 @@ try {
     const requestedFloor = snapshot.floors.find(f => f.id === params.get('floor'));
     const requestedExhibit = snapshot.exhibits.find(e => e.id === params.get('exhibit') && (!requestedFloor || e.floorId === requestedFloor.id));
     floorId = requestedFloor?.id || requestedExhibit?.floorId || exhibit()?.floorId || snapshot.floors[0]?.id;
-    selected = requestedExhibit?.id || snapshot.exhibits.find(e => e.floorId === floorId)?.id || null;
+    selected = requestedExhibit?.id || null;
+    areaId = snapshot.areas.find(area => area.id === params.get('area'))?.id || '';
     if (['iso', 'top', 'perspective'].includes(params.get('view'))) mapMode = params.get('view');
     syncUrl();
     render();

@@ -4,3 +4,11 @@ export function cameraOffset(mode, distance) {
     const length = Math.hypot(...direction);
     return direction.map(value => value * distance / length);
 }
+
+export function navigationGesture(button, shift, mode) {
+    const orbit = button === 0 ? shift : !shift;
+    return {
+        action: orbit ? 'orbit' : 'pan',
+        leaveTop: mode === 'top' && orbit && button !== 2
+    };
+}

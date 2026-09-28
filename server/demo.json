@@ -122,50 +122,8 @@
                 "at": "2026-09-22T08:00:00Z"
             },
             "revision": 1,
-            "notes": [
-                {
-                    "id": "sample-repair",
-                    "body": "**Beispielnotiz — keine Betriebsdaten.**\n\nDie neue Extenderstrecke wurde eingebaut. Die Anschlüsse sind jetzt DisplayPort statt HDMI.\n\n**Nächster Schritt:** Bild nach dem Neustart gemeinsam prüfen.",
-                    "author": "Ray · Demo",
-                    "at": "2026-09-22T09:35:00Z",
-                    "images": [],
-                    "corrections": []
-                },
-                {
-                    "id": "sample-fault",
-                    "body": "Das Display hat ein schwarzes Bild gezeigt. Direkt am Testbildschirm ist ein Bild vorhanden.\n\n- Verbindung geprüft\n- Transmitter für weitere Prüfung markiert\n\nDie Störung ist in Bearbeitung.",
-                    "author": "Chris · Demo",
-                    "at": "2026-09-20T12:10:00Z",
-                    "images": [],
-                    "corrections": []
-                },
-                {
-                    "id": "sample-maintenance",
-                    "body": "Wartung abgeschlossen. Funktion beim Rundgang prüfen.",
-                    "author": "Diego · Demo",
-                    "at": "2026-08-11T10:00:00Z",
-                    "images": [],
-                    "corrections": []
-                }
-            ],
-            "links": [
-                {
-                    "id": "sample-manual",
-                    "title": "Charging · Serviceanleitung (Beispiel)",
-                    "url": "https://nas.example.invalid/charging/service.pdf",
-                    "description": "Platzhalter. Vor Nutzung durch die echte NAS-Webadresse ersetzen.",
-                    "signature": "Demo",
-                    "at": "2026-09-22T09:35:00Z"
-                },
-                {
-                    "id": "sample-plan",
-                    "title": "Installationsplan (Beispiel)",
-                    "url": "https://nas.example.invalid/charging/plan.pdf",
-                    "description": "Nur ein Dateiverweis; die NAS-Datei wird nicht kopiert.",
-                    "signature": "Demo",
-                    "at": "2026-09-22T09:35:00Z"
-                }
-            ]
+            "notes": [],
+            "links": []
         },
         {
             "id": "air-console",

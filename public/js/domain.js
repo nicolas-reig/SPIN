@@ -79,16 +79,34 @@ export class Note extends Record {
         if (!this.author?.trim()) throw Error('signatureRequired');
     }
 }
+export function safeUrl(value) {
+    try {
+        const url = new URL(value);
+        return ['http:', 'https:', 'smb:', 'file:', 'ftp:'].includes(url.protocol) && !url.username && !url.password && !/[\x00-\x20\x7f]/.test(value) && (url.hostname || url.protocol === 'file:');
+    } catch { return false; }
+}
 export class NasDocumentLink extends Record {
     constructor(data) {
         super(data);
-        const u = new URL(this.url);
-        if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) throw Error('invalidUrl');
+        if (!safeUrl(this.url)) throw Error('invalidUrl');
+    }
+}
+export function validateViews(views = {}, required = false) {
+    for (const key of ['top', 'three']) {
+        const view = views[key];
+        if (!view) { if (required) throw Error('invalidView'); else continue; }
+        if (![view.position, view.target].every(vector => Array.isArray(vector) && vector.length === 3 && vector.every(finite)) || !finite(view.span) || view.span <= 0) throw Error('invalidView');
     }
 }
 export function validateSnapshot(s) {
+    s.areas ||= [];
+    s.areas.forEach(area => { if (!area.name || !s.floors.some(f => f.id === area.floorId)) throw Error('invalidArea'); validateViews(area.views, true); });
     s.floors.forEach(x => new Floor(x));
     s.exhibits.forEach(x => {
+        x.areaIds ||= [];
+        x.views ||= {};
+        validateViews(x.views);
+        if (x.areaIds.some(id => !s.areas.some(area => area.id === id && area.floorId === x.floorId))) throw Error('invalidArea');
         new Exhibit(x);
         if (!s.floors.some(f => f.id === x.floorId)) throw Error('invalidFloor');
         x.notes.forEach(n => new Note(n));
@@ -98,11 +116,12 @@ export function validateSnapshot(s) {
     return s;
 }
 export function structural(record, kind) {
-    const keys = kind === 'floors' ? ['id', 'names', 'order', 'elevation', 'modelId', 'transform', 'camera'] : ['id', 'name', 'location', 'floorId', 'modelId', 'transform', 'placed', 'status'];
-    return Object.fromEntries(keys.map(k => [k, structuredClone(record[k])]));
+    const keys = kind === 'areas' ? ['id', 'name', 'floorId', 'views'] : kind === 'floors' ? ['id', 'names', 'order', 'elevation', 'modelId', 'transform', 'camera'] : ['id', 'name', 'location', 'floorId', 'modelId', 'transform', 'placed', 'status', 'areaIds', 'views'];
+    return Object.fromEntries(keys.map(k => [k, structuredClone(record[k] ?? (k === 'areaIds' ? [] : k === 'views' ? {} : null))]));
 }
 export class EditSession {
     constructor(snapshot) {
+        snapshot = { ...snapshot, areas: snapshot.areas || [] };
         this.base = structuredClone(snapshot);
         this.value = structuredClone(snapshot);
         this.undoStack = [];
@@ -127,7 +146,7 @@ export class EditSession {
     }
     changes() {
         const changes = [];
-        for (const kind of ['floors', 'exhibits']) {
+        for (const kind of ['floors', 'areas', 'exhibits']) {
             for (const r of this.value[kind]) {
                 const old = this.base[kind].find(x => x.id === r.id);
                 if (!old && this.base.trash.some(x => x.id === r.id)) {

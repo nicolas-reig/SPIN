@@ -12,7 +12,7 @@ import {
     TransformControls
 } from 'three/addons/controls/TransformControls.js';
 
-import { cameraOffset } from './camera.js';
+import { cameraOffset, navigationGesture } from './camera.js';
 import { STATUS_COLORS, SELECTION_COLORS } from './domain.js';
 
 const radians = v => v * Math.PI / 180;
@@ -38,12 +38,14 @@ export class MapView {
     constructor(container, {
         onSelect = () => {},
         onTransform = () => {},
-        onState = () => {}
+        onState = () => {},
+        onMode = () => {}
     } = {}) {
         this.container = container;
         this.onSelect = onSelect;
         this.onTransform = onTransform;
         this.onState = onState;
+        this.onMode = onMode;
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color('#e8edf0');
         this.root = new THREE.Group();
@@ -76,6 +78,7 @@ export class MapView {
         this.container.append(this.renderer.domElement);
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
+        this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE };
         this.controls.minDistance = 2;
         this.controls.maxDistance = 450;
         this.controls.maxPolarAngle = Math.PI / 2 - .045;
@@ -103,9 +106,20 @@ export class MapView {
             e.preventDefault();
             getSelection()?.removeAllRanges();
             this.down = [e.clientX, e.clientY];
+            this.orbitFromTop = navigationGesture(e.button, e.shiftKey, this.mode).leaveTop ? { button: e.button, shiftKey: e.shiftKey, clientX: e.clientX, clientY: e.clientY } : null;
         });
+        canvas.addEventListener('pointermove', e => {
+            if (!this.orbitFromTop || !e.buttons || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) <= 5) return;
+            const gesture = this.orbitFromTop;
+            this.orbitFromTop = null;
+            this.setView('perspective', true);
+            this.onMode('perspective');
+            this.controls._onMouseDown(gesture);
+        }, true);
+        canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
         canvas.addEventListener('pointerup', e => {
-            if (!this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.dragging || this.transform.axis) return;
+            this.orbitFromTop = null;
+            if (e.button !== 0 || e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.dragging || this.transform.axis) return;
             const r = canvas.getBoundingClientRect();
             const pointer = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
             const ray = new THREE.Raycaster();
@@ -116,9 +130,10 @@ export class MapView {
                 while (o && !o.userData.exhibitId) o = o.parent;
                 if (o) {
                     this.onSelect(o.userData.exhibitId);
-                    break;
+                    return;
                 }
             }
+            this.onSelect(null);
         });
         this.resize();
         return this;
@@ -172,8 +187,6 @@ export class MapView {
                 const object = this.objects.get(exhibit.id);
                 if (!object) continue;
                 object.userData.status = exhibit.status;
-                const marker = object.children.find(child => child.userData.statusMarker);
-                if (marker) marker.material.color.set(STATUS_COLORS[exhibit.status]);
             }
             this.highlight(selected);
             return;
@@ -217,15 +230,6 @@ export class MapView {
                     };
                     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(prepare) : prepare(mesh.material);
                 });
-                const bounds = new THREE.Box3().setFromObject(group);
-                const height = Number.isFinite(bounds.max.y) ? Math.max(.5, bounds.max.y - group.position.y) : 1;
-                const markerMaterial = new THREE.MeshBasicNodeMaterial();
-                markerMaterial.color.set(STATUS_COLORS[exhibit.status]);
-                markerMaterial.toneMapped = false;
-                const marker = new THREE.Mesh(new THREE.SphereGeometry(.25, 12, 8), markerMaterial);
-                marker.userData.statusMarker = true;
-                marker.position.set(0, height + .6, 0);
-                group.add(marker);
                 next.add(group);
                 objects.set(exhibit.id, group);
             }
@@ -254,7 +258,7 @@ export class MapView {
         const transitions = [];
         for (const [exhibitId, group] of this.objects) {
             group.traverse(mesh => {
-                if (!mesh.isMesh || mesh.userData.statusMarker) return;
+                if (!mesh.isMesh) return;
                 for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
                     if (!material.color || !material.userData.statusTint) continue;
                     const selectedColor = this.editing ? SELECTION_COLORS.edit : SELECTION_COLORS.normal;
@@ -287,12 +291,12 @@ export class MapView {
         this.transform.setScaleSnap(snap ? .1 : null);
         this.highlight(this.selected);
     }
-    frameTarget(center, distance, span, animate = true) {
+    frameTarget(center, distance, span, animate = true, position = null) {
         cancelAnimationFrame(this.cameraFrame);
         const offset = new THREE.Vector3(...cameraOffset(this.mode, distance));
         const startTarget = this.controls.target.clone();
         const startPosition = this.camera.position.clone();
-        const endPosition = center.clone().add(offset);
+        const endPosition = position || center.clone().add(offset);
         const startSpan = this.orthoSpan || span;
         const startZoom = this.camera.zoom;
         const started = performance.now();
@@ -322,15 +326,67 @@ export class MapView {
         const span = Math.max(size.x, size.z, 10);
         this.frameTarget(center, span * 1.6, span * .65);
     }
-    focus() {
-        const obj = this.objects.get(this.selected);
-        if (!obj) return;
-        const box = new THREE.Box3().setFromObject(obj);
-        const center = box.getCenter(new THREE.Vector3());
-        const distance = Math.max(9, box.getSize(new THREE.Vector3()).length() * 1.4);
-        this.frameTarget(center, distance, distance * .55);
+    captureView(mode = this.mode) {
+        const target = this.controls.target.toArray();
+        const distance = this.camera.position.distanceTo(this.controls.target);
+        const top = mode === 'top';
+        return {
+            mode: top ? 'top' : mode === 'iso' ? 'iso' : 'perspective',
+            position: top && this.mode !== 'top' ? [target[0], target[1] + distance, target[2] + .00001] : !top && this.mode === 'top' ? new THREE.Vector3(...target).add(new THREE.Vector3(...cameraOffset('perspective', distance))).toArray() : this.camera.position.toArray(),
+            target,
+            span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3, distance * .36)
+        };
     }
-    setView(mode) {
+    fallbackView(ids, mode = this.mode) {
+        const box = new THREE.Box3();
+        for (const id of ids) {
+            const object = this.objects.get(id);
+            if (object) box.union(new THREE.Box3().setFromObject(object));
+        }
+        if (box.isEmpty()) box.setFromObject(this.root);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const aspect = Math.max(.2, this.container.clientWidth / this.container.clientHeight);
+        const span = Math.max(4, size.y, size.z, size.x / aspect) * .7;
+        const distance = Math.max(9, span * 3.2);
+        return { mode, target: center.toArray(), position: center.clone().add(new THREE.Vector3(...cameraOffset(mode, distance))).toArray(), span };
+    }
+    applyView(preset) {
+        if (!preset) return;
+        if (this.mode !== preset.mode) {
+            this.setView(preset.mode, true);
+            this.onMode(preset.mode);
+        }
+        const center = new THREE.Vector3(...preset.target);
+        const position = new THREE.Vector3(...preset.position);
+        this.frameTarget(center, center.distanceTo(position), preset.span, true, position);
+    }
+    isVisible(id) {
+        const object = this.objects.get(id);
+        if (!object) return false;
+        this.camera.updateMatrixWorld();
+        const box = new THREE.Box3().setFromObject(object);
+        const center = box.getCenter(new THREE.Vector3()).project(this.camera);
+        if (center.z < -1 || center.z > 1) return false;
+        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+            const point = new THREE.Vector3(x, y, z).project(this.camera);
+            if (Math.abs(point.x) > .94 || Math.abs(point.y) > .94 || point.z > 1 || point.z < -1) return false;
+        }
+        return true;
+    }
+    focus(onlyWhenHidden = false) {
+        const exhibit = this.data.exhibits.find(e => e.id === this.selected);
+        if (!exhibit?.placed || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
+        const key = this.mode === 'top' ? 'top' : 'three';
+        this.applyView(exhibit.views?.[key] || this.fallbackView([exhibit.id]));
+    }
+    focusArea(id) {
+        const area = this.data.areas?.find(area => area.id === id);
+        const ids = this.data.exhibits.filter(e => e.floorId === this.floor.id && (!area || e.areaIds?.includes(id))).map(e => e.id);
+        const key = this.mode === 'top' ? 'top' : 'three';
+        this.applyView(area?.views[key] || this.fallbackView(ids));
+    }
+    setView(mode, preserve = false) {
         cancelAnimationFrame(this.cameraFrame);
         const target = this.controls.target.clone();
         const distance = this.camera.position.distanceTo(target);
@@ -338,8 +394,8 @@ export class MapView {
         const old = this.camera;
         this.camera = mode === 'perspective' ? new THREE.PerspectiveCamera(38, 1, .05, 2000) : new THREE.OrthographicCamera(-20, 20, 20, -20, .05, 2000);
         this.orthoSpan = Math.max(5, distance * .36);
-        this.camera.position.copy(mode === 'top' ? target.clone().add(new THREE.Vector3(0, distance, .001)) : old.position);
-        if (mode === 'iso') this.camera.position.copy(target).add(new THREE.Vector3(.65, .8, 1).normalize().multiplyScalar(distance));
+        this.camera.position.copy(!preserve && mode === 'top' ? target.clone().add(new THREE.Vector3(0, distance, .001)) : old.position);
+        if (!preserve && mode === 'iso') this.camera.position.copy(target).add(new THREE.Vector3(.65, .8, 1).normalize().multiplyScalar(distance));
         this.controls.object = this.camera;
         this.controls.enableRotate = mode !== 'top';
         this.controls.minPolarAngle = mode === 'top' ? 0 : .02;

@@ -24,7 +24,7 @@ final class Store
         if (is_link($root)) {
             throw new ApiError('storage', 503);
         }
-        foreach (['locks','exhibits','floors','trash','logs','journal','blobs','models'] as $dir) {
+        foreach (['locks','exhibits','floors','areas','trash','logs','journal','blobs','models'] as $dir) {
             $this->directory($dir);
         }
     }
@@ -267,9 +267,9 @@ final class Store
 
     private function initialize(): void
     {
-        $c = ['schema' => 1,'revision' => 1,'structureRevision' => 1,'floors' => [],'exhibits' => [],'trash' => [],'assets' => $this->seed['assets'],'requests' => []];
-        foreach (['floors','exhibits'] as $kind) {
-            foreach ($this->seed[$kind] as $r) {
+        $c = ['schema' => 1,'revision' => 1,'structureRevision' => 1,'floors' => [],'exhibits' => [],'areas' => [],'trash' => [],'assets' => $this->seed['assets'],'requests' => []];
+        foreach (['floors','exhibits','areas'] as $kind) {
+            foreach ($this->seed[$kind] ?? [] as $r) {
                 $c[$kind][$r['id']] = $this->stage($kind, $r, 'seed');
             }
         }
@@ -286,9 +286,9 @@ final class Store
     private function snapshotFrom(array $c): array
     {
         $out = ['schema' => 1,'revision' => $c['revision'],'structureRevision' => $c['structureRevision'],'assets' => array_values($c['assets'])];
-        foreach (['floors','exhibits','trash'] as $kind) {
+        foreach (['floors','exhibits','areas','trash'] as $kind) {
             $out[$kind] = [];
-            foreach ($c[$kind] as $ref) {
+            foreach ($c[$kind] ?? [] as $ref) {
                 $out[$kind][] = $this->record($ref);
             }
         }
@@ -319,7 +319,7 @@ final class Store
     {
         $s = self::text($s, 2048);
         $p = parse_url($s);
-        if (!filter_var($s, FILTER_VALIDATE_URL) || !in_array(strtolower($p['scheme'] ?? ''), ['http','https'], true) || empty($p['host']) || isset($p['user']) || isset($p['pass']) || preg_match('/[\x00-\x20\x7f]/', $s)) {
+        if (!filter_var($s, FILTER_VALIDATE_URL) || !in_array(strtolower($p['scheme'] ?? ''), ['http','https','smb','file','ftp'], true) || (empty($p['host']) && ($p['scheme'] ?? '') !== 'file') || isset($p['user']) || isset($p['pass']) || preg_match('/[\x00-\x20\x7f]/', $s)) {
             throw new ApiError('invalidUrl');
         }
         return $s;
@@ -344,9 +344,54 @@ final class Store
         return $out;
     }
 
+    private static function views(mixed $views, bool $required = false): array
+    {
+        if (!is_array($views) || array_diff(array_keys($views), ['top', 'three'])) {
+            throw new ApiError('invalidView');
+        }
+        $out = [];
+        foreach (['top', 'three'] as $key) {
+            if (!isset($views[$key])) {
+                if ($required) {
+                    throw new ApiError('invalidView');
+                }
+                continue;
+            }
+            $view = $views[$key];
+            foreach (['position', 'target'] as $vector) {
+                if (!isset($view[$vector]) || !is_array($view[$vector]) || count($view[$vector]) !== 3) {
+                    throw new ApiError('invalidView');
+                }
+                foreach ($view[$vector] as $number) {
+                    if (!is_numeric($number) || !is_finite((float)$number) || abs((float)$number) > 100000) {
+                        throw new ApiError('invalidView');
+                    }
+                }
+                $out[$key][$vector] = array_map('floatval', array_values($view[$vector]));
+            }
+            if ($out[$key]['position'] === $out[$key]['target']) {
+                throw new ApiError('invalidView');
+            }
+            $span = $view['span'] ?? 20;
+            if (!is_numeric($span) || !is_finite((float)$span) || $span <= 0 || $span > 100000) {
+                throw new ApiError('invalidView');
+            }
+            $out[$key]['span'] = (float)$span;
+            $out[$key]['mode'] = $key === 'top' ? 'top' : (($view['mode'] ?? '') === 'iso' ? 'iso' : 'perspective');
+        }
+        return $out;
+    }
+
     private function structure(array $row, string $kind, array $floorIds, array $assets): array
     {
         $id = self::id($row['id'] ?? null);
+        if ($kind === 'areas') {
+            $floorId = self::id($row['floorId'] ?? null);
+            if (!in_array($floorId, $floorIds, true)) {
+                throw new ApiError('invalidFloor');
+            }
+            return ['id' => $id, 'name' => self::text($row['name'] ?? null), 'floorId' => $floorId, 'views' => self::views($row['views'] ?? [], true)];
+        }
         $asset = $row['modelId'] ?? null;
         if ($asset !== null && !isset($assets[self::id($asset)])) {
             throw new ApiError('invalidModel');
@@ -375,6 +420,12 @@ final class Store
                 throw new ApiError('invalidInput');
             }
             $out['placed'] = $row['placed'];
+            $out['views'] = self::views($row['views'] ?? []);
+            $ids = $row['areaIds'] ?? [];
+            if (!is_array($ids) || count($ids) > 100) {
+                throw new ApiError('invalidArea');
+            }
+            $out['areaIds'] = array_values(array_unique(array_map([self::class, 'id'], $ids)));
             if (isset($row['status'])) {
                 if (!in_array($row['status'], ['ok', 'problem', 'retired'], true)) {
                     throw new ApiError('invalidStatus');
@@ -411,6 +462,7 @@ final class Store
         self::id($p['requestId'] ?? null);
         return $this->locked(function () use ($p) {
             $c = $this->read('catalog.json');
+            $c['areas'] ??= [];
             if ($retry = $this->retry($c, $p)) {
                 return $retry;
             }
@@ -438,7 +490,7 @@ final class Store
                 foreach ($changes as $ch) {
                     $kind = $ch['kind'] ?? '';
                     $op = $ch['op'] ?? '';
-                    if (!in_array($kind, ['exhibits','floors'], true)) {
+                    if (!in_array($kind, ['exhibits','floors','areas'], true)) {
                         throw new ApiError('invalidInput');
                     }
                     $id = self::id($ch['id'] ?? ($ch['record']['id'] ?? null));
@@ -471,15 +523,17 @@ final class Store
                         $c['exhibits'][$id] = $this->stage('exhibits', $new, $commit);
                         unset($c['trash'][$id]);
                     } elseif ($op === 'delete') {
-                        if ($kind !== 'exhibits' || !$old) {
+                        if (!in_array($kind, ['exhibits', 'areas'], true) || !$old) {
                             throw new ApiError('invalidInput');
                         }
                         $this->checkRevision($old, $ch['baseRevision'] ?? null);
                         $new = $old;
                         $new['revision']++;
                         $new['deleted'] = ['signature' => $sig,'at' => $now];
-                        $c['trash'][$id] = $this->stage('trash', $new, $commit);
-                        unset($c['exhibits'][$id]);
+                        if ($kind === 'exhibits') {
+                            $c['trash'][$id] = $this->stage('trash', $new, $commit);
+                        }
+                        unset($c[$kind][$id]);
                     } elseif ($op === 'put') {
                         if ($old) {
                             $this->checkRevision($old, $ch['baseRevision'] ?? null);
@@ -510,6 +564,14 @@ final class Store
                         throw new ApiError('invalidInput');
                     }
                     $actions[] = ['op' => $op,'kind' => $kind,'id' => $id,'label' => $new['name'] ?? $new['names'],'before' => $old,'after' => $new];
+                }
+                foreach ($c['exhibits'] as $ref) {
+                    $exhibit = $this->record($ref);
+                    foreach ($exhibit['areaIds'] ?? [] as $areaId) {
+                        if (!isset($c['areas'][$areaId]) || $this->record($c['areas'][$areaId])['floorId'] !== $exhibit['floorId']) {
+                            throw new ApiError('invalidArea');
+                        }
+                    }
                 }
                 if (!$actions) {
                     return ['saved' => true,'unchanged' => true,'snapshot' => $this->snapshotFrom($c)];

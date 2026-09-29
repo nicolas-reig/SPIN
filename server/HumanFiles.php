@@ -164,15 +164,6 @@ final class HumanFiles
             }
             $fingerprints[] = $name . ':' . hash('sha256', $body);
             $fileHash = hash('sha256', $body);
-            $images = [];
-            $body = preg_replace_callback('/^!\[[^\]\r\n]*\]\(\.\.\/Fotos\/([A-Za-z0-9%._~-]+)\)[ \t]*\r?\n?/m', function ($match) use ($record, $base, &$images) {
-                $photo = rawurldecode($match[1]);
-                if (basename($photo) !== $photo || !is_file($this->path($base . '/Fotos/' . $photo))) {
-                    return $match[0];
-                }
-                $images[] = self::photoId($base . '/Fotos', $photo);
-                return '';
-            }, $body) ?? $body;
             $id = self::noteId($base . '/Notizen', $name);
             $note = [
                 'id' => $id,
@@ -180,7 +171,7 @@ final class HumanFiles
                 'at' => $when->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
                 'body' => trim($body),
                 'fileHash' => $fileHash,
-                'images' => array_values(array_unique($images)),
+                'images' => [],
                 'corrections' => []
             ];
             if (preg_match('/^deleted by (.+)$/iu', trim($body), $deleted)) {

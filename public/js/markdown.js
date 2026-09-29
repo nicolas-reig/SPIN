@@ -31,7 +31,7 @@ export function markdown(source, exhibitId = '') {
             catch { return escape(node.attrs.alt || ''); }
             if (name.includes('/') || name.includes('\\') || name.includes('..')) return escape(node.attrs.alt || '');
             const url = `api.php?action=photo&exhibitId=${encodeURIComponent(exhibitId)}&file=${encodeURIComponent(name)}`;
-            return `<img class="note-image" src="${escape(url)}" alt="${escape(node.attrs.alt || '')}" loading="lazy">`;
+            return `<a href="${escape(url)}" target="_blank" rel="noopener noreferrer"><img class="note-image" src="${escape(url)}" alt="${escape(node.attrs.alt || '')}" loading="lazy"></a>`;
         }
         return content;
     }

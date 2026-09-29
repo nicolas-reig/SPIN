@@ -14,7 +14,7 @@
     {
       "id": "source-level",
       "name": "Source Level",
-      "url": "assets/models/source-level.glb",
+      "url": "api.php?action=asset&kind=model&id=source-level",
       "dimensions": [
         259.8793029785156,
         3.212110996246338,
@@ -44,12 +44,13 @@
         "BMW.016"
       ],
       "source": "ICTMap.blend",
-      "provisional": true
+      "provisional": true,
+      "file": "Assets/Floors/_Unassigned/source-level.glb"
     },
     {
       "id": "charging",
       "name": "Charging",
-      "url": "assets/models/charging.glb",
+      "url": "api.php?action=asset&kind=model&id=charging",
       "dimensions": [
         5.7906341552734375,
         2.1195340156555176,
@@ -64,12 +65,13 @@
         "Charging.003"
       ],
       "source": "ICTMap.blend",
-      "provisional": false
+      "provisional": false,
+      "file": "Assets/HardwareModels/charging.glb"
     },
     {
       "id": "air-console",
       "name": "Air Console",
-      "url": "assets/models/air-console.glb",
+      "url": "api.php?action=asset&kind=model&id=air-console",
       "dimensions": [
         2.2539443969726562,
         0.9547816514968872,
@@ -82,12 +84,13 @@
         "Air Console Side"
       ],
       "source": "ICTMap.blend",
-      "provisional": false
+      "provisional": false,
+      "file": "Assets/HardwareModels/air-console.glb"
     },
     {
       "id": "gkl",
       "name": "Gkl",
-      "url": "assets/models/gkl.glb",
+      "url": "api.php?action=asset&kind=model&id=gkl",
       "dimensions": [
         7.703418731689453,
         4.484386444091797,
@@ -99,12 +102,13 @@
         "GKL"
       ],
       "source": "ICTMap.blend",
-      "provisional": false
+      "provisional": false,
+      "file": "Assets/HardwareModels/gkl.glb"
     },
     {
       "id": "cube",
       "name": "Cube",
-      "url": "assets/models/cube.glb",
+      "url": "api.php?action=asset&kind=model&id=cube",
       "dimensions": [
         9.28338623046875,
         5.012428283691406,
@@ -122,12 +126,13 @@
         "LED Stele.005"
       ],
       "source": "ICTMap.blend",
-      "provisional": false
+      "provisional": false,
+      "file": "Assets/HardwareModels/cube.glb"
     },
     {
       "id": "display",
       "name": "Display",
-      "url": "assets/models/display.glb",
+      "url": "api.php?action=asset&kind=model&id=display",
       "dimensions": [
         7.670646667480469,
         3.246265411376953,
@@ -139,12 +144,13 @@
         "Plane.001"
       ],
       "source": "ICTMap.blend",
-      "provisional": false
+      "provisional": false,
+      "file": "Assets/HardwareModels/display.glb"
     },
     {
       "id": "demo-gallery",
       "name": "Fictional gallery",
-      "url": "assets/models/demo-gallery.glb",
+      "url": "api.php?action=asset&kind=model&id=demo-gallery",
       "dimensions": [
         24.24,
         3.4,
@@ -153,7 +159,8 @@
       "sha256": "ab82547fd4edb0efb1e8bd2c7d2ea04d8264e16f0071abb81e212c2a95210c11",
       "bytes": 5968,
       "source": "generated Blender fixture",
-      "provisional": true
+      "provisional": true,
+      "file": "Assets/Floors/_Unassigned/demo-gallery.glb"
     }
   ],
   "placements": [

@@ -14,8 +14,9 @@ final class Store
 {
     private string $root;
     private $lock;
+    private ?HumanFiles $human = null;
 
-    public function __construct(string $root, private readonly array $seed, private readonly ?Closure $fault = null)
+    public function __construct(string $root, private readonly array $seed, private readonly ?Closure $fault = null, ?string $contentRoot = null)
     {
         if (!is_dir($root) && !mkdir($root, 0700, true)) {
             throw new ApiError('storage', 503);
@@ -24,8 +25,11 @@ final class Store
         if (is_link($root)) {
             throw new ApiError('storage', 503);
         }
-        foreach (['locks','exhibits','floors','areas','trash','logs','journal','blobs','models'] as $dir) {
+        foreach (['locks','exhibits','floors','areas','trash','logs','journal','blobs','models','note-meta'] as $dir) {
             $this->directory($dir);
+        }
+        if ($contentRoot !== null) {
+            $this->human = new HumanFiles($contentRoot);
         }
     }
 
@@ -208,6 +212,12 @@ final class Store
         $rel = "$kind/$id/$commit";
         $this->directory($rel);
         $meta = $record;
+        if ($this->human && in_array($kind, ['exhibits', 'trash'], true)) {
+            $this->human->ensureExhibit($meta);
+            unset($meta['notes'], $meta['links'], $meta['contentTag']);
+            $this->atomic($rel . '/record.json', $this->encode($meta));
+            return $rel;
+        }
         unset($meta['notes']);
         if (isset($record['notes'])) {
             $this->directory($rel . '/notes');
@@ -247,6 +257,20 @@ final class Store
     private function record(string $rel): array
     {
         $r = $this->read($rel . '/record.json');
+        if ($this->human && isset($r['contentFolder'])) {
+            $r = array_replace($r, $this->human->read($r));
+            foreach ($r['notes'] as &$note) {
+                $metaPath = 'note-meta/' . $note['id'] . '.json';
+                if (file_exists($this->path($metaPath))) {
+                    $meta = $this->read($metaPath);
+                    if (($meta['fileHash'] ?? null) === $note['fileHash']) {
+                        $note['corrections'] = $meta['corrections'] ?? [];
+                    }
+                }
+            }
+            unset($note);
+            return $r;
+        }
         if (isset($r['noteIds'])) {
             $r['notes'] = [];
             foreach ($r['noteIds'] as $nid) {
@@ -270,26 +294,65 @@ final class Store
         $c = ['schema' => 1,'revision' => 1,'structureRevision' => 1,'floors' => [],'exhibits' => [],'areas' => [],'trash' => [],'assets' => $this->seed['assets'],'requests' => []];
         foreach (['floors','exhibits','areas'] as $kind) {
             foreach ($this->seed[$kind] ?? [] as $r) {
+                if ($kind === 'exhibits') {
+                    $this->assignContentFolder($c, $r);
+                }
                 $c[$kind][$r['id']] = $this->stage($kind, $r, 'seed');
             }
         }
         $this->publish($c, null);
     }
 
+    private function assignContentFolder(array $catalog, array &$record): void
+    {
+        if (!$this->human || isset($record['contentFolder'])) {
+            return;
+        }
+        $used = [];
+        foreach (['exhibits', 'trash'] as $kind) {
+            foreach ($catalog[$kind] ?? [] as $ref) {
+                $other = $this->read($ref . '/record.json');
+                if (isset($other['contentFolder'])) {
+                    $used[mb_strtolower($other['contentFolder'])] = true;
+                }
+            }
+        }
+        $name = HumanFiles::filename($record['name']);
+        $candidate = $name;
+        $suffix = ' [' . substr(hash('sha256', $record['id']), 0, 8) . ']';
+        for ($number = 2; isset($used[mb_strtolower($candidate)]); $number++) {
+            $candidate = HumanFiles::filename(mb_strcut($name, 0, 140, 'UTF-8') . $suffix . ($number > 2 ? " ($number)" : ''));
+        }
+        $record['contentFolder'] = $candidate;
+    }
+
     public function snapshot(): array
     {
         return $this->locked(function () {
-                return $this->snapshotFrom($this->read('catalog.json'));
+            return $this->snapshotFrom($this->read('catalog.json'));
         });
     }
 
     private function snapshotFrom(array $c): array
     {
-        $out = ['schema' => 1,'revision' => $c['revision'],'structureRevision' => $c['structureRevision'],'assets' => array_values($c['assets'])];
+        $assets = array_values($c['assets']);
+        if ($this->human) {
+            foreach ($assets as &$asset) {
+                $asset['url'] = 'api.php?action=asset&kind=model&id=' . rawurlencode($asset['id']);
+            }
+            unset($asset);
+        }
+        $out = ['schema' => 1,'revision' => $c['revision'],'structureRevision' => $c['structureRevision'],'assets' => $assets];
         foreach (['floors','exhibits','areas','trash'] as $kind) {
             $out[$kind] = [];
             foreach ($c[$kind] ?? [] as $ref) {
-                $out[$kind][] = $this->record($ref);
+                $record = $this->record($ref);
+                unset($record['contentFolder']);
+                foreach ($record['notes'] ?? [] as &$note) {
+                    unset($note['fileHash']);
+                }
+                unset($note);
+                $out[$kind][] = $record;
             }
         }
         return $out;
@@ -458,16 +521,19 @@ final class Store
 
     public function mutate(array $p): array
     {
-        self::signature($p['signature'] ?? null);
+        $unsignedLink = $this->human && in_array($p['action'] ?? '', ['putLink', 'deleteLink'], true);
+        if (!$unsignedLink) {
+            self::signature($p['signature'] ?? null);
+        }
         self::id($p['requestId'] ?? null);
-        return $this->locked(function () use ($p) {
+        return $this->locked(function () use ($p, $unsignedLink) {
             $c = $this->read('catalog.json');
             $c['areas'] ??= [];
             if ($retry = $this->retry($c, $p)) {
                 return $retry;
             }
             $action = $p['action'] ?? '';
-            $sig = self::signature($p['signature']);
+            $sig = $unsignedLink ? '' : self::signature($p['signature']);
             $now = gmdate('Y-m-d\TH:i:s\Z');
             $commit = $p['requestId'];
             $log = null;
@@ -546,6 +612,7 @@ final class Store
                         }
                         $new = array_replace($old ?? ['revision' => 0], $struct);
                         if (!$old && $kind === 'exhibits') {
+                            $this->assignContentFolder($c, $new);
                             $status = $struct['status'] ?? $ch['status'] ?? null;
                             if (!in_array($status, ['ok','problem','retired'], true)) {
                                 throw new ApiError('invalidStatus');
@@ -578,93 +645,150 @@ final class Store
                 }
                 $c['structureRevision']++;
                 $log = ['changeSetId' => $commit,'at' => $now,'signature' => $sig,'baseRevision' => $p['baseRevision'],'resultRevision' => $c['structureRevision'],'actions' => $actions];
-            } elseif (in_array($action, ['note','status','links','correctNote','deleteNote'], true)) {
+            } elseif (in_array($action, ['note','status','links','correctNote','deleteNote','putLink','deleteLink'], true)) {
                 $id = self::id($p['exhibitId'] ?? null);
                 if (!isset($c['exhibits'][$id])) {
                     throw new ApiError('notFound', 404);
                 }
                 $r = $this->record($c['exhibits'][$id]);
-                $this->checkRevision($r, $p['baseRevision'] ?? null);
-                if ($action === 'deleteNote') {
-                    $found = false;
-                    foreach ($r['notes'] as &$note) {
-                        if ($note['id'] !== ($p['noteId'] ?? null)) {
-                            continue;
-                        }
-                        if (isset($note['deleted'])) {
-                            throw new ApiError('noteDeleted', 409);
-                        }
-                        $note['deleted'] = ['signature' => $sig, 'at' => $now];
-                        $found = true;
-                    }
-                    unset($note);
-                    if (!$found) {
-                        throw new ApiError('notFound', 404);
-                    }
+                if ($action !== 'note') {
+                    $this->checkRevision($r, $p['baseRevision'] ?? null);
+                } elseif (isset($p['status']) && ($p['baseRevision'] ?? null) !== $r['revision']) {
+                    throw new ApiError('conflict', 409, ['current' => $r]);
                 }
-                if ($action === 'note' || $action === 'correctNote') {
-                    $body = self::text($p['body'] ?? '', 50000, false);
-                    $images = $p['images'] ?? [];
-                    if (!is_array($images) || count($images) > 8) {
-                        throw new ApiError('invalidImage');
-                    }
-                    foreach ($images as $image) {
-                        self::id($image);
-                        if (!file_exists($this->path('blobs/' . $image . '.json'))) {
-                            throw new ApiError('invalidImage');
-                        }
-                    }
-                    if ($body === '' && !$images) {
-                        throw new ApiError('bodyRequired');
-                    }
-                    if ($action === 'note') {
-                        array_unshift($r['notes'], ['id' => $commit,'body' => $body,'images' => $images,'author' => $sig,'at' => $now,'corrections' => []]);
+                if ($this->human && in_array($action, ['correctNote','deleteNote','putLink','deleteLink'], true) && ($p['contentTag'] ?? null) !== $r['contentTag']) {
+                    throw new ApiError('conflict', 409, ['current' => $r]);
+                }
+                if ($action === 'putLink' || $action === 'deleteLink') {
+                    if ($action === 'putLink') {
+                        $this->human->putLink(
+                            $r,
+                            isset($p['linkId']) ? self::id($p['linkId']) : null,
+                            self::text($p['title'] ?? null),
+                            self::url($p['url'] ?? null),
+                            self::text($p['description'] ?? '', 1000, false)
+                        );
                     } else {
+                        $this->human->deleteLink($r, self::id($p['linkId'] ?? null));
+                    }
+                    $r['revision']++;
+                    $c['exhibits'][$id] = $this->stage('exhibits', $r, $commit);
+                } else {
+                    if ($action === 'deleteNote') {
                         $found = false;
-                        foreach ($r['notes'] as &$n) {
-                            if ($n['id'] === ($p['noteId'] ?? null)) {
-                                if (isset($n['deleted'])) {
-                                    throw new ApiError('noteDeleted', 409);
-                                }
-                                $found = true;
-                                $n['corrections'][] = ['signature' => $sig,'at' => $now,'previousBody' => $n['body'],'previousImages' => $n['images']];
-                                $n['body'] = $body;
-                                $n['images'] = $images;
+                        foreach ($r['notes'] as &$note) {
+                            if ($note['id'] !== ($p['noteId'] ?? null)) {
+                                continue;
                             }
+                            if (isset($note['deleted'])) {
+                                throw new ApiError('noteDeleted', 409);
+                            }
+                            $note['deleted'] = ['signature' => $sig, 'at' => $now];
+                            $found = true;
                         }
-                        unset($n);
+                        unset($note);
                         if (!$found) {
                             throw new ApiError('notFound', 404);
                         }
                     }
-                }
-                if ($action === 'status' || ($action === 'note' && isset($p['status']))) {
-                    if (!in_array($p['status'] ?? null, ['ok','problem','retired'], true)) {
-                        throw new ApiError('invalidStatus');
-                    }
-                    if ($r['status'] !== $p['status']) {
-                        $r['status'] = $p['status'];
-                        $r['statusChanged'] = ['signature' => $sig,'at' => $now];
-                    }
-                }
-                if ($action === 'links') {
-                    if (!is_array($p['links'] ?? null) || count($p['links']) > 100) {
-                        throw new ApiError('invalidInput');
-                    }
-                    $links = [];
-                    $ids = [];
-                    foreach ($p['links'] as $link) {
-                        $lid = self::id($link['id'] ?? null);
-                        if (isset($ids[$lid])) {
-                            throw new ApiError('invalidId');
+                    if ($action === 'note' || $action === 'correctNote') {
+                        $body = self::text($p['body'] ?? '', 50000, false);
+                        $images = $p['images'] ?? [];
+                        if (!is_array($images) || count($images) > 8) {
+                            throw new ApiError('invalidImage');
                         }
-                        $ids[$lid] = true;
-                        $links[] = ['id' => $lid,'title' => self::text($link['title'] ?? null),'url' => self::url($link['url'] ?? null),'description' => self::text($link['description'] ?? '', 1000, false),'signature' => $sig,'at' => $now];
+                        foreach ($images as $image) {
+                            self::id($image);
+                            if ($this->human) {
+                                $this->human->photo($image);
+                            } elseif (!file_exists($this->path('blobs/' . $image . '.json'))) {
+                                throw new ApiError('invalidImage');
+                            }
+                        }
+                        if ($body === '' && !$images) {
+                            throw new ApiError('bodyRequired');
+                        }
+                        if ($action === 'note') {
+                            array_unshift($r['notes'], ['id' => $commit,'body' => $body,'images' => $images,'author' => $sig,'at' => $now,'corrections' => []]);
+                        } else {
+                            $found = false;
+                            foreach ($r['notes'] as &$n) {
+                                if ($n['id'] === ($p['noteId'] ?? null)) {
+                                    if (isset($n['deleted'])) {
+                                        throw new ApiError('noteDeleted', 409);
+                                    }
+                                    $found = true;
+                                    $n['corrections'][] = ['signature' => $sig,'at' => $now,'previousBody' => $n['body'],'previousImages' => $n['images']];
+                                    $n['body'] = $body;
+                                    $n['images'] = $images;
+                                }
+                            }
+                            unset($n);
+                            if (!$found) {
+                                throw new ApiError('notFound', 404);
+                            }
+                        }
                     }
-                    $r['links'] = $links;
+                    if ($action === 'status' || ($action === 'note' && isset($p['status']))) {
+                        if (!in_array($p['status'] ?? null, ['ok','problem','retired'], true)) {
+                            throw new ApiError('invalidStatus');
+                        }
+                        if ($r['status'] !== $p['status']) {
+                            $r['status'] = $p['status'];
+                            $r['statusChanged'] = ['signature' => $sig,'at' => $now];
+                        }
+                    }
+                    if ($action === 'links') {
+                        if ($this->human) {
+                            throw new ApiError('invalidInput');
+                        }
+                        if (!is_array($p['links'] ?? null) || count($p['links']) > 100) {
+                            throw new ApiError('invalidInput');
+                        }
+                        $links = [];
+                        $ids = [];
+                        foreach ($p['links'] as $link) {
+                            $lid = self::id($link['id'] ?? null);
+                            if (isset($ids[$lid])) {
+                                throw new ApiError('invalidId');
+                            }
+                            $ids[$lid] = true;
+                            $links[] = ['id' => $lid,'title' => self::text($link['title'] ?? null),'url' => self::url($link['url'] ?? null),'description' => self::text($link['description'] ?? '', 1000, false),'signature' => $sig,'at' => $now];
+                        }
+                        $r['links'] = $links;
+                    }
+                    if ($this->human && in_array($action, ['note','correctNote','deleteNote'], true)) {
+                        $before = null;
+                        if ($action !== 'note') {
+                            $before = $this->record($c['exhibits'][$id]);
+                            $before = current(array_filter($before['notes'], fn($note) => $note['id'] === $p['noteId']));
+                        }
+                        $target = $action === 'note' ? $r['notes'][0] : null;
+                        if ($target === null) {
+                            foreach ($r['notes'] as $note) {
+                                if ($note['id'] === ($p['noteId'] ?? null)) {
+                                    $target = $note;
+                                    break;
+                                }
+                            }
+                        }
+                        $this->human->saveNote($r, $action, $target, $sig);
+                        if ($before !== null && $before !== false) {
+                            $updated = $this->human->read($r);
+                            foreach ($updated['notes'] as $note) {
+                                if ($note['id'] !== $p['noteId']) {
+                                    continue;
+                                }
+                                $corrections = $before['corrections'] ?? [];
+                                $corrections[] = ['signature' => $sig, 'at' => $now, 'previousBody' => $before['body'], 'previousImages' => $before['images']];
+                                $this->atomic('note-meta/' . $note['id'] . '.json', $this->encode(['fileHash' => $note['fileHash'], 'corrections' => $corrections]));
+                                break;
+                            }
+                        }
+                    }
+                    $r['revision']++;
+                    $c['exhibits'][$id] = $this->resourceLock($id, fn()=>$this->stage('exhibits', $r, $commit));
                 }
-                $r['revision']++;
-                $c['exhibits'][$id] = $this->resourceLock($id, fn()=>$this->stage('exhibits', $r, $commit));
             } else {
                 throw new ApiError('invalidInput');
             }
@@ -703,13 +827,44 @@ final class Store
             $dims = json_decode($p['dimensions'] ?? 'null', true);
             if (!is_array($dims) || count($dims) !== 3) {
                 throw new ApiError('invalidModel');
-            }foreach ($dims as $v) {
+            }
+            foreach ($dims as $v) {
                 if (!is_numeric($v) || !is_finite((float)$v) || $v < 0 || $v > 100000) {
                     throw new ApiError('invalidModel');
                 }
             }
         } else {
             throw new ApiError('invalidInput');
+        }
+        if ($this->human) {
+            return $this->locked(function () use ($p, $id, $sig, $bytes, $kind, $mime, $dims) {
+                $c = $this->read('catalog.json');
+                if ($kind === 'image') {
+                    $exhibitId = self::id($p['exhibitId'] ?? null);
+                    if (!isset($c['exhibits'][$exhibitId])) {
+                        throw new ApiError('notFound', 404);
+                    }
+                    $receipt = 'blobs/' . $id . '.json';
+                    if (file_exists($this->path($receipt))) {
+                        $saved = $this->read($receipt);
+                        if (($saved['hash'] ?? null) !== hash('sha256', $bytes)) {
+                            throw new ApiError('requestConflict', 409);
+                        }
+                        return ['id' => $saved['id'], 'url' => 'api.php?action=asset&kind=image&id=' . $saved['id']];
+                    }
+                    $record = $this->record($c['exhibits'][$exhibitId]);
+                    $photo = $this->human->savePhoto($record, $sig, $bytes, $mime);
+                    $this->atomic($receipt, $this->encode(['id' => $photo['id'], 'name' => $photo['name'], 'hash' => hash('sha256', $bytes)]));
+                    return ['id' => $photo['id'], 'url' => 'api.php?action=asset&kind=image&id=' . $photo['id']];
+                }
+                if (!isset($c['assets'][$id])) {
+                    $file = $this->human->saveModel($id, self::text($p['name'] ?? 'Model'), $bytes);
+                    $c['assets'][$id] = ['id' => $id, 'name' => self::text($p['name'] ?? 'Model'), 'file' => $file, 'url' => 'api.php?action=asset&kind=model&id=' . $id, 'dimensions' => $dims, 'source' => 'upload'];
+                    $c['revision']++;
+                    $this->publish($c, null);
+                }
+                return ['id' => $id, 'url' => 'api.php?action=asset&kind=model&id=' . $id];
+            });
         }
         return $this->locked(function () use ($p, $id, $sig, $bytes, $folder, $mime, $dims) {
             $hash = hash('sha256', $bytes);
@@ -763,6 +918,26 @@ final class Store
     public function asset(string $kind, string $id): array
     {
         self::id($id);
+        if ($this->human) {
+            return $this->locked(function () use ($kind, $id) {
+                if ($kind === 'image') {
+                    return $this->human->photo($id);
+                }
+                if ($kind !== 'model') {
+                    throw new ApiError('notFound', 404);
+                }
+                $catalog = $this->read('catalog.json');
+                $asset = $catalog['assets'][$id] ?? null;
+                if (!$asset) {
+                    throw new ApiError('notFound', 404);
+                }
+                $file = $asset['file'] ?? $this->seed['assets'][$id]['file'] ?? null;
+                if ($file === null) {
+                    throw new ApiError('notFound', 404);
+                }
+                return $this->human->model($file);
+            });
+        }
         $folder = match ($kind) {
             'model'=>'models','image'=>'blobs',default=>throw new ApiError('notFound', 404)
         };
@@ -772,6 +947,21 @@ final class Store
             }
             $m = $this->read("$folder/$id.json");
             return ['path' => $this->path("$folder/$id.bin"),'mime' => $m['mime']];
+        });
+    }
+
+    public function namedPhoto(string $exhibitId, string $filename): array
+    {
+        $exhibitId = self::id($exhibitId);
+        if (!$this->human) {
+            throw new ApiError('notFound', 404);
+        }
+        return $this->locked(function () use ($exhibitId, $filename) {
+            $catalog = $this->read('catalog.json');
+            if (!isset($catalog['exhibits'][$exhibitId])) {
+                throw new ApiError('notFound', 404);
+            }
+            return $this->human->namedPhoto($this->record($catalog['exhibits'][$exhibitId]), $filename);
         });
     }
 }

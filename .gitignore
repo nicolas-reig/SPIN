@@ -1,7 +1,4 @@
-/runtime/
+/storage/
 /config/local.php
-*.blend
-*.blend1
 .DS_Store
 *.log
-/local-assets/

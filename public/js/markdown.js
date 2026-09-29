@@ -5,7 +5,7 @@ export const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[c]));
 
-export function markdown(source) {
+export function markdown(source, exhibitId = '') {
     function render(node) {
         let content = '';
         node.forEach(child => { content += render(child); });
@@ -23,7 +23,16 @@ export function markdown(source) {
         if (node.type.name === 'hard_break') return '<br>';
         if (node.type.name === 'horizontal_rule') return '<hr>';
         if (node.type.name === 'code_block') return `<pre><code>${content}</code></pre>`;
-        if (node.type.name === 'image') return escape(node.attrs.alt || '');
+        if (node.type.name === 'image') {
+            const match = /^\.\.\/Fotos\/([^/?#]+)$/i.exec(node.attrs.src || '');
+            if (!match || !exhibitId) return escape(node.attrs.alt || '');
+            let name;
+            try { name = decodeURIComponent(match[1]); }
+            catch { return escape(node.attrs.alt || ''); }
+            if (name.includes('/') || name.includes('\\') || name.includes('..')) return escape(node.attrs.alt || '');
+            const url = `api.php?action=photo&exhibitId=${encodeURIComponent(exhibitId)}&file=${encodeURIComponent(name)}`;
+            return `<img class="note-image" src="${escape(url)}" alt="${escape(node.attrs.alt || '')}" loading="lazy">`;
+        }
         return content;
     }
     return render(defaultMarkdownParser.parse(String(source)));

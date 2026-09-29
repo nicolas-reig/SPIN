@@ -49,6 +49,7 @@ let snapshot = null,
     snap = false,
     noticeTimer, dialogCleanup = null;
 let drafts = {};
+const linkDrafts = {};
 try {
     drafts = JSON.parse(localStorage.getItem('hub-drafts') || '{}');
     Object.values(drafts).forEach(draft => { draft.saving = false; draft.readingImages = false; });
@@ -166,7 +167,7 @@ function deleteNoteDialog(noteId) {
     if (!note || note.deleted) return;
     const requestId = uid();
     showDialog('deleteNote', `<p>${esc(t('noteBy'))} ${esc(note.author)} · ${esc(date(note.at))}</p><p class="muted small" style="margin:12px 0 20px">${esc(t('deleteNoteHint'))}</p>${signatureField()}${footer('deleteNote')}`, async form => {
-        const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, requestId, signature: requireSignature(form) });
+        const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, contentTag: record.contentTag, requestId, signature: requireSignature(form) });
         if (drafts[record.id]?.noteId === noteId) delete drafts[record.id];
         persistDrafts();
         closeDialog();
@@ -416,9 +417,7 @@ function syncUrl() {
 }
 
 function noteHTML(n) {
-    const author = n.id.startsWith('sample-') ? n.author.replace(' · Demo', '') : n.author;
-    const body = n.id === 'sample-repair' ? n.body.replace('**Beispielnotiz — keine Betriebsdaten.**\n\n', '') : n.body;
-    if (n.deleted) return `<article class="note tombstone"><p>${esc(t('noteBy'))} <strong>${esc(author)}</strong></p><p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p><time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time></article>`;
+    if (n.deleted) return `<article class="note tombstone"><p>${esc(t('noteBy'))} <strong>${esc(n.author)}</strong></p><p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p><time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time></article>`;
     const shortDate = new Intl.DateTimeFormat(lang() === 'de' ? 'de-DE' : 'en-GB', {
         day: '2-digit',
         month: '2-digit',
@@ -429,10 +428,10 @@ function noteHTML(n) {
     return `
         <article class="note">
             <div class="note-meta">
-                <span class="note-author">${esc(author)}</span>
+                <span class="note-author">${esc(n.author)}</span>
                 <time class="note-date" datetime="${esc(n.at)}" title="${esc(date(n.at, true))}">${esc(shortDate)}</time>
             </div>
-            <div class="note-body">${markdown(body)}</div>
+            <div class="note-body">${markdown(n.body, selected)}</div>
             ${n.images.map(id => `<a href="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" target="_blank" rel="noopener"><img class="note-image" src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}" loading="lazy"></a>`).join('')}
             <div class="note-footer">
                 ${n.corrections?.length ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(n.corrections.at(-1).signature)} · ${esc(date(n.corrections.at(-1).at))}</p></details>` : '<span></span>'}
@@ -564,18 +563,69 @@ function renderPanel() {
         }
         renderComposer();
     } else {
-        el.innerHTML = `
-            <button class="add-link" data-action="addLink"><span aria-hidden="true">+</span>${esc(t('addLink'))}</button>
-            ${e.links.length ? e.links.map(l => `
-                <article class="link-card">
-                    <a class="document-open" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" title="${esc(l.url)}"><span class="file-symbol" aria-hidden="true">↗</span><span>${esc(l.title)}</span></a>
-                    ${l.description ? `<p>${esc(l.description)}</p>` : ''}
-                    <div class="link-actions">
-                        <button class="quiet" data-copy="${esc(l.id)}" title="${esc(l.url)}">${esc(t('copy'))}</button>
-                        <button class="icon-button" data-edit-link="${esc(l.id)}" aria-label="${esc(t('edit'))}" title="${esc(t('edit'))}">✎</button>
-                    </div>
-                </article>`).join('') : `<p class="empty">${esc(t('noLinksHint'))}</p>`}`;
+        renderLinks(e, el);
     }
+}
+
+function renderLinks(e, element) {
+    const draft = linkDrafts[e.id] ||= { open: false, id: null, title: '', url: '', description: '' };
+    element.innerHTML = `
+        <form class="composer link-composer ${draft.open ? 'composing' : ''}" id="link-form" novalidate>
+            <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t('addLink'))}" maxlength="160" value="${esc(draft.title)}">
+            <div class="link-fields" ${draft.open ? '' : 'hidden'}>
+                <input id="link-url" name="url" type="text" inputmode="url" aria-label="${esc(t('url'))}" placeholder="${esc(t('url'))}" value="${esc(draft.url)}">
+                <textarea id="link-description" name="description" aria-label="${esc(t('description'))}" placeholder="${esc(t('description'))}" maxlength="1000">${esc(draft.description)}</textarea>
+                <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t('save'))}</button></div>
+            </div>
+            <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
+        </form>
+        ${e.links.map(link => `
+            <article class="link-card">
+                <a class="document-open" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span><span aria-hidden="true">↗</span></a>
+                ${link.description ? `<p>${esc(link.description)}</p>` : ''}
+                <div class="link-actions">
+                    <button type="button" class="quiet" data-copy="${esc(link.id)}" title="${esc(link.url)}">${esc(t('copy'))}</button>
+                    <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${esc(t('edit'))}</button><button type="button" class="danger" data-delete-link="${esc(link.id)}">${esc(t('remove'))}</button></div></details>
+                </div>
+            </article>`).join('')}`;
+    const form = element.querySelector('#link-form');
+    form.addEventListener('focusin', () => {
+        if (!draft.open) {
+            draft.open = true;
+            form.classList.add('composing');
+            form.querySelector('.link-fields').hidden = false;
+        }
+    });
+    form.addEventListener('input', event => {
+        if (['title', 'url', 'description'].includes(event.target.name)) draft[event.target.name] = event.target.value;
+    });
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (draft.saving) return;
+        const current = exhibit();
+        draft.saving = true;
+        form.querySelector('[type=submit]').disabled = true;
+        try {
+            if (!draft.title.trim()) throw Error('invalidInput');
+            if (!safeUrl(draft.url.trim())) throw Error('invalidUrl');
+            const result = await api.save({
+                action: 'putLink', exhibitId: current.id, linkId: draft.id,
+                title: draft.title.trim(), url: draft.url.trim(), description: draft.description.trim(),
+                baseRevision: current.revision, contentTag: current.contentTag, requestId: uid()
+            });
+            delete linkDrafts[current.id];
+            acceptSnapshot(result.snapshot);
+            announce(t('saved'));
+        } catch (error) {
+            draft.error = error.key || error.message || 'storage';
+            const message = form.querySelector('.link-error');
+            message.textContent = errorText(error);
+            message.hidden = false;
+            form.querySelector('[type=submit]').disabled = false;
+        } finally {
+            draft.saving = false;
+        }
+    });
 }
 
 function noteLinkDialog() {
@@ -598,6 +648,7 @@ function newDraft(e, n = null) {
         status: '',
         requestId: uid(),
         baseRevision: e.revision,
+        contentTag: e.contentTag,
         open: true,
         noteId: n?.id || null
     };
@@ -650,6 +701,7 @@ function renderComposer() {
     const form = $('#note-form');
     let choosingImage = false;
     noteEditor = createNoteEditor($('#note-editor'), {
+        exhibitId: e.id,
         value: d.body, label: t('noteBody'), placeholder: t('writeNote'), disabled: Boolean(d.saving),
         onChange: value => { d.body = value; delete d.error; persistDrafts(); },
         onFocus: () => {
@@ -791,7 +843,7 @@ async function postNote(id) {
                 const file = new File([blob], image.name, {
                     type: blob.type
                 });
-                const r = await api.upload(file, 'image', d.signature, image.id);
+                const r = await api.upload(file, 'image', d.signature, image.id, null, id);
                 image.uploaded = r.id;
                 persistDrafts();
             }
@@ -801,6 +853,7 @@ async function postNote(id) {
             action: d.noteId ? 'correctNote' : 'note',
             exhibitId: id,
             baseRevision: d.baseRevision,
+            contentTag: d.contentTag,
             requestId: d.requestId,
             signature: d.signature,
             body: d.body,
@@ -965,38 +1018,23 @@ function statusDialog(chosenStatus = exhibit().status) {
     });
 }
 
-function linkDialog(id = null) {
-    const e = structuredClone(exhibit()),
-        link = e.links.find(l => l.id === id),
-        requestId = uid();
-    showDialog(link ? 'edit' : 'addLink', `<p class="small muted" style="margin-bottom:18px">${esc(t('nasHint'))}</p><div class="field"><label for="link-title">${esc(t('title'))}</label><input id="link-title" name="title" value="${esc(link?.title||'')}" maxlength="200"></div><div class="field"><label for="link-url">${esc(t('url'))}</label><input type="url" id="link-url" name="url" value="${esc(link?.url||'')}" placeholder="https://nas.example.invalid/file.pdf"></div><div class="field"><label for="link-description">${esc(t('description'))}</label><textarea id="link-description" name="description" style="min-height:80px">${esc(link?.description||'')}</textarea></div>${signatureField()}${link?`<label class="check"><input type="checkbox" name="remove">${esc(t('remove'))}</label>`:''}${footer()}`, async form => {
-        const signature = requireSignature(form);
-        let links = e.links.filter(l => l.id !== id);
-        if (!form.has('remove')) {
-            const url = String(form.get('url')).trim();
-            let u;
-            try {
-                u = new URL(url);
-            } catch {
-                throw Error('invalidUrl');
-            }
-            if (!safeUrl(url)) throw Error('invalidUrl');
-            const title = String(form.get('title')).trim();
-            if (!title) throw Error('invalidInput');
-            links.push({
-                id: id || uid(),
-                title,
-                url,
-                description: form.get('description')
-            });
-        }
+function editLink(id = null) {
+    const record = exhibit();
+    const link = record.links.find(item => item.id === id);
+    if (id && !link) return;
+    linkDrafts[record.id] = { open: true, id, title: link?.title || '', url: link?.url || '', description: link?.description || '' };
+    renderPanel();
+    $('#link-title')?.focus();
+}
+
+function deleteLink(id) {
+    const record = exhibit();
+    const link = record.links.find(item => item.id === id);
+    if (!link) return;
+    showDialog('remove', `<p>${esc(link.title)}</p>${footer('remove')}`, async () => {
         const result = await api.save({
-            action: 'links',
-            exhibitId: e.id,
-            baseRevision: e.revision,
-            requestId,
-            signature,
-            links
+            action: 'deleteLink', exhibitId: record.id, linkId: id,
+            baseRevision: record.revision, contentTag: record.contentTag, requestId: uid()
         });
         closeDialog();
         acceptSnapshot(result.snapshot);
@@ -1436,6 +1474,20 @@ async function refresh() {
     }
 }
 
+async function refreshFromFiles() {
+    if (document.hidden || edit || $('#dialog').open || document.activeElement?.closest('#note-form, #link-form')) return;
+    try {
+        const current = await api.load();
+        const stamp = value => JSON.stringify([value.revision, value.structureRevision, value.exhibits.map(item => [item.id, item.revision, item.contentTag])]);
+        if (!snapshot || stamp(current) !== stamp(snapshot)) acceptSnapshot(current);
+    } catch {
+        // A later refresh can read the files after an external editor finishes saving.
+    }
+}
+
+setInterval(refreshFromFiles, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshFromFiles(); });
+
 function recoverDraft() {
     let saved;
     try { saved = JSON.parse(localStorage.getItem('hub-edit') || 'null'); } catch {}
@@ -1482,7 +1534,11 @@ const actions = {
     },
     noteConflict,
     status: statusDialog,
-    addLink: () => linkDialog(),
+    addLink: () => editLink(),
+    cancelLink: () => {
+        delete linkDrafts[selected];
+        renderPanel();
+    },
     closeDialog,
     clear: () => {
         query = '';
@@ -1539,7 +1595,8 @@ document.addEventListener('click', async event => {
             $('#note-body').focus();
             return;
         }
-        if (element.dataset.editLink) { linkDialog(element.dataset.editLink); return; }
+        if (element.dataset.editLink) { editLink(element.dataset.editLink); return; }
+        if (element.dataset.deleteLink) { deleteLink(element.dataset.deleteLink); return; }
         if (element.dataset.copy) {
             const link = exhibit().links.find(l => l.id === element.dataset.copy);
             try { await navigator.clipboard.writeText(link.url); announce(t('copied')); }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/server/Store.php';
+require dirname(__DIR__) . '/server/HumanFiles.php';
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 try {
@@ -12,8 +13,15 @@ try {
     if (!($config['demo'] ?? false)) {
         $seed = ['floors' => [],'exhibits' => [],'assets' => $seed['assets']];
     }
-    $store = new Store($config['data_dir'], $seed);
+    $store = new Store($config['data_dir'], $seed, null, $config['content_dir']);
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (($_GET['action'] ?? '') === 'photo') {
+            $a = $store->namedPhoto($_GET['exhibitId'] ?? '', $_GET['file'] ?? '');
+            header('Content-Type: ' . $a['mime']);
+            header('Content-Security-Policy: default-src \'none\'');
+            readfile($a['path']);
+            exit;
+        }
         if (($_GET['action'] ?? '') === 'asset') {
             $a = $store->asset($_GET['kind'] ?? '', $_GET['id'] ?? '');
             header('Content-Type: ' . $a['mime']);
@@ -39,14 +47,17 @@ try {
         if (isset($_FILES['file'])) {
             if ($_FILES['file']['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($_FILES['file']['tmp_name'])) {
                 throw new ApiError('invalidUpload');
-            }$result = $store->upload($_POST, $_FILES['file']['tmp_name']);
+            }
+            $result = $store->upload($_POST, $_FILES['file']['tmp_name']);
         } else {
             if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 2 * 1024 * 1024) {
                 throw new ApiError('fileTooLarge');
-            }$p = json_decode(file_get_contents('php://input'), true, 128, JSON_THROW_ON_ERROR);
+            }
+            $p = json_decode(file_get_contents('php://input'), true, 128, JSON_THROW_ON_ERROR);
             if (!is_array($p)) {
                 throw new ApiError('invalidInput');
-            }$result = $store->mutate($p);
+            }
+            $result = $store->mutate($p);
         }
     } else {
         throw new ApiError('invalidRequest', 405);

@@ -1,7 +1,7 @@
 <?php
 
-// Copy to local.php and select a data directory outside the public web root.
 return [
-    'data_dir' => getenv('HUB_DATA_DIR') ?: dirname(__DIR__) . '/runtime',
+    'data_dir' => getenv('WEBAPP_STORAGE_DIR') ?: dirname(__DIR__) . '/storage',
+    'content_dir' => getenv('HUB_CONTENT_DIR') ?: dirname(__DIR__, 2),
     'demo' => true,
 ];

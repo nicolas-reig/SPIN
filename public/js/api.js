@@ -44,13 +44,14 @@ export class Api {
         validateSnapshot(r.snapshot);
         return r;
     }
-    async upload(file, kind, signature, id, dimensions = null) {
+    async upload(file, kind, signature, id, dimensions = null, exhibitId = null) {
         const f = new FormData();
         f.set('file', file);
         f.set('kind', kind);
         f.set('signature', signature);
         f.set('requestId', id);
         f.set('name', file.name);
+        if (exhibitId) f.set('exhibitId', exhibitId);
         if (dimensions) f.set('dimensions', JSON.stringify(dimensions));
         return this.request('api.php', {
             method: 'POST',

@@ -6,7 +6,7 @@ import {
 } from '../vendor/editor.js';
 import { safeUrl } from './domain.js';
 
-export function createNoteEditor(host, { value, label, placeholder, onChange, onFocus, onLink, disabled = false }) {
+export function createNoteEditor(host, { value, label, placeholder, onChange, onFocus, onLink, exhibitId = '', disabled = false }) {
     const markRule = (pattern, type) => new InputRule(pattern, (state, match, start, end) => {
         const text = match[1];
         return state.tr.insertText(text, start, end).addMark(start, start + text.length, type.create()).removeStoredMark(type);
@@ -33,6 +33,22 @@ export function createNoteEditor(host, { value, label, placeholder, onChange, on
             ]
         }),
         editable: () => !disabled,
+        nodeViews: {
+            image(node) {
+                const image = document.createElement('img');
+                const match = /^\.\.\/Fotos\/([^/?#]+)$/i.exec(node.attrs.src || '');
+                if (match && exhibitId) {
+                    try {
+                        const name = decodeURIComponent(match[1]);
+                        if (!name.includes('/') && !name.includes('\\') && !name.includes('..')) {
+                            image.src = `api.php?action=photo&exhibitId=${encodeURIComponent(exhibitId)}&file=${encodeURIComponent(name)}`;
+                        }
+                    } catch {}
+                }
+                image.alt = node.attrs.alt || '';
+                return { dom: image };
+            }
+        },
         attributes: { id: 'note-body', role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', 'data-placeholder': placeholder },
         dispatchTransaction(transaction) {
             view.updateState(view.state.apply(transaction));

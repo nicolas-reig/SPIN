@@ -968,23 +968,6 @@ summary {
     box-shadow: 0 1px 5px #17232f30;
 }
 
-.add-link {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 12px;
-    min-height: 58px;
-    background: #fff;
-    border-radius: 17px;
-    margin-bottom: 18px;
-    color: #747d87;
-    box-shadow: 0 3px 12px #1a293306;
-}
-
-.add-link>span {
-    font-size: 1.5rem;
-    color: var(--accent);
-}
-
 .document-open {
     color: var(--ink);
     font-weight: 550;
@@ -997,11 +980,6 @@ summary {
 
 .document-open:hover {
     color: var(--accent);
-}
-
-.file-symbol {
-    font-size: 1.4rem;
-    color: #798895;
 }
 
 .link-card p {
@@ -1021,6 +999,74 @@ summary {
 .link-actions>button {
     font-size: .75rem;
     min-height: 32px;
+}
+
+.link-composer {
+    padding: 18px 22px;
+}
+
+.link-composer input,
+.link-composer textarea {
+    display: block;
+    width: 100%;
+    border: 0;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+    resize: vertical;
+}
+
+.link-composer input:focus,
+.link-composer textarea:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.link-composer #link-title {
+    font-weight: 550;
+    min-height: 30px;
+}
+
+.link-composer #link-title::placeholder {
+    color: #858c94;
+    font-weight: 400;
+}
+
+.link-fields {
+    padding-top: 12px;
+}
+
+.link-fields input,
+.link-fields textarea {
+    padding: 8px 0;
+    margin: 0 0 8px;
+}
+
+.link-fields textarea {
+    min-height: 48px;
+}
+
+.link-fields .row {
+    padding-top: 4px;
+}
+
+.link-error {
+    color: var(--red);
+    font-size: .8125rem;
+    margin: 8px 0 0;
+}
+
+.link-card .document-open {
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.link-card .document-open span:last-child {
+    color: #89919a;
+}
+
+.link-card .link-actions {
+    margin-top: 14px;
 }
 
 .empty {

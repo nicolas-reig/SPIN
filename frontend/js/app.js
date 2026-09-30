@@ -24,6 +24,7 @@ import {
 import { readNoteImage } from './images.js';
 import { createNoteEditor } from './editor.js';
 import { installSelects } from './select.js';
+import { cameraMode } from './camera.js';
 import { safeUrl, opensInBrowser } from './domain.js';
 let noteEditor = null;
 installSelects();
@@ -71,6 +72,10 @@ const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const floor = () => data()?.floors.find(f => f.id === floorId);
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
 const trashIcon = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg>';
+const cameraIcons = {
+    top: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M10 4v8H4m6 0h10m-4 0v8"/></svg>',
+    perspective: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 11-3 5 4v12l-11 2-5-4V7Zm0 0 5 4 11-3M9 11v11"/></svg>'
+};
 for (const [status, value] of Object.entries(STATUS_COLORS)) document.documentElement.style.setProperty('--status-' + status, value);
 const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
 const button = (label, action, cls = '', extra = '') => `<button type="button" data-action="${action}" class="${cls}" ${extra}>${esc(t(label))}</button>`;
@@ -287,9 +292,9 @@ function renderMapUI() {
     });
     $('#map-controls').innerHTML = `
         <div class="map-toolbar" aria-label="${esc(t('keyboardMap'))}">
-            <select id="camera-view" aria-label="${esc(t('cameraView'))}" title="${esc(t('cameraView'))}">
-                ${options([['iso', t('iso')], ['top', t('top')], ['perspective', t('perspective')]], mapMode)}
-            </select>
+            <div class="view-toggle" role="group" aria-label="${esc(t('cameraView'))}">
+                ${['top', 'perspective'].map(mode => `<button type="button" class="icon-button" data-action="camera:${mode}" aria-label="${esc(t(mode))}" title="${esc(t(mode))}" aria-pressed="${mapMode === mode}">${cameraIcons[mode]}</button>`).join('')}
+            </div>
             <span class="toolbar-divider"></span>
             ${iconButton('focus', 'focus', '⌖', !selected ? 'disabled' : '')}
             ${iconButton('zoomOut', 'camera:zoomOut', '−') + iconButton('zoomIn', 'camera:zoomIn', '+')}
@@ -297,20 +302,12 @@ function renderMapUI() {
                 <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary>
                 <div class="popover">
                     ${button('fit', 'camera:fit', 'quiet')}
-                    ${button('rotate', 'camera:rotate', 'quiet')}
+                    ${button('rotate', 'camera:rotate', 'quiet', mapMode === 'top' ? 'disabled' : '')}
                     <div class="row">${[['panLeft', '←'], ['panUp', '↑'], ['panDown', '↓'], ['panRight', '→']].map(([a, symbol]) => iconButton(a, 'camera:' + a, symbol)).join('')}</div>
                     <p class="small muted">${esc(t('mapHelp'))}</p>
                 </div>
             </details>
         </div>`;
-    $('#camera-view').addEventListener('change', async e => {
-        const value = e.target.value;
-        mapMode = value;
-        await ensureMap();
-        map?.setView(mapMode);
-        syncUrl();
-        renderMapUI();
-    });
     $('#map-message').textContent = mapState === 'mapReady' ? '' : t(mapState);
     map?.resize();
 }
@@ -1547,10 +1544,14 @@ document.addEventListener('click', async event => {
         if (action?.startsWith('view:')) { setView(action.split(':')[1]); return; }
         if (action?.startsWith('camera:')) {
             const command = action.split(':')[1];
-            if (['iso', 'top', 'perspective'].includes(command)) mapMode = command;
+            const modeChange = ['top', 'perspective'].includes(command);
+            if (modeChange && command === mapMode) return;
+            if (modeChange) mapMode = command;
+            await ensureMap();
             map?.command(command);
             syncUrl();
             renderMapUI();
+            if (modeChange) $('#map-controls').querySelector(`[data-action="camera:${command}"]`).focus({ preventScroll: true });
             return;
         }
         if (actions[action]) await actions[action]();
@@ -1629,7 +1630,7 @@ try {
     const requestedExhibit = snapshot.exhibits.find(e => e.id === params.get('exhibit') && (!requestedFloor || e.floorId === requestedFloor.id));
     floorId = requestedFloor?.id || requestedExhibit?.floorId || exhibit()?.floorId || snapshot.floors[0]?.id;
     selected = requestedExhibit?.id || null;
-    if (['iso', 'top', 'perspective'].includes(params.get('view'))) mapMode = params.get('view');
+    if (params.has('view')) mapMode = cameraMode(params.get('view'));
     syncUrl();
     render();
     ensureMap();

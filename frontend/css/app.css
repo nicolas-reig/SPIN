@@ -571,20 +571,35 @@ summary {
     box-shadow: 0 1px 2px #202b3310, 0 8px 24px #202b3318, 0 20px 45px #202b3309;
 }
 
-.map-toolbar select {
-    width: auto;
-    min-height: 36px;
-    padding: 7px 6px;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    font-size: .8125rem;
-    max-width: 124px;
-}
-
 .map-toolbar .icon-button {
     width: 34px;
     font-size: 1.25rem;
+}
+
+.view-toggle {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 5px;
+    background: #e9ecf0;
+}
+
+.view-toggle .icon-button {
+    min-height: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 3px;
+    color: #737d88;
+}
+
+.view-toggle .icon-button[aria-pressed=true] {
+    color: #263442;
+    background: #fff;
+    box-shadow: 0 1px 3px #202b331c;
+}
+
+.view-toggle svg {
+    display: block;
 }
 
 .toolbar-divider {
@@ -1320,10 +1335,6 @@ dialog::backdrop {
     .link-card {
         padding: 20px;
     }
-
-    #map-controls .map-toolbar>.icon-button:nth-of-type(2) {
-        display: none;
-    }
 }
 
 @media (max-width: 860px) {
@@ -1517,12 +1528,10 @@ dialog::backdrop {
         height: 42px;
     }
 
-    .map-toolbar select {
-        min-height: 42px;
-    }
-
-    #map-controls .map-toolbar>.icon-button:nth-of-type(2) {
-        display: inline-flex;
+    .view-toggle .icon-button {
+        min-width: 44px;
+        min-height: 44px;
+        height: 44px;
     }
 
     #editbar {
@@ -2100,14 +2109,6 @@ body.editing {
     margin: 4px 0 8px;
     background: #f2f3f6;
 }
-#map-controls .select-button {
-    width: auto;
-    max-width: 160px;
-    min-height: 36px;
-    background: transparent;
-    padding: 7px 10px;
-    font-size: .8125rem;
-}
 #axis + .select-button {
     width: auto;
 }
@@ -2184,7 +2185,6 @@ body.editing {
 }
 @media (max-width: 860px) {
     .ProseMirror { font-size: 16px; }
-    #map-controls .select-button { max-width: 110px; }
 }
 .view-presets h3 {
     font-size: .8125rem;
@@ -2241,13 +2241,6 @@ body.editing {
     #map-controls .map-toolbar {
         flex-wrap: wrap;
         justify-content: center;
-    }
-    #map-controls .map-toolbar > .icon-button:nth-of-type(2) {
-        display: inline-flex;
-    }
-    #map-controls .select-button {
-        max-width: 100%;
-        min-width: 0;
     }
     #map-message {
         right: calc(var(--inspector-overlay) + 36px);

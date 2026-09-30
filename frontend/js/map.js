@@ -9,7 +9,7 @@ import {
     TransformControls
 } from 'three/addons/controls/TransformControls.js';
 
-import { cameraOffset, navigationGesture } from './camera.js';
+import { cameraMode, cameraOffset, navigationGesture } from './camera.js';
 import { STATUS_COLORS, SELECTION_COLORS } from './domain.js';
 
 const radians = v => v * Math.PI / 180;
@@ -91,7 +91,7 @@ export class MapView {
         }));
         this.sharedMaterials = new Set(Object.values(this.materials));
         this.generation = 0;
-        this.mode = 'iso';
+        this.mode = 'perspective';
         this.selected = null;
         this.frame = 0;
         this.snap = false;
@@ -372,17 +372,19 @@ export class MapView {
         this.frameTarget(center, span * 1.6, span * .65);
     }
     captureView(mode = this.mode) {
+        mode = cameraMode(mode);
         const target = this.controls.target.toArray();
         const distance = this.camera.position.distanceTo(this.controls.target);
         const top = mode === 'top';
         return {
-            mode: top ? 'top' : mode === 'iso' ? 'iso' : 'perspective',
+            mode,
             position: top && this.mode !== 'top' ? [target[0], target[1] + distance, target[2] + .00001] : !top && this.mode === 'top' ? new THREE.Vector3(...target).add(new THREE.Vector3(...cameraOffset('perspective', distance))).toArray() : this.camera.position.toArray(),
             target,
             span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3, distance * .36)
         };
     }
     fallbackView(ids, mode = this.mode) {
+        mode = cameraMode(mode);
         const box = new THREE.Box3();
         for (const id of ids) {
             const object = this.objects.get(id);
@@ -398,9 +400,10 @@ export class MapView {
     }
     applyView(preset) {
         if (!preset) return;
-        if (this.mode !== preset.mode) {
-            this.setView(preset.mode, true);
-            this.onMode(preset.mode);
+        const mode = cameraMode(preset.mode);
+        if (this.mode !== mode) {
+            this.setView(mode, true);
+            this.onMode(mode);
         }
         const center = new THREE.Vector3(...preset.target);
         const position = new THREE.Vector3(...preset.position);
@@ -439,6 +442,7 @@ export class MapView {
         return true;
     }
     focusView(id, preset) {
+        preset = { ...preset, mode: cameraMode(preset.mode) };
         const aspect = this.width / this.height;
         const perspective = preset.mode === 'perspective';
         const camera = perspective ? new THREE.PerspectiveCamera(38, aspect, .05, 2000) :
@@ -488,15 +492,19 @@ export class MapView {
         this.applyView(this.floor.views?.[key] || this.fallbackView(ids));
     }
     setView(mode, preserve = false) {
+        mode = cameraMode(mode);
         cancelAnimationFrame(this.cameraFrame);
         const target = this.controls.target.clone();
         const distance = this.camera.position.distanceTo(target);
         this.mode = mode;
         const old = this.camera;
         this.camera = mode === 'perspective' ? new THREE.PerspectiveCamera(38, 1, .05, 2000) : new THREE.OrthographicCamera(-20, 20, 20, -20, .05, 2000);
-        this.orthoSpan = Math.max(5, distance * .36);
-        this.camera.position.copy(!preserve && mode === 'top' ? target.clone().add(new THREE.Vector3(0, distance, .001)) : old.position);
-        if (!preserve && mode === 'iso') this.camera.position.copy(target).add(new THREE.Vector3(.65, .8, 1).normalize().multiplyScalar(distance));
+        const halfFov = Math.tan(THREE.MathUtils.degToRad(19));
+        this.orthoSpan = old.isOrthographicCamera ? this.orthoSpan / old.zoom : distance * halfFov / old.zoom;
+        const nextDistance = mode === 'perspective' && old.isOrthographicCamera ? this.orthoSpan / halfFov : distance;
+        const offset = !preserve ? new THREE.Vector3(...cameraOffset(mode, nextDistance)) :
+            old.position.clone().sub(target).normalize().multiplyScalar(nextDistance);
+        this.camera.position.copy(target).add(offset);
         this.controls.object = this.camera;
         this.controls.enableRotate = mode !== 'top';
         this.controls.minPolarAngle = mode === 'top' ? 0 : .02;
@@ -510,7 +518,7 @@ export class MapView {
         if (action === 'home') return this.home();
         if (action === 'fit') return this.fit();
         if (action === 'focus') return this.focus();
-        if (['top', 'iso', 'perspective'].includes(action)) return this.setView(action);
+        if (['top', 'perspective'].includes(action)) return this.setView(action);
         if (action === 'zoomIn' || action === 'zoomOut') {
             const factor = action === 'zoomIn' ? .8 : 1.25;
             if (this.camera.isOrthographicCamera) {

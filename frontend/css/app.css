@@ -1,11 +1,27 @@
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('../vendor/inter/InterVariable.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Inter';
+    font-style: italic;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('../vendor/inter/InterVariable-Italic.woff2') format('woff2');
+}
+
 :root {
     --ink: #25282c;
-    --muted: #72777e;
+    --muted: #5e6772;
     --paper: #fff;
     --panel: #f0f1f3;
     --canvas: #e1e4e7;
     --line: #dfe2e6;
-    --accent: #087cf0;
+    --accent: #0872df;
     --accent-soft: #e5f1ff;
     --green: #287c51;
     --red: #b44c4d;
@@ -17,7 +33,10 @@
     --list: 230px;
     --radius: 11px;
     --shadow: 0 2px 4px #202b3304, 0 8px 24px #202b3309, 0 20px 50px #202b3308;
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font: 400 16px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-optical-sizing: auto;
+    font-synthesis: none;
+    font-feature-settings: 'ss04', 'liga', 'calt';
     color: var(--ink);
     background: var(--canvas);
 }
@@ -119,8 +138,14 @@ select {
 
 textarea {
     resize: vertical;
-    line-height: 1.55;
+    line-height: 1.6;
     min-height: 140px;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--muted);
+    opacity: 1;
 }
 
 input[type=checkbox] {
@@ -146,15 +171,20 @@ p {
 
 h1,
 h2 {
-    font-size: 1.65rem;
-    line-height: 1.2;
-    font-weight: 650;
-    letter-spacing: -.045em;
+    font-size: 1.625rem;
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: -.025em;
 }
 
 h3 {
     font-size: 1rem;
     font-weight: 600;
+}
+
+strong,
+b {
+    font-weight: 700;
 }
 
 small,
@@ -377,7 +407,7 @@ summary {
 
 .popover label {
     color: var(--muted);
-    font-size: .75rem;
+    font-size: .8125rem;
     margin-top: 10px;
 }
 
@@ -454,8 +484,8 @@ summary {
 }
 
 .exhibit-name {
-    font-size: .925rem;
-    font-weight: 560;
+    font-size: .9375rem;
+    font-weight: 500;
     overflow-wrap: anywhere;
 }
 
@@ -496,7 +526,7 @@ summary {
     gap: 7px;
     font-size: .8125rem;
     line-height: 1.3;
-    font-weight: 450;
+    font-weight: 500;
 }
 
 .sidebar-footer {
@@ -717,6 +747,8 @@ summary {
 }
 
 .inspector-tools h1 {
+    flex: 1;
+    min-width: 0;
     overflow-wrap: anywhere;
 }
 
@@ -753,13 +785,15 @@ summary {
 
 .tabs button {
     flex: 1;
+    min-width: 0;
     min-height: 33px;
     padding: 5px 8px;
     font-size: .875rem;
     border-radius: 4px;
     background: transparent;
-    color: #72777f;
-    font-weight: 450;
+    color: var(--muted);
+    font-weight: 500;
+    overflow-wrap: anywhere;
 }
 
 .tabs button[aria-selected=true] {
@@ -797,20 +831,20 @@ summary {
 
 .note-author {
     font-size: .875rem;
-    font-weight: 550;
+    font-weight: 500;
     overflow-wrap: anywhere;
 }
 
 .note-date {
-    font-size: .75rem;
-    color: #83888f;
+    font-size: .8125rem;
+    color: var(--muted);
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;
 }
 
 .note-body {
-    font-size: .9375rem;
-    line-height: 1.57;
+    font-size: 1rem;
+    line-height: 1.6;
     overflow-wrap: anywhere;
 }
 
@@ -884,12 +918,12 @@ summary {
     padding: 0;
     resize: none;
     background: transparent;
-    font-size: .9375rem;
-    line-height: 1.5;
+    font-size: 1rem;
+    line-height: 1.6;
 }
 
 .composer textarea::placeholder {
-    color: #969ca5;
+    color: var(--muted);
 }
 
 .composer.composing textarea {
@@ -956,8 +990,8 @@ summary {
 }
 
 .draft-label {
-    font-size: .6875rem;
-    color: #979da5;
+    font-size: .75rem;
+    color: var(--muted);
 }
 
 .note-options>summary {
@@ -972,7 +1006,7 @@ summary {
 
 .composer-correction {
     color: var(--muted);
-    font-size: .75rem;
+    font-size: .8125rem;
     margin-bottom: 8px;
 }
 
@@ -984,7 +1018,7 @@ summary {
 
 .signature-step label {
     font-size: .8125rem;
-    color: #6e7780;
+    color: var(--muted);
 }
 
 .signature-step input {
@@ -1034,7 +1068,7 @@ summary {
 
 .document-open {
     color: var(--ink);
-    font-weight: 550;
+    font-weight: 500;
     font-size: .9375rem;
     text-decoration: none;
     display: flex;
@@ -1047,8 +1081,9 @@ summary {
 }
 
 .link-card p {
-    color: #7a818a;
-    font-size: .8125rem;
+    color: var(--muted);
+    font-size: .875rem;
+    line-height: 1.6;
     margin-top: 12px;
     overflow-wrap: anywhere;
 }
@@ -1091,12 +1126,12 @@ summary {
 }
 
 .link-composer #link-title {
-    font-weight: 550;
+    font-weight: 500;
     min-height: 30px;
 }
 
 .link-composer #link-title::placeholder {
-    color: #858c94;
+    color: var(--muted);
     font-weight: 400;
 }
 
@@ -1659,18 +1694,19 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 
 .floor-selector button {
     background: transparent;
-    font-size: .75rem;
+    font-size: .8125rem;
+    font-variant-numeric: tabular-nums;
     min-height: 44px;
     padding: 8px;
     flex-shrink: 0;
     overflow-wrap: anywhere;
-    color: #66717d;
+    color: var(--muted);
 }
 
 .floor-selector button[aria-current=true] {
     background: #fff;
     color: #086bcb;
-    font-weight: 650;
+    font-weight: 600;
     box-shadow: 0 1px 6px #1d293518;
 }
 
@@ -1713,8 +1749,8 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 }
 
 .edit-attribution {
-    font-size: .75rem;
-    color: #707982;
+    font-size: .8125rem;
+    color: var(--muted);
     max-width: 80%;
 }
 
@@ -1727,7 +1763,7 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 }
 
 .tombstone {
-    color: #69747f;
+    color: var(--muted);
     font-size: .8125rem;
     line-height: 1.6;
     background: #fafbfc;
@@ -1736,7 +1772,7 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 .tombstone time {
     display: block;
     margin-top: 7px;
-    font-size: .75rem;
+    font-size: .8125rem;
 }
 
 .composer.composing textarea {
@@ -1902,13 +1938,13 @@ body.editing {
 
 .status-picker {
     position: relative;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
 }
 
 .status-toggle {
     min-height: 44px;
-    max-width: 138px;
+    max-width: 166px;
     padding: 8px 10px;
     gap: 8px;
     border-radius: 7px;
@@ -1917,10 +1953,12 @@ body.editing {
 }
 
 .status-toggle .status-badge {
-    font-size: .75rem;
+    min-width: 0;
+    font-size: .8125rem;
     text-align: left;
     white-space: normal;
     line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .status-symbol {
@@ -2094,8 +2132,8 @@ body.editing {
     min-height: 52px;
     white-space: pre-wrap;
     overflow-wrap: break-word;
-    line-height: 1.5;
-    font-size: .9375rem;
+    line-height: 1.6;
+    font-size: 1rem;
     cursor: text;
 }
 .composing .ProseMirror {
@@ -2106,7 +2144,7 @@ body.editing {
 }
 .is-empty .ProseMirror:before {
     content: attr(data-placeholder);
-    color: #969ca5;
+    color: var(--muted);
     pointer-events: none;
     position: absolute;
     inset: 0 0 auto;
@@ -2126,10 +2164,12 @@ body.editing {
 .note-body h1, .note-body h2, .note-body h3 {
     margin: 16px 0 8px;
     line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -.015em;
 }
-.note-body h1 { font-size: 1.3rem; }
-.note-body h2 { font-size: 1.15rem; }
-.note-body h3 { font-size: 1rem; }
+.note-body h1 { font-size: 1.375rem; }
+.note-body h2 { font-size: 1.25rem; }
+.note-body h3 { font-size: 1.125rem; }
 .note-body ul, .note-body ol {
     padding-left: 24px;
     margin-block: 10px;
@@ -2163,7 +2203,7 @@ body.editing {
 }
 .view-presets h3 {
     font-size: .8125rem;
-    font-weight: 550;
+    font-weight: 600;
     margin-bottom: 10px;
 }
 .view-presets {
@@ -2316,7 +2356,7 @@ body.editing .sidebar-footer {
     align-items: center;
     gap: 7px;
     font-size: .8125rem;
-    font-weight: 550;
+    font-weight: 500;
     color: var(--accent);
 }
 
@@ -2494,7 +2534,7 @@ body.editing .exhibit-entry {
     padding: 6px 0;
     text-align: left;
     justify-content: flex-start;
-    font-weight: 550;
+    font-weight: 500;
 }
 
 .instance-name small {
@@ -2518,7 +2558,7 @@ body.editing .exhibit-entry {
     cursor: pointer;
     font-size: .8125rem;
     font-weight: 500;
-    color: #697078;
+    color: var(--muted);
     padding-block: 10px;
     min-height: 38px;
 }
@@ -2537,6 +2577,7 @@ body.editing .exhibit-entry {
 #structure-panel .vector input {
     padding: 8px;
     min-height: 38px;
+    font-variant-numeric: tabular-nums;
 }
 #structure-panel .vector .grid3 {
     gap: 8px;
@@ -2616,7 +2657,7 @@ body.editing .exhibit-entry {
 }
 .model-text strong {
     font-size: .875rem;
-    font-weight: 550;
+    font-weight: 500;
 }
 .model-import {
     margin-top: 24px;

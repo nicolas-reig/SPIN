@@ -10,7 +10,7 @@ import {
 } from 'three/addons/controls/TransformControls.js';
 
 import { cameraMode, cameraOffset, navigationGesture } from './camera.js';
-import { STATUS_COLORS, SELECTION_COLORS } from './domain.js';
+import { STATUS_COLORS, SELECTION_COLORS, validTransform } from './domain.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -61,12 +61,14 @@ export class MapView {
     constructor(container, {
         onSelect = () => {},
         onTransform = () => {},
+        onInvalidTransform = () => {},
         onState = () => {},
         onMode = () => {}
     } = {}) {
         this.container = container;
         this.onSelect = onSelect;
         this.onTransform = onTransform;
+        this.onInvalidTransform = onInvalidTransform;
         this.onState = onState;
         this.onMode = onMode;
         this.scene = new THREE.Scene();
@@ -128,14 +130,22 @@ export class MapView {
         this.scene.add(this.transform.getHelper());
         this.transform.addEventListener('dragging-changed', e => {
             this.controls.enabled = !e.value;
-            if (!e.value && this.transform.object) {
+            if (!e.value && this.transform.object && !this.cancelledTransform) {
                 const o = this.transform.object;
-                this.onTransform(o.userData.exhibitId, o.userData.instanceIndex, {
+                const transform = {
                     position: o.position.toArray(),
                     rotation: [o.rotation.x, o.rotation.y, o.rotation.z].map(v => v * 180 / Math.PI),
                     scale: o.scale.toArray()
-                });
+                };
+                if (validTransform(transform)) this.onTransform(o.userData.exhibitId, o.userData.instanceIndex, transform);
+                else {
+                    const previous = this.data.exhibits.find(record => record.id === o.userData.exhibitId)?.models[o.userData.instanceIndex]?.transform;
+                    if (previous) applyTransform(o, previous);
+                    this.onInvalidTransform();
+                    this.requestRender();
+                }
             }
+            if (!e.value) this.cancelledTransform = false;
         });
         this.transform.addEventListener('change', () => this.requestRender());
         this.observer = new ResizeObserver(() => this.resize());
@@ -144,6 +154,7 @@ export class MapView {
         canvas.addEventListener('pointerdown', e => {
             e.preventDefault();
             getSelection()?.removeAllRanges();
+            this.pointerId = e.pointerId;
             this.down = [e.clientX, e.clientY];
             this.orbitFromTop = navigationGesture(e.button, e.shiftKey, this.mode).leaveTop ? { button: e.button, shiftKey: e.shiftKey, clientX: e.clientX, clientY: e.clientY } : null;
         });
@@ -322,6 +333,30 @@ export class MapView {
     setActiveInstance(index) {
         this.activeInstance = index;
         this.highlight(this.selected);
+    }
+    cancelTransform() {
+        if (!this.transform?.dragging) return false;
+        this.cancelledTransform = true;
+        this.transform.reset();
+        this.down = null;
+        this.orbitFromTop = null;
+        this.transform.pointerUp(null);
+        const canvas = this.renderer?.domElement;
+        if (typeof PointerEvent === 'function' && canvas?.hasPointerCapture(this.pointerId)) {
+            canvas.dispatchEvent(new PointerEvent('pointerup', { pointerId: this.pointerId, button: 0 }));
+        }
+        this.requestRender();
+        return true;
+    }
+    placementPosition(transform) {
+        if (!this.controls) return [0, 0, 0];
+        const group = new THREE.Object3D();
+        applyTransform(group, transform);
+        group.updateMatrix();
+        this.root.updateMatrixWorld(true);
+        const matrix = new THREE.Matrix4().multiplyMatrices(this.root.matrixWorld, group.matrix).invert();
+        const position = this.controls.target.clone().applyMatrix4(matrix);
+        return [position.x, 0, position.z];
     }
     setTool(tool, snap = false) {
         this.tool = tool;

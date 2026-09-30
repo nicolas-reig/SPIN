@@ -9,7 +9,8 @@ export class Api {
                 cache: 'no-store',
                 ...options
             });
-        } catch {
+        } catch (error) {
+            if (error.name === 'AbortError') throw error;
             throw Object.assign(Error('offline'), {
                 key: 'offline'
             });
@@ -17,7 +18,8 @@ export class Api {
         let result;
         try {
             result = await response.json();
-        } catch {
+        } catch (error) {
+            if (error.name === 'AbortError') throw error;
             throw Object.assign(Error('storage'), {
                 key: 'storage'
             });
@@ -32,9 +34,10 @@ export class Api {
     async load() {
         return validateSnapshot(await this.request());
     }
-    async save(payload) {
+    async save(payload, options = {}) {
         const r = await this.request('api.php', {
             method: 'POST',
+            signal: options.signal,
             headers: {
                 'Content-Type': 'application/json',
                 'X-Hub-Request': '1'
@@ -44,7 +47,7 @@ export class Api {
         validateSnapshot(r.snapshot);
         return r;
     }
-    async upload(file, kind, signature, id, dimensions = null, exhibitId = null) {
+    async upload(file, kind, signature, id, dimensions = null, exhibitId = null, options = {}) {
         const f = new FormData();
         f.set('file', file);
         f.set('kind', kind);
@@ -55,6 +58,7 @@ export class Api {
         if (dimensions) f.set('dimensions', JSON.stringify(dimensions));
         return this.request('api.php', {
             method: 'POST',
+            signal: options.signal,
             headers: {
                 'X-Hub-Request': '1'
             },

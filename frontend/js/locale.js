@@ -1,6 +1,5 @@
 export const dictionary = {
     de: {
-        unset: 'Nicht festgelegt',
         noFloor: 'Keine Ebene',
         floorNumber: 'Ebenennummer',
         duplicateName: 'Dieser Ordnername wird bereits verwendet.',
@@ -219,7 +218,6 @@ export const dictionary = {
         no: 'Nein'
     },
     en: {
-        unset: 'Not set',
         noFloor: 'No floor',
         floorNumber: 'Floor number',
         duplicateName: 'That folder name is already in use.',

@@ -400,7 +400,7 @@ final class Store
                 'id' => $id,
                 'name' => $id,
                 'floorId' => $floorId,
-                'status' => in_array($meta['status'] ?? null, ['ok', 'problem', 'retired'], true) ? $meta['status'] : 'unset',
+                'status' => in_array($meta['status'] ?? null, ['ok', 'problem', 'retired'], true) ? $meta['status'] : 'ok',
                 'statusBy' => is_string($meta['statusBy'] ?? null) ? $meta['statusBy'] : '',
                 'lastEditedBy' => is_string($meta['lastEditedBy'] ?? null) ? $meta['lastEditedBy'] : '',
                 'transform' => self::readTransform($meta['transform'] ?? null),
@@ -434,8 +434,8 @@ final class Store
         if ($floor !== null && $floor !== '' && !in_array($floor, $floorIds, true)) {
             throw new ApiError('invalidFloor');
         }
-        $status = $record['status'] ?? 'unset';
-        if (!in_array($status, ['unset', 'ok', 'problem', 'retired'], true)) {
+        $status = $record['status'] ?? 'ok';
+        if (!in_array($status, ['ok', 'problem', 'retired'], true)) {
             throw new ApiError('invalidStatus');
         }
         $models = [];
@@ -460,7 +460,7 @@ final class Store
             'views' => (object)self::views($record['views'] ?? []),
             'lastEditedBy' => $signature
         ];
-        $statusBy = $status !== ($old['status'] ?? 'unset') ? $signature : ($old['statusBy'] ?? '');
+        $statusBy = $status !== ($old['status'] ?? 'ok') ? $signature : ($old['statusBy'] ?? '');
         if ($statusBy !== '') {
             $meta['statusBy'] = $statusBy;
         }
@@ -616,7 +616,7 @@ final class Store
                         if (($payload['baseRevision'] ?? null) !== $record['revision']) {
                             throw new ApiError('conflict', 409);
                         }
-                        if (!in_array($payload['status'], ['unset', 'ok', 'problem', 'retired'], true)) {
+                        if (!in_array($payload['status'], ['ok', 'problem', 'retired'], true)) {
                             throw new ApiError('invalidStatus');
                         }
                     }
@@ -662,7 +662,7 @@ final class Store
 
     private function status(string $id, array $record, mixed $status, string $signature): void
     {
-        if (!in_array($status, ['unset', 'ok', 'problem', 'retired'], true)) {
+        if (!in_array($status, ['ok', 'problem', 'retired'], true)) {
             throw new ApiError('invalidStatus');
         }
         if ($record['status'] === $status) {

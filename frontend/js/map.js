@@ -412,17 +412,10 @@ export class MapView {
     viewportBounds() {
         const rect = this.renderer.domElement.getBoundingClientRect();
         if (!rect.width || !rect.height) return { left: -.94, right: .94, top: .94, bottom: -.94 };
-        let left = rect.left, right = rect.right;
-        const workspace = this.container.closest('#workspace');
-        if (workspace && matchMedia('(min-width: 861px)').matches) {
-            left = Math.max(left, workspace.querySelector('#sidebar').getBoundingClientRect().right);
-            const inspector = workspace.querySelector('#inspector');
-            if (!inspector.inert) right = Math.min(right, workspace.getBoundingClientRect().right - inspector.offsetWidth);
-        }
-        const margin = Math.min(16, (right - left) * .05);
+        const inset = Math.min(16, rect.width * .05) / rect.width * 2;
         return {
-            left: (left - rect.left + margin) / rect.width * 2 - 1,
-            right: (right - rect.left - margin) / rect.width * 2 - 1,
+            left: -1 + inset,
+            right: 1 - inset,
             top: .94,
             bottom: -.94
         };

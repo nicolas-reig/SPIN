@@ -2204,11 +2204,18 @@ body.editing {
         --inspector-width: clamp(320px, var(--reader), 60vw);
         --inspector-overlay: var(--inspector-width);
     }
+    #sidebar {
+        grid-column: 1;
+        grid-row: 1;
+    }
+    #map-panel {
+        grid-column: 1 / -1;
+    }
     #map-panel:before {
-        inset: 0 0 0 -24px;
+        inset: 0;
     }
     #map-stage {
-        margin: 0 0 0 -24px;
+        margin: 0;
     }
     #inspector {
         position: absolute;
@@ -2226,7 +2233,7 @@ body.editing {
     }
     #map-heading {
         right: calc(var(--inspector-overlay) + 18px);
-        max-width: calc(100% - var(--inspector-overlay) - 28px);
+        max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
     }
     #editbar {
         max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
@@ -2235,14 +2242,15 @@ body.editing {
         top: calc(var(--editbar-height, 0px) + 36px);
     }
     #map-controls {
-        left: calc((100% - var(--inspector-overlay)) / 2);
-        max-width: calc(100% - var(--inspector-overlay) - 28px);
+        left: calc((100% + var(--list) - var(--inspector-overlay)) / 2);
+        max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
     }
     #map-controls .map-toolbar {
         flex-wrap: wrap;
         justify-content: center;
     }
     #map-message {
+        left: calc(var(--list) + 36px);
         right: calc(var(--inspector-overlay) + 36px);
     }
     body.inspector-hidden #inspector {
@@ -2266,6 +2274,25 @@ body.editing {
     }
 }
 @media (max-width: 860px) {
+    #map-panel {
+        position: fixed;
+        inset: 0;
+    }
+    #map-panel:before {
+        inset: 0;
+    }
+    #map-heading {
+        max-height: calc(100% - 190px - env(safe-area-inset-bottom));
+    }
+    body.editing #map-heading {
+        top: calc(var(--editbar-height, 0px) + 24px);
+    }
+    #map-controls {
+        bottom: calc(87px + env(safe-area-inset-bottom));
+    }
+    #map-message {
+        bottom: calc(153px + env(safe-area-inset-bottom));
+    }
     body.inspector-hidden #inspector { display: none; }
     .composer-tools .toolbar { width: 100%; justify-content: space-between; }
     .composer-tools .icon-button { width: 40px; min-width: 0; height: 44px; min-height: 44px; }

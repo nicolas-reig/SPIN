@@ -77,6 +77,9 @@ function enhance(select) {
     const label = select.getAttribute('aria-label') || select.labels?.[0]?.textContent || select.title;
     if (label) button.setAttribute('aria-label', label);
     button.title = select.title || label || '';
+    for (const attribute of ['aria-description', 'aria-describedby']) {
+        if (select.hasAttribute(attribute)) button.setAttribute(attribute, select.getAttribute(attribute));
+    }
     select.after(button);
     const sync = () => {
         button.replaceChildren();

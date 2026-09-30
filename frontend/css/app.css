@@ -1879,8 +1879,8 @@ body.editing {
 
 /* Status colors are shared with the model palette. */
 .status-symbol {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     padding: 0;
 }

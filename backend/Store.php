@@ -229,7 +229,7 @@ final class Store
                 throw new ApiError('invalidView');
             }
             $result[$key]['span'] = (float)$view['span'];
-            $result[$key]['mode'] = $key === 'top' ? 'top' : (($view['mode'] ?? '') === 'iso' ? 'iso' : 'perspective');
+            $result[$key]['mode'] = $key === 'top' ? 'top' : 'perspective';
         }
         return $result;
     }

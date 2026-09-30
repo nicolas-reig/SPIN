@@ -1005,6 +1005,10 @@ summary {
     padding: 18px 22px;
 }
 
+.link-search {
+    margin-bottom: 18px;
+}
+
 .link-composer input,
 .link-composer textarea {
     display: block;

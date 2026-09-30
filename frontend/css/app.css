@@ -2182,18 +2182,11 @@ body.editing {
     .ProseMirror { font-size: 16px; }
     #map-controls .select-button { max-width: 110px; }
 }
-.area-membership {
-    border: 0;
-    padding: 0;
-    margin: 16px 0 22px;
-}
-.area-membership legend, .view-presets h3 {
+.view-presets h3 {
     font-size: .8125rem;
     font-weight: 550;
     margin-bottom: 10px;
 }
-.area-membership .check { margin-block: 8px; }
-.area-membership p { margin-top: 8px; }
 .view-presets {
     margin-block: 22px;
 }
@@ -2246,4 +2239,49 @@ body.editing {
         #inspector { transition: transform 280ms cubic-bezier(.22,.68,0,1), visibility 0s; }
         body.inspector-hidden #inspector { transition-delay: 0s, 280ms; }
     }
+}
+
+.status-symbol.unset {
+    background: var(--status-unset);
+}
+.instance-heading {
+    margin: 18px 0 10px;
+}
+.model-instance {
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 16px;
+    background: #ffffffb8;
+    box-shadow: 0 2px 8px #23334109;
+}
+.model-instance.active {
+    box-shadow: 0 2px 8px #23334109, 0 0 0 1px #8056cb36;
+}
+.model-instance .row {
+    gap: 6px;
+}
+.model-instance .select-wrap {
+    flex: 1;
+    min-width: 0;
+}
+.model-instance .select-button {
+    width: 100%;
+}
+.model-instance details {
+    margin-top: 10px;
+}
+.model-instance summary, .exhibit-transform summary {
+    cursor: pointer;
+    font-size: .8125rem;
+    color: var(--muted);
+    padding-block: 6px;
+}
+.model-instance .vector {
+    margin-block: 12px;
+}
+.exhibit-transform {
+    margin-block: 18px;
+}
+#structure-form .grid2 {
+    gap: 12px;
 }

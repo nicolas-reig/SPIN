@@ -364,7 +364,7 @@ async function select(id, instanceIndex = 0) {
     const e = data().exhibits.find(x => x.id === id);
     if (!e) {
         selected = null;
-        renderList(); renderInspector(); updateMap(); syncUrl();
+        renderList(); renderInspector(); renderMapUI(); updateMap(); syncUrl();
         return;
     }
     const changed = Boolean(e.floorId && floorId !== e.floorId);
@@ -1559,40 +1559,53 @@ document.addEventListener('keydown', event => {
     }
 });
 
-$('#workspace').addEventListener('transitionend', event => {
-    if (event.target === $('#workspace') && event.propertyName === 'grid-template-columns' && selected && !edit) map?.focus(true);
-});
-
 $('#dialog').addEventListener('cancel', () => { dialogCleanup?.(); dialogCleanup = null; });
+new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--editbar-height', $('#editbar').offsetHeight + 'px');
+}).observe($('#editbar'));
 const resizer = $('#resizer');
+new ResizeObserver(() => {
+    if (innerWidth < 861) return;
+    resizer.setAttribute('aria-valuemin', '320');
+    resizer.setAttribute('aria-valuemax', Math.round(innerWidth * .6));
+    resizer.setAttribute('aria-valuenow', $('#inspector').clientWidth);
+}).observe($('#inspector'));
+let resizeStart = null;
+function resizeInspector(value) {
+    const width = Math.max(320, Math.min(innerWidth * .6, value));
+    document.documentElement.style.setProperty('--reader', width + 'px');
+}
 resizer.addEventListener('pointerdown', event => {
     event.preventDefault();
     getSelection()?.removeAllRanges();
+    resizeStart = { x: event.clientX, width: $('#inspector').clientWidth };
     resizer.setPointerCapture(event.pointerId);
     resizer.focus({ preventScroll: true });
     document.body.classList.add('resizing');
 });
 resizer.addEventListener('pointermove', event => {
-    if (!resizer.hasPointerCapture(event.pointerId)) return;
+    if (!resizeStart || !resizer.hasPointerCapture(event.pointerId)) return;
     event.preventDefault();
     getSelection()?.removeAllRanges();
-    const width = Math.min(innerWidth * .6, Math.max(320, innerWidth - event.clientX));
-    document.documentElement.style.setProperty('--reader', width + 'px');
-    resizer.setAttribute('aria-valuenow', Math.round(width));
+    resizeInspector(resizeStart.width + resizeStart.x - event.clientX);
 });
 const endResize = event => {
     if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+    resizeStart = null;
     document.body.classList.remove('resizing');
 };
 resizer.addEventListener('pointerup', endResize);
 resizer.addEventListener('pointercancel', endResize);
-resizer.addEventListener('lostpointercapture', () => document.body.classList.remove('resizing'));
+resizer.addEventListener('lostpointercapture', () => {
+    resizeStart = null;
+    document.body.classList.remove('resizing');
+});
 resizer.addEventListener('dragstart', event => event.preventDefault());
 resizer.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     const width = $('#inspector').clientWidth + (event.key === 'ArrowLeft' ? 24 : -24);
-    document.documentElement.style.setProperty('--reader', Math.max(320, Math.min(innerWidth * .6, width)) + 'px');
+    resizeInspector(width);
 });
 window.addEventListener('beforeunload', event => {
     persistDrafts(); persistEdit();

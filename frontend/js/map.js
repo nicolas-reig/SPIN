@@ -143,7 +143,11 @@ export class MapView {
         const w = this.container.clientWidth,
             h = this.container.clientHeight;
         if (!w || !h) return;
-        this.renderer.setSize(w, h);
+        if (this.width !== w || this.height !== h) {
+            this.width = w;
+            this.height = h;
+            this.renderer.setSize(w, h);
+        }
         if (this.camera.isPerspectiveCamera) this.camera.aspect = w / h;
         else {
             const span = this.orthoSpan || 25;
@@ -403,24 +407,81 @@ export class MapView {
         const position = new THREE.Vector3(...preset.position);
         this.frameTarget(center, center.distanceTo(position), preset.span, true, position);
     }
-    isVisible(id) {
+    viewportBounds() {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        if (!rect.width || !rect.height) return { left: -.94, right: .94, top: .94, bottom: -.94 };
+        let left = rect.left, right = rect.right;
+        const workspace = this.container.closest('#workspace');
+        if (workspace && matchMedia('(min-width: 861px)').matches) {
+            left = Math.max(left, workspace.querySelector('#sidebar').getBoundingClientRect().right);
+            const inspector = workspace.querySelector('#inspector');
+            if (!inspector.inert) right = Math.min(right, workspace.getBoundingClientRect().right - inspector.offsetWidth);
+        }
+        const margin = Math.min(16, (right - left) * .05);
+        return {
+            left: (left - rect.left + margin) / rect.width * 2 - 1,
+            right: (right - rect.left - margin) / rect.width * 2 - 1,
+            top: .94,
+            bottom: -.94
+        };
+    }
+    isVisible(id, camera = this.camera) {
         const object = this.objects.get(id);
         if (!object) return false;
-        this.camera.updateMatrixWorld();
+        camera.updateMatrixWorld();
+        const bounds = this.viewportBounds();
         const box = new THREE.Box3().setFromObject(object);
-        const center = box.getCenter(new THREE.Vector3()).project(this.camera);
+        const center = box.getCenter(new THREE.Vector3()).project(camera);
         if (center.z < -1 || center.z > 1) return false;
         for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
-            const point = new THREE.Vector3(x, y, z).project(this.camera);
-            if (Math.abs(point.x) > .94 || Math.abs(point.y) > .94 || point.z > 1 || point.z < -1) return false;
+            const point = new THREE.Vector3(x, y, z).project(camera);
+            if (point.x < bounds.left || point.x > bounds.right || point.y < bounds.bottom || point.y > bounds.top || point.z > 1 || point.z < -1) return false;
         }
         return true;
     }
+    focusView(id, preset) {
+        const aspect = this.width / this.height;
+        const perspective = preset.mode === 'perspective';
+        const camera = perspective ? new THREE.PerspectiveCamera(38, aspect, .05, 2000) :
+            new THREE.OrthographicCamera(-preset.span * aspect, preset.span * aspect, preset.span, -preset.span, .05, 2000);
+        const target = new THREE.Vector3(...preset.target);
+        camera.position.fromArray(preset.position);
+        camera.lookAt(target);
+        camera.updateMatrixWorld();
+        if (this.isVisible(id, camera)) return preset;
+        const box = new THREE.Box3().setFromObject(this.objects.get(id));
+        const bounds = this.viewportBounds();
+        const points = [];
+        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+            points.push(new THREE.Vector3(x, y, z).project(camera));
+        }
+        const scale = Math.max(1,
+            (Math.max(...points.map(p => p.x)) - Math.min(...points.map(p => p.x))) / (bounds.right - bounds.left),
+            (Math.max(...points.map(p => p.y)) - Math.min(...points.map(p => p.y))) / (bounds.top - bounds.bottom));
+        if (perspective) {
+            camera.position.sub(target).multiplyScalar(scale).add(target);
+        } else {
+            camera.left *= scale;
+            camera.right *= scale;
+            camera.top *= scale;
+            camera.bottom *= scale;
+        }
+        camera.updateProjectionMatrix();
+        camera.updateMatrixWorld();
+        const center = box.getCenter(new THREE.Vector3());
+        const projected = center.clone().project(camera);
+        const depth = -center.clone().applyMatrix4(camera.matrixWorldInverse).z;
+        const halfWidth = (perspective ? Math.tan(THREE.MathUtils.degToRad(19)) * depth : preset.span * scale) * aspect;
+        const shift = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
+            .multiplyScalar((projected.x - (bounds.left + bounds.right) / 2) * halfWidth);
+        return { ...preset, target: target.add(shift).toArray(), position: camera.position.add(shift).toArray(), span: preset.span * scale };
+    }
     focus(onlyWhenHidden = false) {
         const exhibit = this.data.exhibits.find(e => e.id === this.selected);
-        if (!exhibit?.models.length || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
+        if (!exhibit?.models.length || !this.objects.has(exhibit.id) || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
         const key = this.mode === 'top' ? 'top' : 'three';
-        this.applyView(exhibit.views?.[key] || this.fallbackView([exhibit.id]));
+        const preset = exhibit.views?.[key] || this.fallbackView([exhibit.id]);
+        this.applyView(this.focusView(exhibit.id, preset));
     }
     focusFloor() {
         const ids = this.data.exhibits.filter(exhibit => exhibit.floorId === this.floor.id).map(exhibit => exhibit.id);

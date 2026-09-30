@@ -23,7 +23,7 @@ import {
 import { readNoteImage } from './images.js';
 import { createNoteEditor } from './editor.js';
 import { installSelects } from './select.js';
-import { safeUrl } from './domain.js';
+import { safeUrl, opensInBrowser } from './domain.js';
 let noteEditor = null;
 installSelects();
 const $ = s => document.querySelector(s),
@@ -569,7 +569,7 @@ function renderLinks(e, element) {
         </form>
         ${e.links.map(link => `
             <article class="link-card">
-                <a class="document-open" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span><span aria-hidden="true">↗</span></a>
+                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span><span aria-hidden="true">↗</span></a>
                 ${link.description ? `<p>${esc(link.description)}</p>` : ''}
                 <div class="link-actions">
                     <button type="button" class="quiet" data-copy="${esc(link.id)}" title="${esc(link.url)}">${esc(t('copy'))}</button>
@@ -619,7 +619,7 @@ function renderLinks(e, element) {
 function noteLinkDialog() {
     if (!noteEditor) return;
     const editor = noteEditor, link = editor.link();
-    showDialog('link', `<div class="field"><label for="note-link-url">URL</label><input id="note-link-url" name="url" type="url" value="${esc(link.url)}" placeholder="https://"></div>${link.text ? '' : `<div class="field"><label for="note-link-text">${esc(t('title'))}</label><input id="note-link-text" name="text"></div>`}${footer('apply')}`, async form => {
+    showDialog('link', `<div class="field"><label for="note-link-url">URL</label><input id="note-link-url" name="url" type="text" inputmode="url" value="${esc(link.url)}" placeholder="${esc(t('url'))}"></div>${link.text ? '' : `<div class="field"><label for="note-link-text">${esc(t('title'))}</label><input id="note-link-text" name="text"></div>`}${footer('apply')}`, async form => {
         const url = String(form.get('url')).trim();
         if (url && !safeUrl(url)) throw Error('invalidUrl');
         closeDialog();

@@ -3,24 +3,38 @@ import { escape as esc } from './markdown.js';
 import { t } from './locale.js';
 import { icon } from './icons.js';
 
+export function editHelp(key) {
+    const text = esc(t(key));
+    return `title="${text}" aria-description="${text}"`;
+}
+
 export function vectorFields(transform, attributes = '', scope = 'group') {
-    return ['position', 'rotation', 'scale'].map(key => `
-        <div class="vector"><h3>${esc(t(key))}</h3><div class="grid3">
+    return ['position', 'rotation', 'scale'].map(key => {
+        const help = editHelp(key + (scope === 'group' ? 'GroupHint' : 'InstanceHint'));
+        return `
+        <div class="vector"><h3 ${help}>${esc(t(key))}</h3><div class="grid3">
             ${['X', 'Y', 'Z'].map((axis, index) => {
                 const id = `transform-${scope}-${key}-${index}`;
-                return `<div><label for="${id}">${axis}</label><input id="${id}" aria-label="${esc(t(key) + ' · ' + axis)}" type="number" step="any" min="${key === 'scale' ? '.001' : '-100000'}" max="${key === 'scale' ? '1000' : '100000'}" data-vector="${key}" data-axis="${index}" ${attributes} value="${Number(transform[key][index].toFixed(4))}"></div>`;
+                return `<div><label for="${id}">${axis}</label><input id="${id}" aria-label="${esc(t(key) + ' · ' + axis)}" ${help} type="number" step="any" min="${key === 'scale' ? '.001' : '-100000'}" max="${key === 'scale' ? '1000' : '100000'}" data-vector="${key}" data-axis="${index}" ${attributes} value="${Number(transform[key][index].toFixed(4))}"></div>`;
             }).join('')}
-        </div></div>`).join('');
+        </div></div>`;
+    }).join('');
 }
 
 export function viewPresets(record) {
-    return `<details class="view-presets"><summary>${esc(t('defaultViews'))}</summary>
-        ${['top', 'three'].map(key => `<div class="preset-row">
-            <span class="preset-type" title="${esc(t(key === 'top' ? 'view2D' : 'view3D'))}">${icon(key === 'top' ? 'grid-2x2' : 'box')}<span class="sr-only">${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span></span>
-            <button type="button" class="icon-button" data-preview-view="${key}" aria-label="${esc(t('showView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(record.views?.[key] ? t('showView') : t('viewFallback'))}">${icon('eye')}</button>
-            <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(t('useCurrentView'))}">${icon('camera')}</button>
-            <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(t('automatic'))}" ${record.views?.[key] ? '' : 'disabled'}>${icon('rotate-ccw')}</button>
-        </div>`).join('')}
+    return `<details class="view-presets"><summary ${editHelp('defaultViewsHint')}>${esc(t('defaultViews'))}</summary>
+        ${['top', 'three'].map(key => {
+            const saved = Boolean(record.views?.[key]);
+            const previewHelp = key === 'top'
+                ? saved ? 'previewTopHint' : 'automaticTopHint'
+                : saved ? 'previewThreeHint' : 'automaticThreeHint';
+            return `<div class="preset-row">
+            <span class="preset-type" ${editHelp(key === 'top' ? 'topViewHint' : 'threeViewHint')}>${icon(key === 'top' ? 'grid-2x2' : 'box')}<span class="sr-only">${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span></span>
+            <button type="button" class="icon-button" data-preview-view="${key}" aria-label="${esc(t('showView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(previewHelp)}>${icon('eye')}</button>
+            <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(key === 'top' ? 'captureTopHint' : 'captureThreeHint')}>${icon('camera')}</button>
+            <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(saved ? 'resetViewHint' : 'alreadyAutomaticHint')} ${saved ? '' : 'disabled'}>${icon('rotate-ccw')}</button>
+        </div>`;
+        }).join('')}
     </details>`;
 }
 

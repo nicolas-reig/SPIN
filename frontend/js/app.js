@@ -49,7 +49,7 @@ let snapshot = null,
     gizmo = '',
     axisConstraint = '',
     snap = false,
-    noticeTimer, dialogCleanup = null;
+    noticeTimer, noticeClearTimer, dialogCleanup = null;
 let creation = null, creationOpen = false, editingFloor = null, editConflict = null;
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
@@ -84,10 +84,37 @@ const statusOptions = (value, keep = false) => options([...(keep ? [
 ] : []), ...STATUSES.map(s => [s, t(s)])], value);
 
 function announce(message, action = null, label = 'undo') {
-    $('#notice').innerHTML = `<span>${esc(message)}</span>${action ? button(label, action, 'quiet') : ''}`;
     clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(() => $('#notice').textContent = '', action ? 10000 : 6500);
+    clearTimeout(noticeClearTimer);
+    const notice = $('#notice');
+    notice.classList.remove('is-exiting');
+    notice.inert = false;
+    notice.innerHTML = `<span>${esc(message)}</span>${action ? button(label, action, 'quiet') : ''}`;
+    noticeTimer = setTimeout(dismissNotice, action ? 10000 : 6500);
 }
+
+function clearNotice() {
+    clearTimeout(noticeClearTimer);
+    const notice = $('#notice');
+    notice.replaceChildren();
+    notice.classList.remove('is-exiting');
+    notice.inert = false;
+}
+
+function dismissNotice() {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        clearNotice();
+        return;
+    }
+    const notice = $('#notice');
+    notice.classList.add('is-exiting');
+    notice.inert = true;
+    noticeClearTimer = setTimeout(clearNotice, 220);
+}
+
+$('#notice').addEventListener('animationend', event => {
+    if (event.animationName === 'notice-out' && $('#notice').classList.contains('is-exiting')) clearNotice();
+});
 
 function errorText(e) {
     return t(e.key || e.message || 'storage');
@@ -1871,6 +1898,10 @@ new ResizeObserver(() => {
     document.documentElement.style.setProperty('--editbar-height', $('#editbar').offsetHeight + 'px');
     if (edit) requestAnimationFrame(() => $('#exhibit-list .exhibit-row.active')?.scrollIntoView({ block: 'nearest' }));
 }).observe($('#editbar'));
+new ResizeObserver(() => {
+    const height = $('#map-controls').offsetHeight;
+    if (height) document.documentElement.style.setProperty('--map-controls-height', height + 'px');
+}).observe($('#map-controls'));
 const resizer = $('#resizer');
 new ResizeObserver(() => {
     if (innerWidth < 861) return;

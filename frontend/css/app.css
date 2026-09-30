@@ -11,6 +11,9 @@
     --red: #b44c4d;
     --slate: #727b85;
     --reader: 366px;
+    --map-ui-center: 50%;
+    --map-ui-width: calc(100% - 28px);
+    --map-controls-bottom: 25px;
     --list: 230px;
     --radius: 11px;
     --shadow: 0 2px 4px #202b3304, 0 8px 24px #202b3309, 0 20px 50px #202b3308;
@@ -600,11 +603,11 @@ summary {
 #map-controls {
     width: max-content;
     position: absolute;
-    bottom: 25px;
-    left: 50%;
+    bottom: var(--map-controls-bottom);
+    left: var(--map-ui-center);
     transform: translateX(-50%);
     z-index: 5;
-    max-width: calc(100% - 28px);
+    max-width: var(--map-ui-width);
 }
 
 .map-toolbar {
@@ -1150,8 +1153,8 @@ summary {
 
 #notice {
     position: fixed;
-    bottom: 88px;
-    left: 50%;
+    bottom: calc(var(--map-controls-bottom) + var(--map-controls-height, 46px) + 12px);
+    left: var(--map-ui-center);
     transform: translateX(-50%);
     background: #303b47;
     color: #fff;
@@ -1160,7 +1163,13 @@ summary {
     font-size: .875rem;
     box-shadow: var(--shadow);
     z-index: 30;
-    max-width: min(560px, 88vw);
+    max-width: min(560px, var(--map-ui-width));
+    overflow-wrap: anywhere;
+    pointer-events: auto;
+}
+
+#notice.is-exiting {
+    pointer-events: none;
 }
 
 #notice:empty {
@@ -1543,10 +1552,6 @@ dialog::backdrop {
         top: 22px;
     }
 
-    #map-controls {
-        bottom: 22px;
-    }
-
     .map-toolbar .icon-button {
         width: 37px;
         height: 42px;
@@ -1559,10 +1564,6 @@ dialog::backdrop {
     }
 
 
-
-    #notice {
-        bottom: 90px;
-    }
 
     dialog {
         max-height: calc(100dvh - 22px);
@@ -1820,8 +1821,22 @@ body.editing {
     .panel-content, .floor-selector, dialog[open] {
         animation: surface-in 180ms ease-out;
     }
-    .composer-expanded, .signature-step, .tombstone, #notice:not(:empty) {
+    .composer-expanded, .signature-step, .tombstone {
         animation: surface-in 160ms ease-out;
+    }
+    #notice:not(:empty) {
+        animation: notice-in 180ms ease-out;
+    }
+    #notice.is-exiting {
+        animation: notice-out 180ms ease-in both;
+    }
+    @keyframes notice-in {
+        from { opacity: 0; transform: translate(-50%, 6px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
+    }
+    @keyframes notice-out {
+        from { opacity: 1; transform: translate(-50%, 0); }
+        to { opacity: 0; transform: translate(-50%, 6px); }
     }
     .composer textarea {
         transition: height 140ms ease-out;
@@ -2164,6 +2179,8 @@ body.editing {
     body {
         --inspector-width: clamp(320px, var(--reader), 60vw);
         --inspector-overlay: var(--inspector-width);
+        --map-ui-center: calc((100% + var(--list) - var(--inspector-overlay)) / 2);
+        --map-ui-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
     }
     #sidebar {
         grid-column: 1;
@@ -2197,8 +2214,8 @@ body.editing {
         max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
     }
     #map-controls {
-        left: calc((100% + var(--list) - var(--inspector-overlay)) / 2);
-        max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
+        left: var(--map-ui-center);
+        max-width: var(--map-ui-width);
     }
     #map-controls .map-toolbar {
         flex-wrap: wrap;
@@ -2221,13 +2238,16 @@ body.editing {
         #inspector { transition: transform 280ms cubic-bezier(.22,.68,0,1); }
         #resizer { transition: transform 280ms cubic-bezier(.22,.68,0,1), opacity 180ms; }
         #map-heading { transition: right 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
-        #map-controls { transition: left 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
+        #map-controls, #notice { transition: left 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
         #map-message { transition: right 280ms cubic-bezier(.22,.68,0,1); }
-        body.resizing :is(#map-heading, #map-controls, #map-message),
-        body:has(#resizer:focus) :is(#map-heading, #map-controls, #map-message) { transition: none; }
+        body.resizing :is(#map-heading, #map-controls, #map-message, #notice),
+        body:has(#resizer:focus) :is(#map-heading, #map-controls, #map-message, #notice) { transition: none; }
     }
 }
 @media (max-width: 860px) {
+    body {
+        --map-controls-bottom: calc(87px + env(safe-area-inset-bottom));
+    }
     #map-panel {
         position: fixed;
         inset: 0;
@@ -2237,9 +2257,6 @@ body.editing {
     }
     #map-heading {
         max-height: calc(100% - 190px - env(safe-area-inset-bottom));
-    }
-    #map-controls {
-        bottom: calc(87px + env(safe-area-inset-bottom));
     }
     #map-message {
         bottom: calc(153px + env(safe-area-inset-bottom));
@@ -2683,8 +2700,8 @@ body.editing .exhibit-entry {
         top: 24px;
         max-height: calc(100% - var(--editbar-height, 0px) - 215px);
     }
-    body.editing #map-controls {
-        bottom: calc(93px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
+    body.editing {
+        --map-controls-bottom: calc(93px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
     }
     .map-toolbar {
         flex-wrap: wrap;
@@ -2727,7 +2744,7 @@ body.editing .exhibit-entry {
     .conflict-card {
         padding: 16px;
     }
-    #notice {
+    body:not([data-view=map]) #notice {
         bottom: calc(91px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
     }
 }

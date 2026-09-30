@@ -244,7 +244,7 @@ summary {
 #workspace {
     position: relative;
     display: grid;
-    grid-template-columns: var(--list) minmax(0, 1fr) 0 var(--reader);
+    grid-template-columns: var(--list) minmax(0, 1fr);
     height: 100%;
     min-height: 0;
 }
@@ -2200,28 +2200,76 @@ body.editing {
 .edit-resources > .row { flex-wrap: wrap; margin-bottom: 12px; }
 .edit-resources .select-button { width: auto; max-width: 180px; }
 @media (min-width: 861px) {
+    body {
+        --inspector-width: clamp(320px, var(--reader), 60vw);
+        --inspector-overlay: var(--inspector-width);
+    }
+    #map-panel:before {
+        inset: 0 0 0 -24px;
+    }
+    #map-stage {
+        margin: 0 0 0 -24px;
+    }
     #inspector {
         position: absolute;
         inset: 0 0 0 auto;
-        width: var(--reader);
+        width: var(--inspector-width);
         transform: translateX(0);
     }
-    body.inspector-hidden #workspace {
-        grid-template-columns: var(--list) minmax(0, 1fr) 0 0px;
+    body.inspector-hidden {
+        --inspector-overlay: 0px;
+    }
+    #resizer {
+        position: absolute;
+        inset: 0 calc(var(--inspector-width) - 18px) 0 auto;
+        transform: translateX(0);
+    }
+    #map-heading {
+        right: calc(var(--inspector-overlay) + 18px);
+        max-width: calc(100% - var(--inspector-overlay) - 28px);
+    }
+    #editbar {
+        max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
+    }
+    body.editing #map-heading {
+        top: calc(var(--editbar-height, 0px) + 36px);
+    }
+    #map-controls {
+        left: calc((100% - var(--inspector-overlay)) / 2);
+        max-width: calc(100% - var(--inspector-overlay) - 28px);
+    }
+    #map-controls .map-toolbar {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    #map-controls .map-toolbar > .icon-button:nth-of-type(2) {
+        display: inline-flex;
+    }
+    #map-controls .select-button {
+        max-width: 100%;
+        min-width: 0;
+    }
+    #map-message {
+        right: calc(var(--inspector-overlay) + 36px);
     }
     body.inspector-hidden #inspector {
         transform: translateX(calc(100% + 40px));
         pointer-events: none;
     }
     body.inspector-hidden #resizer {
+        transform: translateX(calc(var(--inspector-width) + 40px));
         opacity: 0;
         pointer-events: none;
     }
     @media (prefers-reduced-motion: no-preference) {
-        #workspace { transition: grid-template-columns 280ms cubic-bezier(.22,.68,0,1); }
         #inspector { transition: transform 280ms cubic-bezier(.22,.68,0,1); }
-        #resizer { transition: opacity 180ms; }
-        body.resizing #workspace { transition: none; }
+        #resizer { transition: transform 280ms cubic-bezier(.22,.68,0,1), opacity 180ms; }
+        #map-heading { transition: right 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
+        #map-controls { transition: left 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
+        #map-message { transition: right 280ms cubic-bezier(.22,.68,0,1); }
+        #editbar { transition: max-width 280ms cubic-bezier(.22,.68,0,1); }
+        body.resizing :is(#map-heading, #map-controls, #map-message, #editbar),
+        body:has(#resizer:focus) :is(#map-heading, #map-controls, #map-message, #editbar) { transition: none; }
     }
 }
 @media (max-width: 860px) {

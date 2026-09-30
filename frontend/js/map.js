@@ -91,7 +91,7 @@ export class MapView {
             this.controls.enabled = !e.value;
             if (!e.value && this.transform.object) {
                 const o = this.transform.object;
-                this.onTransform(o.userData.exhibitId, {
+                this.onTransform(o.userData.exhibitId, o.userData.instanceIndex, {
                     position: o.position.toArray(),
                     rotation: [o.rotation.x, o.rotation.y, o.rotation.z].map(v => v * 180 / Math.PI),
                     scale: o.scale.toArray()
@@ -129,7 +129,7 @@ export class MapView {
                 let o = h.object;
                 while (o && !o.userData.exhibitId) o = o.parent;
                 if (o) {
-                    this.onSelect(o.userData.exhibitId);
+                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex || 0);
                     return;
                 }
             }
@@ -180,8 +180,21 @@ export class MapView {
         this.selected = selected;
         this.editing = editing;
         const floor = data.floors.find(f => f.id === floorId);
-        if (!floor) return;
-        const key = JSON.stringify([floor, data.exhibits.filter(e => e.floorId === floorId).map(e => [e.id, e.modelId, e.transform, e.placed])]);
+        if (!floor) {
+            this.generation++;
+            this.transform?.detach();
+            this.scene.remove(this.root);
+            dispose(this.root);
+            this.root = new THREE.Group();
+            this.scene.add(this.root);
+            this.objects.clear();
+            this.floor = null;
+            this.key = null;
+            this.requestRender();
+            this.onState('mapReady');
+            return;
+        }
+        const key = JSON.stringify([floor, data.exhibits.filter(e => e.floorId === floorId).map(e => [e.id, e.transform, e.models])]);
         if (key === this.key) {
             for (const exhibit of data.exhibits) {
                 const object = this.objects.get(exhibit.id);
@@ -214,18 +227,32 @@ export class MapView {
                 }
             });
             next.add(building);
-            for (const exhibit of data.exhibits.filter(e => e.floorId === floorId && e.placed)) {
+            for (const exhibit of data.exhibits.filter(e => e.floorId === floorId && e.models.length)) {
                 const group = new THREE.Group();
                 group.userData.exhibitId = exhibit.id;
                 group.userData.status = exhibit.status;
                 applyTransform(group, exhibit.transform);
-                if (exhibit.modelId) group.add(await this.model(data.assets.find(a => a.id === exhibit.modelId)));
+                for (const [index, instance] of exhibit.models.entries()) {
+                    const holder = new THREE.Group();
+                    holder.userData.exhibitId = exhibit.id;
+                    holder.userData.instanceIndex = index;
+                    applyTransform(holder, instance.transform);
+                    holder.add(await this.model(data.assets.find(asset => asset.id === instance.model)));
+                    group.add(holder);
+                }
+                let hasStatusSurface = false;
+                group.traverse(mesh => {
+                    if (!mesh.isMesh) return;
+                    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                    if (materials.some(material => material.name.startsWith('StatusSurface'))) hasStatusSurface = true;
+                });
                 group.traverse(mesh => {
                     if (!mesh.isMesh) return;
                     const prepare = material => {
                         const copy = material.clone();
-                        copy.color?.set(STATUS_COLORS[exhibit.status]);
-                        copy.userData.statusTint = true;
+                        const tint = !hasStatusSurface || material.name.startsWith('StatusSurface');
+                        if (tint) copy.color?.set(STATUS_COLORS[exhibit.status]);
+                        copy.userData.statusTint = tint;
                         return copy;
                     };
                     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(prepare) : prepare(mesh.material);
@@ -243,13 +270,20 @@ export class MapView {
             this.scene.add(next);
             this.objects = objects;
             this.floor = floor;
-            this.highlight(selected);
+            for (const exhibit of this.data.exhibits) {
+                const object = objects.get(exhibit.id);
+                if (object) object.userData.status = exhibit.status;
+            }
+            this.highlight(this.selected);
             if (reset) this.home();
             this.requestRender();
             this.onState('mapReady');
         } catch (e) {
             dispose(next);
-            if (generation === this.generation) this.onState('mapUnavailable');
+            if (generation === this.generation) {
+                this.key = null;
+                this.onState('mapUnavailable');
+            }
         }
     }
     highlight(id) {
@@ -276,9 +310,15 @@ export class MapView {
         };
         animate();
         const object = this.objects.get(id);
-        if (object && this.editing && this.tool) this.transform?.attach(object);
+        if (object && this.editing && this.tool && object.children[this.activeInstance || 0]) {
+            this.transform?.attach(object.children[this.activeInstance || 0]);
+        }
         else this.transform?.detach();
         this.requestRender();
+    }
+    setActiveInstance(index) {
+        this.activeInstance = index;
+        this.highlight(this.selected);
     }
     setTool(tool, snap = false) {
         this.tool = tool;
@@ -314,10 +354,12 @@ export class MapView {
         step();
     }
     home() {
-        this.root.updateMatrixWorld(true);
-        const center = new THREE.Vector3(0, 1, 0).applyMatrix4(this.root.matrixWorld);
-        const distance = new THREE.Vector3(...(this.floor?.camera?.position || [28, 27, 33])).length();
-        this.frameTarget(center, distance, distance * .36);
+        const preset = this.floor?.views?.[this.mode === 'top' ? 'top' : 'three'];
+        if (preset) {
+            this.applyView({ ...preset, mode: this.mode });
+            return;
+        }
+        this.fit();
     }
     fit() {
         const box = new THREE.Box3().setFromObject(this.root);
@@ -376,15 +418,14 @@ export class MapView {
     }
     focus(onlyWhenHidden = false) {
         const exhibit = this.data.exhibits.find(e => e.id === this.selected);
-        if (!exhibit?.placed || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
+        if (!exhibit?.models.length || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
         const key = this.mode === 'top' ? 'top' : 'three';
         this.applyView(exhibit.views?.[key] || this.fallbackView([exhibit.id]));
     }
-    focusArea(id) {
-        const area = this.data.areas?.find(area => area.id === id);
-        const ids = this.data.exhibits.filter(e => e.floorId === this.floor.id && (!area || e.areaIds?.includes(id))).map(e => e.id);
+    focusFloor() {
+        const ids = this.data.exhibits.filter(exhibit => exhibit.floorId === this.floor.id).map(exhibit => exhibit.id);
         const key = this.mode === 'top' ? 'top' : 'three';
-        this.applyView(area?.views[key] || this.fallbackView(ids));
+        this.applyView(this.floor.views?.[key] || this.fallbackView(ids));
     }
     setView(mode, preserve = false) {
         cancelAnimationFrame(this.cameraFrame);

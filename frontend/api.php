@@ -2,18 +2,13 @@
 
 declare(strict_types=1);
 
-require dirname(__DIR__) . '/server/Store.php';
-require dirname(__DIR__) . '/server/HumanFiles.php';
+require dirname(__DIR__) . '/backend/Store.php';
+require dirname(__DIR__) . '/backend/HumanFiles.php';
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 try {
-    $configFile = dirname(__DIR__) . '/config/local.php';
-    $config = is_file($configFile) ? require $configFile : require dirname(__DIR__) . '/config/example.php';
-    $seed = require dirname(__DIR__) . '/server/seed.php';
-    if (!($config['demo'] ?? false)) {
-        $seed = ['floors' => [],'exhibits' => [],'assets' => $seed['assets']];
-    }
-    $store = new Store($config['data_dir'], $seed, null, $config['content_dir']);
+    $config = require dirname(__DIR__) . '/config.php';
+    $store = new Store($config['assets_dir'], $config['exhibits_dir']);
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if (($_GET['action'] ?? '') === 'photo') {
             $a = $store->namedPhoto($_GET['exhibitId'] ?? '', $_GET['file'] ?? '');

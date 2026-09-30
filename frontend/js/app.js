@@ -30,8 +30,8 @@ const $ = s => document.querySelector(s),
     api = new Api();
 let snapshot = null,
     selected = null,
-    areaId = '',
-    floorId = 'source-level',
+    floorId = '0',
+    activeInstance = 0,
     tab = 'notes',
     edit = null,
     map = null,
@@ -40,7 +40,7 @@ let snapshot = null,
     mapState = 'mapLoading',
     view = 'list',
     query = '',
-    scope = 'nameLocation',
+    scope = 'nameFloor',
     floorFilter = '',
     statusFilter = '',
     mapMode = 'iso',
@@ -48,16 +48,22 @@ let snapshot = null,
     axisConstraint = '',
     snap = false,
     noticeTimer, dialogCleanup = null;
-let drafts = {};
+let drafts = {}, draftStorageKey = '', editStorageKey = '';
 const linkDrafts = {};
-try {
-    drafts = JSON.parse(localStorage.getItem('hub-drafts') || '{}');
-    Object.values(drafts).forEach(draft => { draft.saving = false; draft.readingImages = false; });
-} catch {}
+function loadDrafts() {
+    draftStorageKey = 'hub-drafts-' + snapshot.datasetKey;
+    editStorageKey = 'hub-edit-' + snapshot.datasetKey;
+    try {
+        drafts = JSON.parse(localStorage.getItem(draftStorageKey) || '{}');
+        Object.values(drafts).forEach(draft => { draft.saving = false; draft.readingImages = false; });
+    } catch {
+        drafts = {};
+    }
+}
 const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const floor = () => data()?.floors.find(f => f.id === floorId);
-const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id;
+const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
 const trashIcon = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg>';
 for (const [status, value] of Object.entries(STATUS_COLORS)) document.documentElement.style.setProperty('--status-' + status, value);
 const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
@@ -79,7 +85,7 @@ function errorText(e) {
 
 function persistDrafts() {
     try {
-        localStorage.setItem('hub-drafts', JSON.stringify(drafts, (key, value) => ['saving', 'readingImages'].includes(key) ? undefined : value));
+        if (draftStorageKey) localStorage.setItem(draftStorageKey, JSON.stringify(drafts, (key, value) => ['saving', 'readingImages'].includes(key) ? undefined : value));
         return true;
     } catch {
         announce(t('draftFailed'));
@@ -89,11 +95,11 @@ function persistDrafts() {
 
 function persistEdit() {
     try {
-        if (edit) localStorage.setItem('hub-edit', JSON.stringify({
+        if (edit) localStorage.setItem(editStorageKey, JSON.stringify({
             base: edit.base,
             value: edit.value
         }));
-        else localStorage.removeItem('hub-edit');
+        else if (editStorageKey) localStorage.removeItem(editStorageKey);
     } catch {
         announce(t('draftFailed'));
     }
@@ -114,11 +120,11 @@ function iconButton(label, action, symbol, extra = '') {
 }
 
 function displayName(record) {
-    return ['mini-ar', 'reserve'].includes(record.id) ? record.name.replace(' · Demo', '') : record.name;
+    return record.name;
 }
 
 function floorLabel(record) {
-    return ['source-level', 'demo-gallery'].includes(record.id) ? record.names[lang()].split(' · ')[0] : record.names[lang()];
+    return record.names[lang()];
 }
 
 function collapseEmptyDraft() {
@@ -130,13 +136,13 @@ function collapseEmptyDraft() {
     }
 }
 
-function trashExhibit(id) {
+function removeExhibit(id) {
     if (!edit) return;
     edit.change(state => {
         const record = state.exhibits.find(e => e.id === id);
         if (!record) return;
+        if (record.notes.length || record.links.length) throw Error('notEmpty');
         state.exhibits = state.exhibits.filter(e => e.id !== id);
-        state.trash.push({ ...record, deleted: { signature: '', at: new Date().toISOString() } });
     });
     changed();
 }
@@ -182,7 +188,7 @@ function renderHeader() {
 }
 
 function renderSidebar() {
-    const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameLocation');
+    const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameFloor');
     const frows = [
         ['', t('allFloors')], ...data().floors.map(f => [f.id, f.names[lang()]])
     ];
@@ -198,7 +204,7 @@ function renderSidebar() {
                 <summary class="icon-button ${filtered ? 'active' : ''}" title="${esc(t('filters'))}" aria-label="${esc(t('filters'))}">☷${filtered ? '<i class="filter-dot"></i>' : ''}</summary>
                 <div class="popover">
                     <label for="scope">${esc(t('scope'))}</label>
-                    <select id="scope">${options(['nameLocation', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
+                    <select id="scope">${options(['nameFloor', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
                     <label for="floor-filter">${esc(t('floor'))}</label>
                     <select id="floor-filter">${options(frows, floorFilter)}</select>
                     <label for="status-filter">${esc(t('status'))}</label>
@@ -225,7 +231,6 @@ function renderSidebar() {
                     </div>
                 </details>
             </div>
-            <span class="sample-label" title="${esc(t('demo'))}">${esc(t('sampleShort'))}</span>
         </div>`;
     $('#search').addEventListener('input', e => {
         query = e.target.value;
@@ -247,15 +252,15 @@ function renderSidebar() {
 function renderList() {
     const q = query.trim().toLocaleLowerCase(lang());
     const records = data().exhibits.filter(e => {
-        if (floorFilter && e.floorId !== floorFilter || statusFilter && e.status !== statusFilter || areaId && !e.areaIds?.includes(areaId)) return false;
-        const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + e.location + ' ' + titleFloor(e.floorId);
+        if (floorFilter && e.floorId !== floorFilter || statusFilter && e.status !== statusFilter) return false;
+        const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + titleFloor(e.floorId);
         return text.toLocaleLowerCase(lang()).includes(q);
     });
-    const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameLocation');
+    const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameFloor');
     $('.active-filters').hidden = !filtered;
-    $('#filter-description').textContent = [scope !== 'nameLocation' ? t(scope) : '', floorFilter ? titleFloor(floorFilter) : '', statusFilter ? t(statusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
+    $('#filter-description').textContent = [scope !== 'nameFloor' ? t(scope) : '', floorFilter ? titleFloor(floorFilter) : '', statusFilter ? t(statusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
     $('#exhibit-list').innerHTML = records.length ? records.map(e => `
-        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + e.location + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
+        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
             <span class="exhibit-name">${esc(displayName(e))}</span>
             <span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>
         </button>${edit ? `<button class="icon-button danger exhibit-trash" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}">${trashIcon}</button>` : ''}</div>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
@@ -263,7 +268,7 @@ function renderList() {
 
 function renderMapUI() {
     $('#map-heading').innerHTML = `<nav class="floor-selector" aria-label="${esc(t('floor'))}">
-        ${[...data().floors].sort((a, b) => b.order - a.order).map(f => `<button data-floor="${esc(f.id)}" aria-current="${floorId === f.id ? 'true' : 'false'}" title="${esc(f.names[lang()])}">${esc(f.id === 'source-level' ? t('sourceFloor') : f.id === 'demo-gallery' ? t('galleryFloor') : floorLabel(f))}</button>`).join('')}
+        ${[...data().floors].sort((a, b) => b.order - a.order).map(f => `<button data-floor="${esc(f.id)}" aria-current="${floorId === f.id ? 'true' : 'false'}" title="${esc(f.names[lang()])}">${esc(floorLabel(f))}</button>`).join('')}
     </nav>`;
     $('.floor-selector').addEventListener('keydown', event => {
         if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
@@ -280,8 +285,7 @@ function renderMapUI() {
                 ${options([['iso', t('iso')], ['top', t('top')], ['perspective', t('perspective')]], mapMode)}
             </select>
             <span class="toolbar-divider"></span>
-            ${iconButton('focus', 'focus', '⌖', !selected && !areaId ? 'disabled' : '')}
-            <select id="area-selector" aria-label="${esc(t('area'))}">${options([['', t('allAreas')], ...data().areas.map(area => [area.id, area.name])], areaId)}</select>
+            ${iconButton('focus', 'focus', '⌖', !selected ? 'disabled' : '')}
             ${iconButton('zoomOut', 'camera:zoomOut', '−') + iconButton('zoomIn', 'camera:zoomIn', '+')}
             <details class="camera-menu">
                 <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary>
@@ -293,13 +297,11 @@ function renderMapUI() {
                 </div>
             </details>
         </div>`;
-    $('#area-selector').addEventListener('change', event => changeArea(event.target.value));
     $('#camera-view').addEventListener('change', async e => {
         const value = e.target.value;
         mapMode = value;
         await ensureMap();
         map?.setView(mapMode);
-        if (areaId && !selected) map?.focusArea(areaId);
         syncUrl();
         renderMapUI();
     });
@@ -328,11 +330,11 @@ async function initializeMap() {
                 $('#map-canvas').classList.toggle('floor-loading', key === 'mapLoading');
                 $('#map-message').textContent = key === 'mapReady' ? '' : t(key);
             },
-            onTransform: (id, transform) => {
+            onTransform: (id, index, transform) => {
                 if (!edit) return;
                 edit.change(s => {
                     const e = s.exhibits.find(x => x.id === id);
-                    if (e) e.transform = transform;
+                    if (e?.models[index]) e.models[index].transform = transform;
                 });
                 persistEdit();
                 renderEditBar();
@@ -341,9 +343,8 @@ async function initializeMap() {
         });
         await instance.init();
         map = instance;
-        await updateMap(true);
         map.setView(mapMode);
-        if (areaId) map.focusArea(areaId);
+        await updateMap(true);
     } catch (e) {
         instance?.destroy();
         map = null;
@@ -357,7 +358,7 @@ async function updateMap(reset = false) {
     });
 }
 
-async function select(id) {
+async function select(id, instanceIndex = 0) {
     collapseEmptyDraft();
     const e = data().exhibits.find(x => x.id === id);
     if (!e) {
@@ -365,10 +366,11 @@ async function select(id) {
         renderList(); renderInspector(); updateMap(); syncUrl();
         return;
     }
-    if (areaId && !e.areaIds?.includes(areaId)) areaId = '';
-    const changed = floorId !== e.floorId;
+    const changed = Boolean(e.floorId && floorId !== e.floorId);
     selected = id;
-    floorId = e.floorId;
+    activeInstance = instanceIndex;
+    if (e.floorId) floorId = e.floorId;
+    map?.setActiveInstance(activeInstance);
     renderList();
     renderInspector();
     renderMapUI();
@@ -384,7 +386,6 @@ function changeFloor(id) {
     floorId = id;
     const e = exhibit();
     if (e?.floorId !== id) selected = null;
-    if (data().areas.find(area => area.id === areaId)?.floorId !== id) areaId = '';
     renderMapUI();
     renderList();
     renderInspector();
@@ -392,24 +393,11 @@ function changeFloor(id) {
     syncUrl();
 }
 
-async function changeArea(id) {
-    collapseEmptyDraft();
-    areaId = id;
-    const area = data().areas.find(area => area.id === id);
-    if (area) floorId = area.floorId;
-    selected = null;
-    renderList(); renderInspector(); renderMapUI();
-    await ensureMap();
-    await updateMap();
-    map?.focusArea(id);
-    syncUrl();
-}
-
 function syncUrl() {
     const url = new URL(location.href);
-    url.searchParams.set('floor', floorId);
-    if (areaId) url.searchParams.set('area', areaId);
-    else url.searchParams.delete('area');
+    if (floorId) url.searchParams.set('floor', floorId);
+    else url.searchParams.delete('floor');
+    url.searchParams.delete('area');
     if (selected) url.searchParams.set('exhibit', selected);
     else url.searchParams.delete('exhibit');
     url.searchParams.set('view', mapMode);
@@ -467,7 +455,7 @@ function renderInspector() {
     $('#inspector').innerHTML = `
         <div class="inspector-header">
             <div class="inspector-tools">
-                <h1 title="${esc(e.location + ' · ' + titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
+                <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
                 <div class="status-picker">
                     <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" title="${esc(t(e.status))}">${statusHTML(e.status)}<span class="status-chevron" aria-hidden="true"></span></button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
@@ -892,7 +880,7 @@ function acceptSnapshot(value) {
                     const base = edit.base.exhibits.find(x => x.id === r.id);
                     if (r.status === base?.status) {
                         r.status = live.status;
-                        r.statusChanged = structuredClone(live.statusChanged);
+                        r.statusBy = live.statusBy;
                     }
                 }
             }
@@ -920,9 +908,8 @@ function renderEditInspector() {
             <div class="row"><label class="check"><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><select id="axis" aria-label="${esc(t('axis'))}">${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div>
         </div>
         <div id="structure-slot"></div>
-        <div class="edit-resources"><div class="row">${button('newArea', 'newArea', 'quiet')}<select id="edit-area" aria-label="${esc(t('editArea'))}">${options([['', t('editArea')], ...data().areas.map(area => [area.id, area.name])], '')}</select></div><div class="row">${button('editFloor', 'editFloor', 'quiet')}${button('newFloor', 'newFloor', 'quiet')}${button('models', 'models', 'quiet')}${button('trash', 'trash', 'quiet')}</div></div>
+        <div class="edit-resources"><div class="row">${button('editFloor', 'editFloor', 'quiet')}${button('newFloor', 'newFloor', 'quiet')}${button('models', 'models', 'quiet')}</div></div>
     </div>`;
-    $('#edit-area').addEventListener('change', event => { if (event.target.value) areaDialog(event.target.value); });
     $('#axis').addEventListener('change', e => {
         axisConstraint = e.target.value;
         map?.setAxis(axisConstraint);
@@ -945,7 +932,6 @@ function render() {
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
     if (!data().exhibits.some(e => e.id === selected)) selected = null;
-    if (!data().areas.some(area => area.id === areaId)) areaId = '';
     renderSidebar();
     renderInspector();
     renderMapUI();
@@ -1056,237 +1042,149 @@ function changed() {
     map?.setAxis(axisConstraint);
 }
 
+function vectorFields(transform, attributes = '') {
+    return ['position', 'rotation', 'scale'].map(key => `
+        <div class="vector"><h3>${esc(t(key))}</h3><div class="grid3">
+            ${['X', 'Y', 'Z'].map((axis, index) => `<div><label>${axis}<input type="number" step="any" data-vector="${key}" data-axis="${index}" ${attributes} value="${Number(transform[key][index].toFixed(4))}"></label></div>`).join('')}
+        </div></div>`).join('');
+}
+
 function structureDialog(kind, isNew = false) {
     if (!edit) return;
-    const source = kind === 'floors' ? floor() : exhibit();
-    if (!source && !isNew) return;
-    const record = isNew ? (kind === 'floors' ? {
-        id: uid(),
-        names: {
-            de: '',
-            en: ''
-        },
-        order: data().floors.length,
-        elevation: 0,
-        modelId: data().assets.find(a => a.id === 'demo-gallery')?.id,
-        transform: identity(),
-        camera: {
-            ...identity(),
-            position: [28, 27, 33]
-        },
-        revision: 0
-    } : {
-        id: uid(),
-        name: '',
-        location: '',
-        floorId,
-        modelId: null,
-        transform: identity(),
-        placed: false,
-        status: 'retired',
-        statusChanged: {
-            signature: '',
-            at: new Date().toISOString()
-        },
-        revision: 0,
-        notes: [],
-        links: []
-    }) : structuredClone(source);
     const isFloor = kind === 'floors';
+    const source = isFloor ? floor() : exhibit();
+    if (!source && !isNew) return;
+    const record = isNew ? (isFloor ? {
+        id: '', names: { de: '', en: '' }, order: 0, modelId: null,
+        transform: identity(), views: {}, revision: null
+    } : {
+        id: '', name: '', floorId: floorId || null, status: 'unset',
+        transform: identity(), models: [], views: {}, revision: null,
+        notes: [], links: [], placed: false
+    }) : structuredClone(source);
+    const hardware = data().assets.filter(asset => asset.kind === 'hardware');
     if (isNew && !isFloor) {
         $('#inspector h1').textContent = t('newExhibit');
         map?.setTool('');
     }
-    let transform = structuredClone(record.transform);
-    let locked = true;
-    const modelOptions = options([...(isFloor ? [] : [
-        ['', t('noModel')]
-    ]), ...data().assets.map(a => [a.id, a.name])], record.modelId || '');
-    const formRoot = showStructureForm(kind, isNew ? (isFloor ? 'newFloor' : 'newExhibit') : (isFloor ? 'editFloor' : 'editExhibit'), `
- ${isFloor?`<p class="small muted" style="margin-bottom:16px">${esc(t('floorAlignHint'))}</p><div class="grid2"><div class="field"><label for="name-de">${esc(t('nameDe'))}</label><input name="nameDe" id="name-de" value="${esc(record.names.de)}"></div><div class="field"><label for="name-en">${esc(t('nameEn'))}</label><input name="nameEn" id="name-en" value="${esc(record.names.en)}"></div></div><div class="grid2"><div class="field"><label for="order">${esc(t('order'))}</label><input type="number" name="order" id="order" value="${record.order}"></div><div class="field"><label for="elevation">${esc(t('elevation'))}</label><input type="number" name="elevation" id="elevation" step="any" value="${record.elevation}"></div></div>`:`<div class="field"><label for="ex-name">${esc(t('name'))}</label><input id="ex-name" name="name" maxlength="200" value="${esc(record.name)}"></div><div class="field"><label for="ex-location">${esc(t('location'))}</label><input id="ex-location" name="location" value="${esc(record.location)}"></div><div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select name="floorId" id="ex-floor">${options(data().floors.map(f=>[f.id,f.names[lang()]]),record.floorId)}</select></div>${`<div class="field"><label for="initial-status">${esc(t('status'))}</label><select name="status" id="initial-status">${statusOptions(record.status)}</select></div>`}`}
- ${!isFloor ? `<fieldset class="area-membership"><legend>${esc(t('areas'))}</legend>${data().areas.filter(area => area.floorId === record.floorId).map(area => `<label class="check"><input type="checkbox" name="areaIds" value="${esc(area.id)}" ${record.areaIds?.includes(area.id) ? 'checked' : ''}>${esc(area.name)}</label>`).join('')}<p class="small muted">${esc(t('secondaryComponent'))}</p></fieldset><div class="view-presets"><h3>${esc(t('defaultViews'))}</h3>${['top', 'three'].map(key => `<div class="row"><span>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span><button type="button" class="quiet" data-capture-exhibit="${key}">${esc(t('useCurrentView'))}</button>${record.views?.[key] ? `<button type="button" class="icon-button" data-clear-view="${key}" aria-label="${esc(t('automatic'))}">×</button>` : `<span class="small muted">${esc(t('automatic'))}</span>`}</div>`).join('')}</div>` : ''}
- <div class="field"><label for="model-choice">${esc(t('model'))}</label><select id="model-choice" name="modelId">${modelOptions}</select></div>
- ${!isFloor?`<label class="check"><input type="checkbox" name="placed" ${record.placed?'checked':''}>${esc(t('placed'))}</label>`:''}
- ${['position','rotation','scale'].map(key=>`<div class="vector"><h3>${esc(t(key))}</h3><div class="grid3">${['X','Y','Z'].map((axis,i)=>`<div><label for="${key}-${i}">${axis}</label><input type="number" step="any" data-vector="${key}" data-axis="${i}" id="${key}-${i}" value="${Number(transform[key][i].toFixed(4))}"></div>`).join('')}</div></div>`).join('')}
- <label class="check"><input type="checkbox" id="locked" checked>${esc(t('lockProportions'))}</label><div class="vector"><h3>${esc(t('dimensions'))}</h3><div class="grid3">${['X','Y','Z'].map((axis,i)=>`<div><label for="dim-${i}">${axis}</label><input type="number" step="any" min="0.001" data-dimension="${i}" id="dim-${i}"></div>`).join('')}</div><p class="small muted">${esc(t('dimensionHint'))}</p></div>
- <div class="row">${button('resetTransform','resetFormTransform')}${!isFloor&&!isNew?button('deleteExhibit','deleteCurrent','danger'):''}</div>${!isFloor&&!isNew?`<p class="small muted" style="margin-top:10px">${esc(t('deleteHint'))}</p>`:''}${isFloor ? footer('apply') : `<div class="dialog-footer">${button('duplicate', 'duplicateExhibit', 'quiet', isNew ? 'disabled' : '')}${button('cancel', 'cancelStructure', 'quiet')}<button type="submit" class="primary">${esc(t('apply'))}</button></div>`}`,
-        async form => {
-            const selectedAsset = data().assets.find(asset => asset.id === form.get('modelId'));
-            const pendingDimensions = selectedAsset ? [0, 1, 2].filter(axis => {
-                const input = field('#dim-' + axis);
-                return !input.disabled && Number(input.value) !== Number((selectedAsset.dimensions[axis] * transform.scale[axis]).toFixed(4));
-            }).map(axis => [axis, Number(field('#dim-' + axis).value)]) : [];
-            const beforeInput = structuredClone(transform);
-            for (const key of ['position', 'rotation', 'scale']) {
-                for (let axis = 0; axis < 3; axis++) {
-                    const input = field('#' + key + '-' + axis);
-                    if (!input.value.trim()) throw Error('invalidTransform');
-                    let value = Number(input.value);
-                    if (!Number.isFinite(value) || key === 'scale' && value <= 0) throw Error('invalidTransform');
-                    if (value === Number(beforeInput[key][axis].toFixed(4))) continue;
-                    if (snap && key === 'position') value = Math.round(value);
-                    if (snap && key === 'rotation') value = Math.round(value / 15) * 15;
-                    if (key === 'scale' && locked) {
-                        const ratio = value / transform.scale[axis];
-                        transform.scale = transform.scale.map(component => component * ratio);
-                    } else {
-                        transform[key][axis] = value;
-                    }
-                }
-            }
-            for (const [axis, size] of pendingDimensions) {
-                transform = new MapPlacement(transform).resize(selectedAsset.dimensions, axis, size, locked).toJSON();
-            }
-            new MapPlacement(transform);
-            record.transform = transform;
-            record.modelId = form.get('modelId') || null;
-            if (isFloor) {
-                record.names = {
-                    de: String(form.get('nameDe')).trim(),
-                    en: String(form.get('nameEn')).trim()
-                };
-                if (!record.names.de || !record.names.en || !record.modelId) throw Error('invalidInput');
-                record.order = Number(form.get('order'));
-                record.elevation = Number(form.get('elevation'));
-            } else {
-                record.name = String(form.get('name')).trim();
-                if (!record.name) throw Error('invalidInput');
-                record.location = String(form.get('location')).trim();
-                record.floorId = form.get('floorId');
-                record.areaIds = form.getAll('areaIds').filter(id => data().areas.some(area => area.id === id && area.floorId === record.floorId));
-                record.views ||= {};
-                record.placed = form.has('placed');
-                record.status = form.get('status');
-            }
-            const previous = data()[kind].find(x => x.id === record.id);
-            if (previous && JSON.stringify(structural(previous, kind)) === JSON.stringify(structural(record, kind))) {
-                if (isFloor) closeDialog();
-                return;
-            }
-            edit.change(s => {
-                const index = s[kind].findIndex(x => x.id === record.id);
-                if (index < 0) s[kind].push(record);
-                else s[kind][index] = record;
-            });
-            if (!isFloor) {
-                selected = record.id;
-                floorId = record.floorId;
-            } else floorId = record.id;
-            closeDialog();
-            changed();
-        });
-    if (isFloor) {
-        for (const input of formRoot.querySelectorAll('input[id], select[id]')) {
-            const originalId = input.id;
-            input.id = 'floor-' + originalId;
-            const label = formRoot.querySelector('label[for="' + originalId + '"]');
-            if (label) label.htmlFor = input.id;
+    const presets = `<div class="view-presets"><h3>${esc(t('defaultViews'))}</h3>${['top', 'three'].map(key => `
+        <div class="row"><span>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span>
+            <button type="button" class="quiet" ${isFloor ? 'data-floor-view' : 'data-capture-exhibit'}="${key}">${esc(t('useCurrentView'))}</button>
+            <button type="button" class="icon-button" ${isFloor ? 'data-clear-floor-view' : 'data-clear-view'}="${key}" aria-label="${esc(t('automatic'))}" title="${esc(record.views?.[key] ? t('automatic') : t('viewFallback'))}">×</button>
+        </div>`).join('')}</div>`;
+    const content = isFloor ? `
+        <div class="field"><label for="floor-number">${esc(t('floorNumber'))}</label><input id="floor-number" name="floorNumber" type="number" step="1" value="${esc(record.id)}" ${isNew ? '' : 'readonly'}></div>
+        <div class="grid2"><div class="field"><label for="floor-name-de">${esc(t('nameDe'))}</label><input id="floor-name-de" name="nameDe" value="${esc(record.names.de)}"></div><div class="field"><label for="floor-name-en">${esc(t('nameEn'))}</label><input id="floor-name-en" name="nameEn" value="${esc(record.names.en)}"></div></div>
+        ${presets}${footer('apply')}` : `
+        <div class="field"><label for="ex-name">${esc(t('name'))}</label><input id="ex-name" name="name" maxlength="160" value="${esc(record.name)}" ${isNew ? '' : `readonly title="${esc(t('folderNameHint'))}"`}></div>
+        <div class="grid2"><div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId">${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div><div class="field"><label for="initial-status">${esc(t('status'))}</label><select id="initial-status" name="status">${statusOptions(record.status)}</select></div></div>
+        <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><button type="button" class="icon-button" data-add-instance title="${esc(t('addModel'))}" aria-label="${esc(t('addModel'))}" ${hardware.length ? '' : 'disabled'}>+</button></div>
+        <div id="instance-list"></div>
+        <details class="exhibit-transform"><summary>${esc(t('exhibitTransform'))}</summary>${vectorFields(record.transform, 'data-group-vector')}</details>
+        ${presets}
+        <div class="dialog-footer">${button('duplicate', 'duplicateExhibit', 'quiet', isNew ? 'disabled' : '')}${button('cancel', 'cancelStructure', 'quiet')}<button type="submit" class="primary">${esc(t('apply'))}</button></div>
+        ${isNew ? '' : `<button type="button" class="quiet danger" data-delete-current ${record.notes.length || record.links.length ? `disabled title="${esc(t('notEmpty'))}"` : ''}>${esc(t('deleteExhibit'))}</button>`}`;
+    const formRoot = showStructureForm(kind, isNew ? (isFloor ? 'newFloor' : 'newExhibit') : (isFloor ? 'editFloor' : 'editExhibit'), content, async form => {
+        if (isFloor) {
+            const number = String(form.get('floorNumber')).trim();
+            if (!/^(0|-?[1-9][0-9]*)$/.test(number)) throw Error('invalidFloor');
+            if (isNew && data().floors.some(item => item.id === number)) throw Error('duplicateName');
+            record.id = number;
+            record.order = Number(number);
+            record.names = { de: String(form.get('nameDe')).trim() || number, en: String(form.get('nameEn')).trim() || number };
+        } else {
+            record.name = String(form.get('name')).trim();
+            if (!record.name || /[<>:"/\\|?*\x00-\x1f]/.test(record.name) || /^[.]/.test(record.name) || /[. ]$/.test(record.name)) throw Error('invalidInput');
+            if (isNew && data().exhibits.some(item => item.id === record.name)) throw Error('duplicateName');
+            record.id = record.name;
+            record.floorId = form.get('floorId') || null;
+            record.status = form.get('status');
+            record.placed = Boolean(record.floorId && record.models.length);
+            if (record.models.length && !record.floorId) throw Error('invalidFloor');
+            new MapPlacement(record.transform);
+            record.models.forEach(instance => new MapPlacement(instance.transform));
         }
-    }
-    const field = selector => formRoot.querySelector(isFloor && selector.startsWith('#') ? '#floor-' + selector.slice(1) : selector);
-    const syncDimensions = () => {
-        const asset = data().assets.find(a => a.id === field('#model-choice').value);
-        for (let i = 0; i < 3; i++) {
-            const dimensionInput = field('#dim-' + i);
-            dimensionInput.disabled = !asset || !asset.dimensions[i];
-            dimensionInput.value = asset ? Number((asset.dimensions[i] * transform.scale[i]).toFixed(4)) : '';
-        }
-    };
-    const syncVectors = () => {
-        for (const k of ['position', 'rotation', 'scale'])
-            for (let i = 0; i < 3; i++) field('#' + k + '-' + i).value = Number(transform[k][i].toFixed(4));
-        syncDimensions();
-    };
-    field('#locked').addEventListener('change', e => locked = e.target.checked);
-    field('#model-choice').addEventListener('change', syncDimensions);
-    formRoot.querySelectorAll('[data-vector]').forEach(input => input.addEventListener('change', () => {
-        const k = input.dataset.vector,
-            i = Number(input.dataset.axis);
-        let v = Number(input.value);
-        if (snap && k === 'position') v = Math.round(v);
-        if (snap && k === 'rotation') v = Math.round(v / 15) * 15;
-        if (!Number.isFinite(v) || k === 'scale' && v <= 0) {
-            input.value = transform[k][i];
+        const previous = data()[kind].find(item => item.id === record.id);
+        if (previous && JSON.stringify(structural(previous, kind)) === JSON.stringify(structural(record, kind))) {
+            if (isFloor) closeDialog();
             return;
         }
-        if (k === 'scale' && locked) {
-            const ratio = v / transform.scale[i];
-            transform.scale = transform.scale.map(x => x * ratio);
-        } else transform[k][i] = v;
-        syncVectors();
-    }));
-    formRoot.querySelectorAll('[data-dimension]').forEach(input => input.addEventListener('change', () => {
-        try {
-            const asset = data().assets.find(a => a.id === field('#model-choice').value);
-            transform = new MapPlacement(transform).resize(asset.dimensions, Number(input.dataset.dimension), Number(input.value), locked).toJSON();
-            syncVectors();
-        } catch {
-            syncVectors();
-        }
-    }));
-    field('[data-action=resetFormTransform]').onclick = () => {
-        transform = identity();
-        syncVectors();
-    };
-    field('[data-action=deleteCurrent]')?.addEventListener('click', () => {
-        edit.change(s => {
-            s.exhibits = s.exhibits.filter(x => x.id !== record.id);
-            s.trash.push({
-                ...record,
-                deleted: {
-                    signature: '',
-                    at: new Date().toISOString()
-                }
-            });
+        edit.change(state => {
+            const index = state[kind].findIndex(item => item.id === record.id);
+            if (index < 0) state[kind].push(structuredClone(record));
+            else state[kind][index] = structuredClone(record);
         });
-        selected = data().exhibits.find(x => x.floorId === floorId)?.id || null;
-        closeDialog();
+        if (isFloor) floorId = record.id;
+        else {
+            selected = record.id;
+            if (record.floorId) floorId = record.floorId;
+        }
+        if (isFloor) closeDialog();
         changed();
     });
-    syncDimensions();
-}
-
-async function areaDialog(id = null) {
-    if (!edit) return;
-    if (submitStructure && !await submitStructure()) return;
-    await ensureMap();
-    if (!map) throw Error('mapUnavailable');
-    const area = structuredClone(data().areas.find(area => area.id === id) || {
-        id: uid(), name: '', floorId, revision: 0,
-        views: { top: map.captureView('top'), three: map.captureView(mapMode === 'top' ? 'perspective' : mapMode) }
+    if (isFloor) {
+        formRoot.querySelectorAll('[data-floor-view], [data-clear-floor-view]').forEach(control => control.addEventListener('click', async () => {
+            const key = control.dataset.floorView || control.dataset.clearFloorView;
+            if (control.dataset.clearFloorView) delete record.views[key];
+            else {
+                await ensureMap();
+                if (!map || record.id !== floorId) { announce(t('viewFloorMismatch')); return; }
+                record.views[key] = map.captureView(key === 'top' ? 'top' : mapMode === 'top' ? 'perspective' : mapMode);
+                announce(t('viewCaptured'));
+            }
+        }));
+        return;
+    }
+    const list = formRoot.querySelector('#instance-list');
+    const renderInstances = () => {
+        list.innerHTML = record.models.length ? record.models.map((instance, index) => `
+            <div class="model-instance ${index === activeInstance ? 'active' : ''}">
+                <div class="row"><button type="button" class="icon-button" data-active-instance="${index}" title="${esc(t('selectModel'))}" aria-label="${esc(t('selectModel'))}" aria-pressed="${index === activeInstance}">⌖</button>
+                    <select data-instance-model="${index}" aria-label="${esc(t('model'))}">${options(hardware.map(asset => [asset.id, asset.name]), instance.model)}</select>
+                    <button type="button" class="icon-button" data-remove-instance="${index}" aria-label="${esc(t('remove'))}">×</button></div>
+                <details ${index === activeInstance ? 'open' : ''}><summary>${esc(t('placement'))}</summary>${vectorFields(instance.transform, `data-instance="${index}"`)}</details>
+            </div>`).join('') : `<p class="small muted">${esc(t('noModel'))}</p>`;
+    };
+    const updateVector = input => {
+        const target = input.hasAttribute('data-group-vector') ? record.transform : record.models[Number(input.dataset.instance)]?.transform;
+        if (!target) return;
+        const key = input.dataset.vector, axis = Number(input.dataset.axis);
+        let value = Number(input.value);
+        if (!input.value.trim() || !Number.isFinite(value) || key === 'scale' && value <= 0) {
+            input.value = target[key][axis];
+            return;
+        }
+        if (snap && key === 'position') value = Math.round(value);
+        if (snap && key === 'rotation') value = Math.round(value / 15) * 15;
+        target[key][axis] = value;
+    };
+    formRoot.addEventListener('change', event => {
+        const input = event.target;
+        if (input.dataset.vector) updateVector(input);
+        if (input.dataset.instanceModel !== undefined) record.models[Number(input.dataset.instanceModel)].model = input.value;
     });
-    showDialog(id ? 'editArea' : 'newArea', `<div class="field"><label for="area-name">${esc(t('name'))}</label><input id="area-name" name="name" value="${esc(area.name)}"></div><p class="small muted">${esc(titleFloor(area.floorId))}</p><div class="view-presets"><h3>${esc(t('defaultViews'))}</h3>${['top', 'three'].map(key => `<div class="row"><span>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span><button type="button" class="quiet" data-area-capture="${key}">${esc(t('useCurrentView'))}</button><button type="button" class="quiet" data-area-view="${key}">${esc(t('showView'))}</button></div>`).join('')}</div><p class="small muted">${esc(t('areaViewHint'))}</p>${id ? `<button type="button" class="danger quiet" id="delete-area">${esc(t('deleteArea'))}</button>` : ''}${footer('apply')}`, async form => {
-        area.name = String(form.get('name')).trim();
-        if (!area.name) throw Error('invalidInput');
-        edit.change(state => {
-            const index = state.areas.findIndex(item => item.id === area.id);
-            if (index < 0) state.areas.push(area);
-            else state.areas[index] = area;
-        });
-        closeDialog(); changed();
+    formRoot.querySelector('[data-add-instance]').addEventListener('click', () => {
+        record.models.push({ model: hardware[0].id, transform: identity() });
+        activeInstance = record.models.length - 1;
+        renderInstances();
     });
-    $('#dialog').querySelectorAll('[data-area-capture]').forEach(button => button.addEventListener('click', () => {
-        if (floorId !== area.floorId) { announce(t('viewFloorMismatch')); return; }
-        const key = button.dataset.areaCapture;
-        area.views[key] = map.captureView(key === 'top' ? 'top' : mapMode === 'top' ? 'perspective' : mapMode);
-        announce(t('viewCaptured'));
-    }));
-    $('#dialog').querySelectorAll('[data-area-view]').forEach(button => button.addEventListener('click', async () => {
-        if (floorId !== area.floorId) selected = null;
-        floorId = area.floorId;
-        await updateMap();
-        syncUrl();
-        map.applyView(area.views[button.dataset.areaView]);
-        renderMapUI();
-    }));
-    $('#delete-area')?.addEventListener('click', () => {
-        edit.change(state => {
-            state.areas = state.areas.filter(item => item.id !== id);
-            state.exhibits.forEach(exhibit => { exhibit.areaIds = (exhibit.areaIds || []).filter(areaId => areaId !== id); });
-        });
-        if (areaId === id) areaId = '';
-        closeDialog(); changed();
+    list.addEventListener('click', async event => {
+        const remove = event.target.closest('[data-remove-instance]');
+        if (remove) {
+            record.models.splice(Number(remove.dataset.removeInstance), 1);
+            activeInstance = Math.max(0, Math.min(activeInstance, record.models.length - 1));
+            renderInstances();
+        }
+        const activate = event.target.closest('[data-active-instance]');
+        if (activate) {
+            activeInstance = Number(activate.dataset.activeInstance);
+            if (submitStructure && !await submitStructure()) return;
+            map?.setActiveInstance(activeInstance);
+        }
     });
+    formRoot.querySelector('[data-delete-current]')?.addEventListener('click', () => removeExhibit(record.id));
+    renderInstances();
+    map?.setActiveInstance(activeInstance);
 }
 
 async function saveExit() {
@@ -1348,23 +1246,10 @@ async function saveExit() {
     });
 }
 
-function trashDialog() {
-    if (!edit) return;
-    const rows = data().trash.map(e => {
-        const attribution = e.deleted?.signature ? e.deleted.signature + ' · ' + date(e.deleted.at) : t('pending');
-        return `<div class="row between">
-            <div><strong>${esc(e.name)}</strong><p class="small muted">${esc(attribution)}</p></div>
-            <button data-restore="${esc(e.id)}" type="button">${esc(t('restore'))}</button>
-        </div>`;
-    }).join('');
-    showDialog('trash', rows ? '<div class="stack">' + rows + '</div>' : '<p class="muted">' + esc(t('emptyTrash')) + '</p>');
-}
-
 async function modelsDialog() {
-    const rows = data().assets.map(asset => {
-        const dimensions = asset.dimensions.map(n => new Intl.NumberFormat(lang(), { maximumFractionDigits: 2 }).format(n)).join(' × ');
+    const rows = data().assets.filter(asset => asset.kind === 'hardware').map(asset => {
         return `<div class="model-row">
-            <div class="model-text"><strong>${esc(asset.name)}</strong><p>${esc(asset.id)} · ${dimensions} m</p><p>${esc(asset.source || 'GLB')}</p></div>
+            <div class="model-text"><strong>${esc(asset.name)}</strong><p>${esc(asset.file)}</p><p>${esc(asset.source || 'GLB')}</p></div>
             <button type="button" data-preview-model="${esc(asset.id)}">${esc(t('preview'))}</button>
         </div>`;
     }).join('');
@@ -1372,14 +1257,13 @@ async function modelsDialog() {
         <p class="muted small" style="margin-bottom:16px">${esc(t('modelHint'))}</p>
         <div class="model-grid">${rows}</div>
         <div class="field" style="margin-top:24px"><label for="model-file">${esc(t('uploadModel'))}</label><input type="file" name="model" id="model-file" accept=".glb,model/gltf-binary"></div>
-        ${signatureField()}${footer('uploadModel')}`, async form => {
-        const signature = requireSignature(form);
+        ${footer('uploadModel')}`, async form => {
         const file = form.get('model');
         if (!file?.size) throw Error('invalidModel');
         if (file.size > 32 * 1024 * 1024) throw Error('fileTooLarge');
         const { inspectModel } = await import('./map.js');
         const dimensions = await inspectModel(file);
-        await api.upload(file, 'model', signature, uid(), dimensions);
+        await api.upload(file, 'model', '', uid(), dimensions);
         const live = await api.load();
         snapshot = live;
         if (edit) {
@@ -1418,6 +1302,7 @@ async function noteConflict() {
         ${footer('rebase')}`, async () => {
         snapshot = live;
         draft.baseRevision = current.revision;
+        draft.contentTag = current.contentTag;
         draft.requestId = uid();
         delete draft.conflict;
         delete draft.error;
@@ -1442,18 +1327,13 @@ async function structureConflict() {
                 if (change.op === 'put') {
                     const old = state[change.kind].find(x => x.id === change.id);
                     const desired = savedValue[change.kind].find(x => x.id === change.id);
-                    if (!old && state.trash.some(x => x.id === change.id)) throw Error('conflict');
                     const merged = { ...(old || desired), ...change.record };
                     const index = state[change.kind].findIndex(x => x.id === change.id);
                     if (index < 0) state[change.kind].push(merged);
                     else state[change.kind][index] = merged;
                 } else if (change.op === 'delete') {
                     state[change.kind] = state[change.kind].filter(e => e.id !== change.id);
-                } else if (change.op === 'restore') {
-                    const record = state.trash.find(e => e.id === change.id);
-                    if (!record || state.exhibits.some(e => e.id === change.id)) throw Error('conflict');
-                    state.exhibits.push({ ...record, ...change.record });
-                    state.trash = state.trash.filter(e => e.id !== change.id);
+
                 }
             }
         });
@@ -1490,7 +1370,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 
 function recoverDraft() {
     let saved;
-    try { saved = JSON.parse(localStorage.getItem('hub-edit') || 'null'); } catch {}
+    try { saved = JSON.parse(localStorage.getItem(editStorageKey) || 'null'); } catch {}
     if (!saved) return;
     showDialog('draftRecover', `<p>${esc(t('draft'))}</p><div class="dialog-footer">${button('discard', 'forgetEditDraft')}<button type="submit" class="primary">${esc(t('recover'))}</button></div>`, async () => {
         edit = new EditSession(saved.base);
@@ -1510,8 +1390,11 @@ const actions = {
     duplicateExhibit: () => {
         if (!edit || !exhibit()) return;
         const copy = structuredClone(exhibit());
-        copy.id = uid();
-        copy.name += ' (2)';
+        const originalName = copy.name;
+        let number = 2;
+        while (data().exhibits.some(item => item.id === originalName + ' (' + number + ')')) number++;
+        copy.name = originalName + ' (' + number + ')';
+        copy.id = copy.name;
         copy.transform.position[0] += 2;
         copy.notes = [];
         copy.links = [];
@@ -1544,11 +1427,10 @@ const actions = {
         query = '';
         floorFilter = '';
         statusFilter = '';
-        scope = 'nameLocation';
+        scope = 'nameFloor';
         renderSidebar();
     },
     focus: async () => {
-        if (!selected && areaId) { await ensureMap(); map?.focusArea(areaId); setView('map'); return; }
         if (!exhibit()?.placed) { announce(t('unplaced')); return; }
         await ensureMap();
         map?.focus();
@@ -1558,14 +1440,12 @@ const actions = {
     editFloor: () => structureDialog('floors'),
     newExhibit: () => { setView('detail'); structureDialog('exhibits', true); },
     newFloor: () => structureDialog('floors', true),
-    newArea: () => areaDialog(),
     undo: () => { edit?.undo(); changed(); },
     redo: () => { edit?.redo(); changed(); },
     saveExit,
-    trash: trashDialog,
     models: modelsDialog,
     discard: () => { edit = null; persistEdit(); closeDialog(); render(); },
-    forgetEditDraft: () => { localStorage.removeItem('hub-edit'); closeDialog(); },
+    forgetEditDraft: () => { localStorage.removeItem(editStorageKey); closeDialog(); },
     structureConflict
 };
 
@@ -1574,7 +1454,7 @@ document.addEventListener('click', async event => {
     if (!element) return;
     try {
         if (element.dataset.floor) { changeFloor(element.dataset.floor); return; }
-        if (element.dataset.trashExhibit) { trashExhibit(element.dataset.trashExhibit); return; }
+        if (element.dataset.trashExhibit) { removeExhibit(element.dataset.trashExhibit); return; }
         if (element.dataset.deleteNote) { deleteNoteDialog(element.dataset.deleteNote); return; }
         if (element.dataset.language) { setLanguage(element.dataset.language); render(); return; }
         if (element.dataset.select) { select(element.dataset.select); return; }
@@ -1630,14 +1510,6 @@ document.addEventListener('click', async event => {
             if (element.dataset.format === 'link') noteLinkDialog();
             else noteEditor?.command(element.dataset.format);
             return;
-        }
-        if (element.dataset.restore) {
-            const id = element.dataset.restore;
-            edit.change(state => {
-                state.exhibits.push(state.trash.find(e => e.id === id));
-                state.trash = state.trash.filter(e => e.id !== id);
-            });
-            closeDialog(); changed(); return;
         }
         if (element.dataset.previewModel) { await modelPreview(element.dataset.previewModel); return; }
         const action = element.dataset.action;
@@ -1706,13 +1578,13 @@ renderHeader();
 $('#sidebar').innerHTML = '<p>' + esc(t('loading')) + '</p>';
 try {
     snapshot = await api.load();
+    loadDrafts();
     if (!snapshot.exhibits.some(e => e.id === selected)) selected = snapshot.exhibits[0]?.id || null;
     const params = new URLSearchParams(location.search);
     const requestedFloor = snapshot.floors.find(f => f.id === params.get('floor'));
     const requestedExhibit = snapshot.exhibits.find(e => e.id === params.get('exhibit') && (!requestedFloor || e.floorId === requestedFloor.id));
     floorId = requestedFloor?.id || requestedExhibit?.floorId || exhibit()?.floorId || snapshot.floors[0]?.id;
     selected = requestedExhibit?.id || null;
-    areaId = snapshot.areas.find(area => area.id === params.get('area'))?.id || '';
     if (['iso', 'top', 'perspective'].includes(params.get('view'))) mapMode = params.get('view');
     syncUrl();
     render();

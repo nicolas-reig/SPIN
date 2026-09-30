@@ -8,6 +8,7 @@ import {
     MapPlacement,
     STATUSES,
     STATUS_COLORS,
+    normalizeStatus,
     structural
 } from './domain.js';
 import {
@@ -56,7 +57,11 @@ function loadDrafts() {
     editStorageKey = 'hub-edit-' + snapshot.datasetKey;
     try {
         drafts = JSON.parse(localStorage.getItem(draftStorageKey) || '{}');
-        Object.values(drafts).forEach(draft => { draft.saving = false; draft.readingImages = false; });
+        Object.values(drafts).forEach(draft => {
+            draft.saving = false;
+            draft.readingImages = false;
+            if (draft.status === 'unset') draft.status = 'ok';
+        });
     } catch {
         drafts = {};
     }
@@ -1083,7 +1088,7 @@ function structureDialog(kind, isNew = false) {
         id: '', names: { de: '', en: '' }, order: 0, modelId: null,
         transform: identity(), views: {}, revision: null
     } : {
-        id: '', name: '', floorId: floorId || null, status: 'unset',
+        id: '', name: '', floorId: floorId || null, status: 'ok',
         transform: identity(), models: [], views: {}, revision: null,
         notes: [], links: [], placed: false
     }) : structuredClone(source);
@@ -1399,6 +1404,7 @@ function recoverDraft() {
     if (!saved) return;
     showDialog('draftRecover', `<p>${esc(t('draft'))}</p><div class="dialog-footer">${button('discard', 'forgetEditDraft')}<button type="submit" class="primary">${esc(t('recover'))}</button></div>`, async () => {
         edit = new EditSession(saved.base);
+        saved.value.exhibits.forEach(record => { record.status = normalizeStatus(record.status); });
         edit.value = saved.value;
         closeDialog();
         render();

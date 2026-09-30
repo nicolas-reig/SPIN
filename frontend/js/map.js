@@ -1,8 +1,5 @@
 import * as THREE from 'three';
 import {
-    color, mix, texture
-} from 'three/tsl';
-import {
     GLTFLoader
 } from 'three/addons/loaders/GLTFLoader.js';
 import {
@@ -23,16 +20,42 @@ function applyTransform(object, t) {
     object.scale.fromArray(t.scale);
 }
 
-function dispose(object) {
-    object.traverse(o => {
-        o.geometry?.dispose();
-        if (o.material)
-            for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-                for (const v of Object.values(m))
-                    if (v?.isTexture) v.dispose();
-                m.dispose();
-            }
+function disposeMaterials(materials) {
+    const textures = new Set();
+    for (const material of materials) {
+        for (const value of Object.values(material)) {
+            if (value?.isTexture) textures.add(value);
+        }
+        material.dispose();
+    }
+    for (const texture of textures) texture.dispose();
+}
+
+function replaceMaterials(object, material) {
+    const originals = new Set();
+    object.traverse(mesh => {
+        if (!mesh.isMesh) return;
+        for (const original of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+            if (original && original !== material) originals.add(original);
+        }
+        mesh.material = material;
     });
+    disposeMaterials(originals);
+}
+
+function dispose(object, keepMaterials = new Set()) {
+    const geometries = new Set();
+    const materials = new Set();
+    object.traverse(o => {
+        if (o.geometry) geometries.add(o.geometry);
+        if (o.material) {
+            for (const material of Array.isArray(o.material) ? o.material : [o.material]) {
+                if (!keepMaterials.has(material)) materials.add(material);
+            }
+        }
+    });
+    for (const geometry of geometries) geometry.dispose();
+    disposeMaterials(materials);
 }
 export class MapView {
     constructor(container, {
@@ -51,6 +74,22 @@ export class MapView {
         this.root = new THREE.Group();
         this.scene.add(this.root);
         this.objects = new Map();
+        this.materials = Object.fromEntries(Object.entries({
+            ...STATUS_COLORS,
+            selection: SELECTION_COLORS.normal,
+            editSelection: SELECTION_COLORS.edit,
+            floor: '#c4c9ce'
+        }).map(([name, color]) => {
+            const material = new THREE.MeshStandardMaterial({
+                color,
+                roughness: .9,
+                metalness: 0,
+                side: THREE.DoubleSide
+            });
+            material.name = name;
+            return [name, material];
+        }));
+        this.sharedMaterials = new Set(Object.values(this.materials));
         this.generation = 0;
         this.mode = 'iso';
         this.selected = null;
@@ -172,9 +211,10 @@ export class MapView {
             }
         });
     }
-    async model(asset) {
+    async model(asset, material = this.materials.floor) {
         if (!asset) return new THREE.Group();
         const result = await this.loader.loadAsync(asset.url);
+        replaceMaterials(result.scene, material);
         return result.scene;
     }
     async setData(data, floorId, selected, editing = false, {
@@ -188,7 +228,7 @@ export class MapView {
             this.generation++;
             this.transform?.detach();
             this.scene.remove(this.root);
-            dispose(this.root);
+            dispose(this.root, this.sharedMaterials);
             this.root = new THREE.Group();
             this.scene.add(this.root);
             this.objects.clear();
@@ -219,57 +259,29 @@ export class MapView {
             const asset = data.assets.find(a => a.id === floor.modelId);
             const building = await this.model(asset);
             building.userData.floor = true;
-            building.traverse(object => {
-                if (!object.isMesh || !object.name.includes('Grundriss')) return;
-                const original = object.material;
-                if (original?.map) {
-                    const material = new THREE.MeshBasicNodeMaterial();
-                    material.colorNode = mix(color('#e1e4e7'), texture(original.map), 0.32);
-                    material.side = THREE.DoubleSide;
-                    object.material = material;
-                    original.dispose();
-                }
-            });
             next.add(building);
             for (const exhibit of data.exhibits.filter(e => e.floorId === floorId && e.models.length)) {
                 const group = new THREE.Group();
                 group.userData.exhibitId = exhibit.id;
                 group.userData.status = exhibit.status;
                 applyTransform(group, exhibit.transform);
+                next.add(group);
                 for (const [index, instance] of exhibit.models.entries()) {
                     const holder = new THREE.Group();
                     holder.userData.exhibitId = exhibit.id;
                     holder.userData.instanceIndex = index;
                     applyTransform(holder, instance.transform);
-                    holder.add(await this.model(data.assets.find(asset => asset.id === instance.model)));
+                    holder.add(await this.model(data.assets.find(asset => asset.id === instance.model), this.materials[exhibit.status] || this.materials.ok));
                     group.add(holder);
                 }
-                let hasStatusSurface = false;
-                group.traverse(mesh => {
-                    if (!mesh.isMesh) return;
-                    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-                    if (materials.some(material => material.name.startsWith('StatusSurface'))) hasStatusSurface = true;
-                });
-                group.traverse(mesh => {
-                    if (!mesh.isMesh) return;
-                    const prepare = material => {
-                        const copy = material.clone();
-                        const tint = !hasStatusSurface || material.name.startsWith('StatusSurface');
-                        if (tint) copy.color?.set(STATUS_COLORS[exhibit.status]);
-                        copy.userData.statusTint = tint;
-                        return copy;
-                    };
-                    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(prepare) : prepare(mesh.material);
-                });
-                next.add(group);
                 objects.set(exhibit.id, group);
             }
             if (generation !== this.generation) {
-                dispose(next);
+                dispose(next, this.sharedMaterials);
                 return;
             }
             this.scene.remove(this.root);
-            dispose(this.root);
+            dispose(this.root, this.sharedMaterials);
             this.root = next;
             this.scene.add(next);
             this.objects = objects;
@@ -283,7 +295,7 @@ export class MapView {
             this.requestRender();
             this.onState('mapReady');
         } catch (e) {
-            dispose(next);
+            dispose(next, this.sharedMaterials);
             if (generation === this.generation) {
                 this.key = null;
                 this.onState('mapUnavailable');
@@ -292,27 +304,14 @@ export class MapView {
     }
     highlight(id) {
         this.selected = id;
-        cancelAnimationFrame(this.tintFrame);
-        const transitions = [];
         for (const [exhibitId, group] of this.objects) {
+            const material = exhibitId === id ?
+                this.materials[this.editing ? 'editSelection' : 'selection'] :
+                this.materials[group.userData.status] || this.materials.ok;
             group.traverse(mesh => {
-                if (!mesh.isMesh) return;
-                for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-                    if (!material.color || !material.userData.statusTint) continue;
-                    const selectedColor = this.editing ? SELECTION_COLORS.edit : SELECTION_COLORS.normal;
-                    const target = new THREE.Color(exhibitId === id ? selectedColor : STATUS_COLORS[group.userData.status]);
-                    transitions.push({ material, start: material.color.clone(), target });
-                }
+                if (mesh.isMesh) mesh.material = material;
             });
         }
-        const started = performance.now();
-        const animate = () => {
-            const progress = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.min(1, (performance.now() - started) / 160);
-            for (const item of transitions) item.material.color.copy(item.start).lerp(item.target, progress);
-            this.requestRender();
-            if (progress < 1) this.tintFrame = requestAnimationFrame(animate);
-        };
-        animate();
         const object = this.objects.get(id);
         if (object && this.editing && this.tool && object.children[this.activeInstance || 0]) {
             this.transform?.attach(object.children[this.activeInstance || 0]);
@@ -549,9 +548,10 @@ export class MapView {
         this.requestRender();
     }
     async preview(asset) {
-        const model = await this.model(asset);
+        const material = asset.kind === 'floor' ? this.materials.floor : this.materials.ok;
+        const model = await this.model(asset, material);
         this.scene.remove(this.root);
-        dispose(this.root);
+        dispose(this.root, this.sharedMaterials);
         this.root = model;
         this.scene.add(model);
         this.fit();
@@ -560,11 +560,11 @@ export class MapView {
         this.generation++;
         cancelAnimationFrame(this.frame);
         cancelAnimationFrame(this.cameraFrame);
-        cancelAnimationFrame(this.tintFrame);
         this.observer?.disconnect();
         this.controls?.dispose();
         this.transform?.dispose();
-        dispose(this.scene);
+        dispose(this.scene, this.sharedMaterials);
+        disposeMaterials(this.sharedMaterials);
         this.renderer?.dispose();
         this.renderer?.domElement.remove();
     }

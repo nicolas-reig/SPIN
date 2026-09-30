@@ -1,11 +1,11 @@
-export const STATUSES = ['unset', 'ok', 'problem', 'retired'];
+export const STATUSES = ['ok', 'problem', 'retired'];
 export const STATUS_COLORS = {
-    unset: '#a1a7ad',
     ok: '#31975c',
     problem: '#d99a22',
     retired: '#798491'
 };
 export const SELECTION_COLORS = { normal: '#1684ef', edit: '#8056cb' };
+export const normalizeStatus = status => status == null || status === '' || status === 'unset' ? 'ok' : status;
 
 export const identity = () => ({
     position: [0, 0, 0],
@@ -45,6 +45,7 @@ class Record {
 export class Exhibit extends Record {
     constructor(data) {
         super(data);
+        this.status = normalizeStatus(this.status);
         if (!STATUSES.includes(this.status)) throw Error('invalidStatus');
         new MapPlacement(this.transform);
         if (!Array.isArray(this.models)) throw Error('invalidModel');
@@ -123,7 +124,7 @@ export function validateSnapshot(snapshot) {
         validateViews(record.views);
     });
     snapshot.exhibits.forEach(record => {
-        new Exhibit(record);
+        record.status = new Exhibit(record).status;
         validateViews(record.views);
         record.notes.forEach(note => new Note(note));
         record.links.forEach(link => new NasDocumentLink(link));
@@ -141,7 +142,8 @@ export function structural(record, kind) {
 export class EditSession {
     constructor(snapshot) {
         this.base = structuredClone(snapshot);
-        this.value = structuredClone(snapshot);
+        this.base.exhibits.forEach(record => { record.status = normalizeStatus(record.status); });
+        this.value = structuredClone(this.base);
         this.undoStack = [];
         this.redoStack = [];
     }

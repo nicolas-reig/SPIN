@@ -24,7 +24,8 @@ import { readNoteImage } from './images.js';
 import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
 import { cameraMode } from './camera.js';
-import { editIcons, vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
+import { vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
+import { icon } from './icons.js';
 import { safeUrl, opensInBrowser } from './domain.js';
 let noteEditor = null;
 installSelects();
@@ -73,14 +74,10 @@ const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const floor = () => data()?.floors.find(f => f.id === floorId);
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
-const trashIcon = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/></svg>';
-const cameraIcons = {
-    top: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M10 4v8H4m6 0h10m-4 0v8"/></svg>',
-    perspective: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 11-3 5 4v12l-11 2-5-4V7Zm0 0 5 4 11-3M9 11v11"/></svg>'
-};
 for (const [status, value] of Object.entries(STATUS_COLORS)) document.documentElement.style.setProperty('--status-' + status, value);
 const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
 const button = (label, action, cls = '', extra = '') => `<button type="button" data-action="${action}" class="${cls}" ${extra}>${esc(t(label))}</button>`;
+const menuButton = (label, action, name, extra = '') => `<button type="button" data-action="${action}" class="quiet menu-action" ${extra}>${icon(name)}<span>${esc(t(label))}</span></button>`;
 const options = (rows, value) => rows.map(([id, label]) => `<option value="${esc(id)}" ${id===value?'selected':''}>${esc(label)}</option>`).join('');
 const statusOptions = (value, keep = false) => options([...(keep ? [
     ['', t('keepStatus')]
@@ -137,8 +134,8 @@ function setView(value) {
 }
 
 
-function iconButton(label, action, symbol, extra = '') {
-    return `<button type="button" class="icon-button" data-action="${action}" aria-label="${esc(t(label))}" title="${esc(t(label))}" ${extra}>${symbol}</button>`;
+function iconButton(label, action, name, extra = '') {
+    return `<button type="button" class="icon-button" data-action="${action}" aria-label="${esc(t(label))}" title="${esc(t(label))}" ${extra}>${icon(name)}</button>`;
 }
 
 function displayName(record) {
@@ -198,14 +195,14 @@ function renderSidebar() {
     ];
     $('#sidebar').setAttribute('aria-label', t('exhibits'));
     $('#sidebar').innerHTML = `
-        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', '+') : ''}</div>
+        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', 'plus') : ''}</div>
         <div class="search-row">
             <div class="searchbox">
-                <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
+                ${icon('search', 'search-icon')}
                 <input id="search" type="search" value="${esc(query)}" placeholder="${esc(t('searchShort'))}" aria-label="${esc(t('search'))}" autocomplete="off">
             </div>
             <details class="filter-menu">
-                <summary class="icon-button ${filtered ? 'active' : ''}" title="${esc(t('filters'))}" aria-label="${esc(t('filters'))}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4Z"/></svg>${filtered ? '<i class="filter-dot"></i>' : ''}</summary>
+                <summary class="icon-button ${filtered ? 'active' : ''}" title="${esc(t('filters'))}" aria-label="${esc(t('filters'))}">${icon('funnel')}${filtered ? '<i class="filter-dot"></i>' : ''}</summary>
                 <div class="popover">
                     <label for="scope">${esc(t('scope'))}</label>
                     <select id="scope">${options(['nameFloor', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
@@ -218,7 +215,7 @@ function renderSidebar() {
             </details>
         </div>
         <div class="active-filters" ${filtered ? '' : 'hidden'}>
-            <span id="filter-description"></span>${iconButton('clear', 'clear', '×')}
+            <span id="filter-description"></span>${iconButton('clear', 'clear', 'x')}
         </div>
         <div class="exhibit-list" id="exhibit-list"></div>
         <div class="sidebar-footer">
@@ -228,10 +225,10 @@ function renderSidebar() {
                     <button data-language="en" class="${lang() === 'en' ? 'active' : ''}" lang="en" aria-pressed="${lang() === 'en'}">EN</button>
                 </div>
                 <details class="app-menu">
-                    <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary>
+                    <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
                     <div class="popover">
-                        ${edit ? (creation ? button('resumeCreation', 'resumeCreation', 'quiet') : '') + button('editFloor', 'editFloor', 'quiet') + button('newFloor', 'newFloor', 'quiet') + button('models', 'models', 'quiet') : button('editStructure', 'enterEdit', 'quiet')}
-                        ${button('refresh', 'refresh', 'quiet')}
+                        ${edit ? (creation ? menuButton('resumeCreation', 'resumeCreation', 'pencil-line') : '') + menuButton('editFloor', 'editFloor', 'layers') + menuButton('newFloor', 'newFloor', 'layers-plus') + menuButton('models', 'models', 'library') : menuButton('editStructure', 'enterEdit', 'pencil-line')}
+                        ${menuButton('refresh', 'refresh', 'refresh-cw')}
                     </div>
                 </details>
             </div>
@@ -267,7 +264,7 @@ function renderList() {
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
             <span class="exhibit-name">${esc(displayName(e))}</span>
             <span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>
-        </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}">···</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}">${esc(t('duplicate'))}</button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${e.notes.length || e.links.length ? `disabled title="${esc(t('notEmpty'))}"` : ''}>${esc(t('deleteExhibit'))}</button></div></details>` : ''}</div>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
+        </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}">${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${e.notes.length || e.links.length ? `disabled title="${esc(t('notEmpty'))}"` : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
 }
 
 function renderMapUI() {
@@ -286,18 +283,17 @@ function renderMapUI() {
     $('#map-controls').innerHTML = `
         <div class="map-toolbar" aria-label="${esc(t('keyboardMap'))}">
             <div class="view-toggle" role="group" aria-label="${esc(t('cameraView'))}">
-                ${['top', 'perspective'].map(mode => `<button type="button" class="icon-button" data-action="camera:${mode}" aria-label="${esc(t(mode))}" title="${esc(t(mode))}" aria-pressed="${mapMode === mode}">${cameraIcons[mode]}</button>`).join('')}
+                ${['top', 'perspective'].map(mode => `<button type="button" class="icon-button" data-action="camera:${mode}" aria-label="${esc(t(mode))}" title="${esc(t(mode))}" aria-pressed="${mapMode === mode}">${icon(mode === 'top' ? 'grid-2x2' : 'box')}</button>`).join('')}
             </div>
             <span class="toolbar-divider"></span>
-            ${iconButton('focus', 'focus', '⌖', !selected ? 'disabled' : '')}
-            ${iconButton('zoomOut', 'camera:zoomOut', '−') + iconButton('zoomIn', 'camera:zoomIn', '+')}
-            ${edit && exhibit()?.models.length && !creationOpen && !editingFloor && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'G'], ['rotate', 'rotate', 'R'], ['scale', 'scaleTool', 'S']].map(([tool, label, key]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" title="${esc(t(label) + ' (' + key + ')')}" aria-pressed="${gizmo === tool}">${editIcons[tool]}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" title="${esc(t('placementOptions'))}">${editIcons.settings}</summary><div class="popover"><label class="check"><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis">${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''}
+            ${iconButton('focus', 'focus', 'crosshair', !selected ? 'disabled' : '')}
+            ${iconButton('zoomOut', 'camera:zoomOut', 'minus') + iconButton('zoomIn', 'camera:zoomIn', 'plus')}
+            ${edit && exhibit()?.models.length && !creationOpen && !editingFloor && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'G', 'move'], ['rotate', 'rotate', 'R', 'rotate-cw'], ['scale', 'scaleTool', 'S', 'scaling']].map(([tool, label, key, name]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" title="${esc(t(label) + ' (' + key + ')')}" aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" title="${esc(t('placementOptions'))}">${icon('sliders-horizontal')}</summary><div class="popover"><label class="check"><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis">${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''}
             <details class="camera-menu">
-                <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary>
+                <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
                 <div class="popover">
-                    ${button('fit', 'camera:fit', 'quiet')}
-                    ${button('rotate', 'camera:rotate', 'quiet', mapMode === 'top' ? 'disabled' : '')}
-                    <div class="row">${[['panLeft', '←'], ['panUp', '↑'], ['panDown', '↓'], ['panRight', '→']].map(([a, symbol]) => iconButton(a, 'camera:' + a, symbol)).join('')}</div>
+                    <div class="camera-actions">${iconButton('fit', 'camera:fit', 'maximize')}${iconButton('rotate', 'camera:rotate', 'rotate-cw', mapMode === 'top' ? 'disabled' : '')}</div>
+                    <div class="row camera-pan">${[['panLeft', 'arrow-left'], ['panUp', 'arrow-up'], ['panDown', 'arrow-down'], ['panRight', 'arrow-right']].map(([action, name]) => iconButton(action, 'camera:' + action, name)).join('')}</div>
                     <p class="small muted">${esc(t('mapHelp'))}</p>
                 </div>
             </details>
@@ -434,7 +430,7 @@ function noteHTML(n) {
             ${n.images.map(id => `<a href="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" target="_blank" rel="noopener"><img class="note-image" src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}" loading="lazy"></a>`).join('')}
             <div class="note-footer">
                 ${n.corrections?.length ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(n.corrections.at(-1).signature)} · ${esc(date(n.corrections.at(-1).at))}</p></details>` : '<span></span>'}
-                <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${esc(t('correct'))}</button><button type="button" class="danger" data-delete-note="${esc(n.id)}">${esc(t('deleteNote'))}</button></div></details>
+                <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${icon('pencil-line')}<span>${esc(t('correct'))}</span></button><button type="button" class="danger" data-delete-note="${esc(n.id)}">${icon('trash')}<span>${esc(t('deleteNote'))}</span></button></div></details>
             </div>
         </article>`;
 }
@@ -467,7 +463,7 @@ function renderInspector() {
             <div class="inspector-tools">
                 <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
                 <div class="status-picker">
-                    <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" title="${esc(t(e.status))}">${statusHTML(e.status)}<span class="status-chevron" aria-hidden="true"></span></button>
+                    <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" title="${esc(t(e.status))}">${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
                         ${STATUSES.map(status => `<button type="button" class="status-choice" data-status-choice="${status}" role="menuitemradio" tabindex="-1" aria-label="${esc(t(status))}" aria-checked="${status === e.status}">${statusHTML(status)}</button>`).join('')}
                     </div>
@@ -580,16 +576,16 @@ function renderLinks(e, element) {
             <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
         </form>
         ${searchable ? `<div class="searchbox link-search">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
+            ${icon('search', 'search-icon')}
             <input id="link-search" type="search" value="${esc(linkSearches[e.id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
         </div>` : ''}
         <div id="link-results">${e.links.map(link => `
             <article class="link-card">
-                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span><span aria-hidden="true">↗</span></a>
+                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span>${icon('external-link')}</a>
                 ${link.description ? `<p>${esc(link.description)}</p>` : ''}
                 <div class="link-actions">
-                    <button type="button" class="quiet" data-copy="${esc(link.id)}" title="${esc(link.url)}">${esc(t('copy'))}</button>
-                    <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${esc(t('edit'))}</button><button type="button" class="danger" data-delete-link="${esc(link.id)}">${esc(t('remove'))}</button></div></details>
+                    <button type="button" class="icon-button" data-copy="${esc(link.id)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>
+                    <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button><button type="button" class="danger" data-delete-link="${esc(link.id)}">${icon('trash')}<span>${esc(t('remove'))}</span></button></div></details>
                 </div>
             </article>`).join('')}
             <p id="link-no-results" class="empty" role="status" hidden>${esc(t('noLinkResults'))}</p>
@@ -684,30 +680,30 @@ function renderComposer() {
         d = drafts[e.id];
     if (!d) return;
     if (d.readOnly) {
-        $('#composer-slot').innerHTML = button('continueEdit', 'resumeNote', 'quiet');
+        $('#composer-slot').innerHTML = iconButton('continueEdit', 'resumeNote', 'pencil-line');
         return;
     }
     const active = d.open || Boolean(d.body || d.images.length || d.noteId);
     $('#composer-slot').innerHTML = `
         <form class="composer ${active ? 'composing' : ''}" id="note-form" novalidate>
-            ${d.noteId ? `<div class="composer-correction row between">${button('backToNote', 'backToNote', 'quiet')}${button('cancel', 'discardDraft', 'quiet')}</div>` : ''}
+            ${d.noteId ? `<div class="composer-correction row between">${iconButton('backToNote', 'backToNote', 'arrow-left')}${button('cancel', 'discardDraft', 'quiet')}</div>` : ''}
             <div id="note-editor" class="note-body"></div>
             <div class="composer-expanded" ${active ? '' : 'hidden'}>
                 <div class="attachments">
-                    ${d.existingImages.map(id => `<div class="attachment"><img src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}"><button type="button" data-remove-existing="${esc(id)}" aria-label="${esc(t('remove'))}">×</button></div>`).join('')}
-                    ${d.images.map((im, i) => `<div class="attachment"><img src="${esc(im.data)}" alt="${esc(im.name)}"><button type="button" data-remove-image="${i}" aria-label="${esc(t('remove'))}">×</button></div>`).join('')}
+                    ${d.existingImages.map(id => `<div class="attachment"><img src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}"><button type="button" data-remove-existing="${esc(id)}" aria-label="${esc(t('remove'))}" title="${esc(t('remove'))}">${icon('x')}</button></div>`).join('')}
+                    ${d.images.map((im, i) => `<div class="attachment"><img src="${esc(im.data)}" alt="${esc(im.name)}"><button type="button" data-remove-image="${i}" aria-label="${esc(t('remove'))}" title="${esc(t('remove'))}">${icon('x')}</button></div>`).join('')}
                 </div>
                 <div class="composer-tools" ${d.signing ? 'hidden' : ''}>
                     <div class="toolbar">
-                        ${[['bold', '<strong>B</strong>'], ['italic', '<em>I</em>'], ['heading', 'H'], ['list', '1.'], ['link', '↗']].map(([key, icon]) => `<button type="button" class="icon-button" data-format="${key}" aria-label="${esc(t(key === 'list' ? 'numberedList' : key))}" title="${esc(t(key === 'list' ? 'numberedList' : key))}">${icon}</button>`).join('')}
-                        <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 6-6 4 4 3-3 4 5"/></svg></button>
+                        ${[['bold', 'bold'], ['italic', 'italic'], ['heading', 'heading'], ['list', 'list-ordered'], ['link', 'link']].map(([key, name]) => `<button type="button" class="icon-button" data-format="${key}" aria-label="${esc(t(key === 'list' ? 'numberedList' : key))}" title="${esc(t(key === 'list' ? 'numberedList' : key))}">${icon(name)}</button>`).join('')}
+                        <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}">${icon('image-plus')}</button>
                         <input type="file" id="note-image" hidden accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple>
                     </div>
                     <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : 'postShort'))}</button>
                 </div>
                 <div class="composer-secondary" ${d.signing ? 'hidden' : ''}>
                     <span class="draft-label" title="${esc(t('draftScope'))}">${esc(t('draftShort'))}</span>
-                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">···</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
+                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
                 </div>
             </div>
             ${d.readingImages ? `<p class="muted small" role="status">${esc(t('addingImages'))}</p>` : ''}
@@ -924,7 +920,7 @@ function acceptSnapshot(value) {
 
 function renderMobile() {
     const detail = Boolean(exhibit() || edit && (creationOpen || editingFloor || editConflict?.open));
-    $('#mobile-nav').innerHTML = ['list', 'map', 'detail'].map(key => button(key === 'list' ? 'exhibits' : key, 'view:' + key, view === key ? 'active' : '', `aria-current="${view===key?'page':'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}`)).join('');
+    $('#mobile-nav').innerHTML = [['list', 'list'], ['map', 'map'], ['detail', 'panel-right']].map(([key, name]) => `<button type="button" data-action="view:${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}>${icon(name)}<span>${esc(t(key === 'list' ? 'exhibits' : key))}</span></button>`).join('');
 }
 
 function renderEditBar() {
@@ -936,7 +932,7 @@ function renderEditBar() {
     el.classList.toggle('signing', signing);
     const label = creation ? `<button type="button" class="quiet edit-session-label" data-action="resumeCreation" title="${esc(t('resumeCreation'))}">${esc(t(creation.kind === 'floors' ? 'newFloor' : 'newExhibit'))}</button>` : `<span class="edit-session-label" title="${esc(t(dirty ? 'editing' : 'editStructure'))}">${esc(t('editingShort'))}${dirty ? '<i aria-hidden="true"></i>' : ''}</span>`;
     el.innerHTML = `<div class="edit-session-heading">${label}
-        <div class="edit-history">${iconButton('undo', 'undo', editIcons.undo, !edit.undoStack.length || editSave?.saving ? 'disabled' : '')}${iconButton('redo', 'redo', editIcons.redo, !edit.redoStack.length || editSave?.saving ? 'disabled' : '')}</div></div>
+        <div class="edit-history">${iconButton('undo', 'undo', 'undo-2', !edit.undoStack.length || editSave?.saving ? 'disabled' : '')}${iconButton('redo', 'redo', 'redo-2', !edit.redoStack.length || editSave?.saving ? 'disabled' : '')}</div></div>
         ${signing ? `<label class="sr-only" for="edit-signature">${esc(t('signature'))}</label><input id="edit-signature" autocomplete="off" maxlength="120" placeholder="${esc(t('yourName'))}" value="${esc(editSave.signature)}" aria-describedby="edit-save-error">` : ''}
         <div class="edit-session-actions" role="group" aria-label="${esc(t('editStructure'))}">${button('cancel', signing ? 'cancelEditSignature' : 'cancelEdit', 'quiet', `title="${esc(t(signing ? 'continueEdit' : 'cancelEditing'))}"`)}<button type="button" class="primary" data-action="${signing ? 'confirmEditSave' : 'saveExit'}" title="${esc(t(creation ? 'finishCreation' : editConflict ? 'resolveChanges' : 'signSave'))}" ${editSave?.saving || creation || editConflict || !dirty || (signing && !editSave.signature.trim()) ? 'disabled' : ''}>${esc(t(editSave?.saving ? 'saving' : 'save'))}</button></div>
         <div class="error" id="edit-save-error" role="alert" ${editSave?.error ? '' : 'hidden'}><span>${esc(editSave?.error ? t(editSave.error === 'conflict' ? 'editConflictHint' : editSave.error) : '')}</span>${editSave?.error === 'conflict' ? button('resolveChanges', 'structureConflict', 'quiet') : ''}</div>`;
@@ -951,7 +947,7 @@ function renderEditBar() {
 
 function editorMenu(record) {
     if (!record || editingFloor) return '';
-    return `<details class="editor-menu"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary><div class="popover">${button('duplicate', 'duplicateExhibit', 'quiet')}<button type="button" class="quiet danger" data-trash-exhibit="${esc(record.id)}" ${record.notes.length || record.links.length ? `disabled title="${esc(t('notEmpty'))}"` : ''}>${esc(t('deleteExhibit'))}</button></div></details>`;
+    return `<details class="editor-menu"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${menuButton('duplicate', 'duplicateExhibit', 'copy-plus')}<button type="button" class="quiet danger" data-trash-exhibit="${esc(record.id)}" ${record.notes.length || record.links.length ? `disabled title="${esc(t('notEmpty'))}"` : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>`;
 }
 
 function renderEditInspector() {
@@ -967,12 +963,12 @@ function renderEditInspector() {
         <div class="grid2"><div class="field"><label for="floor-name-de">${esc(t('nameDe'))}</label><input id="floor-name-de" data-floor-name="de" maxlength="200" value="${esc(record.names.de)}" placeholder="${esc(record.id)}"></div><div class="field"><label for="floor-name-en">${esc(t('nameEn'))}</label><input id="floor-name-en" data-floor-name="en" maxlength="200" value="${esc(record.names.en)}" placeholder="${esc(record.id)}"></div></div>
         ${viewPresets(record)}` : `
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId">${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div>
-        <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" title="${esc(t('addModel'))}">+</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}">${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}${button('models', 'models', 'quiet')}</div></details></div>
+        <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" title="${esc(t('addModel'))}">${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}">${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}${button('models', 'models', 'quiet')}</div></details></div>
         <div id="instance-list">${record.models.map((instance, index) => {
             const asset = hardware.find(item => item.id === instance.model);
             return `<article class="model-instance ${index === activeInstance ? 'active' : ''}">
                 <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${index}" aria-pressed="${index === activeInstance}" title="${esc(t('selectModel'))}">${esc(asset?.name || instance.model)}${record.models.filter(item => item.model === instance.model).length > 1 ? `<small>${index + 1}</small>` : ''}</button>
-                    <details class="instance-menu"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + (asset?.name || instance.model))}">···</summary><div class="popover"><button type="button" data-duplicate-instance="${index}">${esc(t('duplicate'))}</button><button type="button" class="danger" data-remove-instance="${index}">${esc(t('remove'))}</button></div></details></div>
+                    <details class="instance-menu"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + (asset?.name || instance.model))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-instance="${index}">${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-remove-instance="${index}">${icon('trash')}<span>${esc(t('remove'))}</span></button></div></details></div>
                 <details class="instance-placement"><summary>${esc(t('placement'))}</summary><label class="sr-only" for="instance-model-${index}">${esc(t('model'))}</label><select id="instance-model-${index}" data-instance-model="${index}">${options(hardware.map(item => [item.id, item.name]), instance.model)}</select>${vectorFields(instance.transform, `data-instance="${index}"`, index)}</details>
             </article>`;
         }).join('')}</div>
@@ -1016,7 +1012,7 @@ function closeDialog() {
 function showDialog(title, html, onSubmit = null) {
     closeDialog();
     const dialog = $('#dialog');
-    dialog.innerHTML = `<div class="dialog-header"><h2>${esc(t(title))}</h2><button type="button" data-action="closeDialog" class="quiet" aria-label="${esc(t('close'))}">×</button></div><form class="dialog-body" id="dialog-form" novalidate>${html}<div id="dialog-error" class="error" role="alert" hidden></div></form>`;
+    dialog.innerHTML = `<div class="dialog-header"><h2>${esc(t(title))}</h2><button type="button" data-action="closeDialog" class="quiet" aria-label="${esc(t('close'))}" title="${esc(t('close'))}">${icon('x')}</button></div><form class="dialog-body" id="dialog-form" novalidate>${html}<div id="dialog-error" class="error" role="alert" hidden></div></form>`;
     if (onSubmit) $('#dialog-form').addEventListener('submit', async e => {
         e.preventDefault();
         const submit = e.submitter;
@@ -1464,7 +1460,7 @@ async function modelsDialog() {
     const rows = data().assets.filter(asset => asset.kind === 'hardware').map(asset => `
         <div class="model-row">
             <div class="model-text"><strong title="${esc(asset.file)}">${esc(asset.name)}</strong></div>
-            <button type="button" class="quiet" data-preview-model="${esc(asset.id)}">${esc(t('preview'))}</button>
+            <button type="button" class="icon-button" data-preview-model="${esc(asset.id)}" aria-label="${esc(t('preview') + ': ' + asset.name)}" title="${esc(t('preview'))}">${icon('eye')}</button>
         </div>`).join('');
     let closed = false;
     const controller = new AbortController();

@@ -1,3 +1,5 @@
+import { icon } from './icons.js';
+
 let active = null;
 let activePopover = null;
 let serial = 0;
@@ -80,10 +82,8 @@ function enhance(select) {
         button.replaceChildren();
         const text = document.createElement('span');
         text.textContent = select.selectedOptions[0]?.textContent || '';
-        const arrow = document.createElement('span');
-        arrow.className = 'status-chevron';
-        arrow.setAttribute('aria-hidden', 'true');
-        button.append(text, arrow);
+        button.append(text);
+        button.insertAdjacentHTML('beforeend', icon('chevron-down', 'status-chevron'));
         button.disabled = select.disabled;
     };
     sync();
@@ -164,6 +164,10 @@ export function installSelects() {
         if (active && !active.button.isConnected) close();
         if (activePopover && !activePopover.details.isConnected) closePopover();
         document.querySelectorAll('select:not([data-custom])').forEach(enhance);
+        document.querySelectorAll('details > summary:not(.icon-button):not([data-disclosure])').forEach(summary => {
+            summary.dataset.disclosure = 'true';
+            summary.insertAdjacentHTML('beforeend', icon('chevron-right', 'disclosure-icon'));
+        });
         for (const panel of panels) if (!panel.isConnected) { observer.unobserve(panel); panels.delete(panel); }
         document.querySelectorAll('.panel-content:not([data-measured])').forEach(panel => { panel.dataset.measured = 'true'; panels.add(panel); observer.observe(panel); });
     };

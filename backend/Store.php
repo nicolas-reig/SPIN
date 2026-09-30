@@ -751,7 +751,13 @@ final class Store
         if ($kind !== 'model' || !in_array($id, $this->modelFiles(), true)) {
             throw new ApiError('notFound', 404);
         }
-        return ['path' => $this->path($this->assets, $id), 'mime' => 'model/gltf-binary'];
+        $path = $this->path($this->assets, $id);
+        $bytes = file_get_contents($path);
+        if ($bytes === false) {
+            throw new ApiError('storage', 503);
+        }
+        self::validateGlb($bytes);
+        return ['path' => $path, 'mime' => 'model/gltf-binary'];
     }
 
     public function namedPhoto(string $exhibit, string $name): array

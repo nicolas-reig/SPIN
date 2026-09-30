@@ -27,6 +27,7 @@ import { cameraMode } from './camera.js';
 import { vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
 import { icon } from './icons.js';
 import { safeUrl, opensInBrowser } from './domain.js';
+import { copyText } from './clipboard.js';
 let noteEditor = null;
 installSelects();
 const $ = s => document.querySelector(s),
@@ -1788,7 +1789,7 @@ document.addEventListener('click', async event => {
         if (element.dataset.deleteLink) { deleteLink(element.dataset.deleteLink); return; }
         if (element.dataset.copy) {
             const link = exhibit().links.find(l => l.id === element.dataset.copy);
-            try { await navigator.clipboard.writeText(link.url); announce(t('copied')); }
+            try { await copyText(link.url); announce(t('copied')); }
             catch { announce(t('copyFailed')); }
             return;
         }

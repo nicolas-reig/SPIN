@@ -61,14 +61,21 @@ final class Store
     public static function url(mixed $value): string
     {
         $url = self::text($value, 2048);
-        $parts = parse_url($url);
-        $scheme = strtolower($parts['scheme'] ?? '');
-        if (
-            !in_array($scheme, ['http', 'https', 'smb', 'file', 'ftp'], true) ||
-            (empty($parts['host']) && $scheme !== 'file') ||
-            isset($parts['user']) || isset($parts['pass']) ||
-            preg_match('/[\x00-\x20\x7f]/', $url)
-        ) {
+        if (!preg_match('/^([a-z][a-z0-9+.-]*):/i', $url, $match) || preg_match('/[\x00-\x20\x7f]/', $url)) {
+            throw new ApiError('invalidUrl');
+        }
+        $scheme = strtolower($match[1]);
+        if (in_array($scheme, ['javascript', 'vbscript', 'data', 'blob', 'filesystem'], true)) {
+            throw new ApiError('invalidUrl');
+        }
+        $target = substr($url, strlen($match[0]));
+        $hasAuthority = preg_match('~^//([^/?#]*)~', $target, $authority) === 1;
+        $network = in_array($scheme, ['http', 'https', 'smb', 'ftp'], true);
+        if (($network && (!$hasAuthority || $authority[1] === '')) || ($scheme === 'file' && $target === '')) {
+            throw new ApiError('invalidUrl');
+        }
+        if ($hasAuthority && (str_contains($authority[1], '@') ||
+            ($authority[1] !== '' && parse_url($url) === false))) {
             throw new ApiError('invalidUrl');
         }
         return $url;

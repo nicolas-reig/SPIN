@@ -79,15 +79,25 @@ export class Note extends Record {
 }
 
 export function safeUrl(value) {
+    if (typeof value !== 'string' || /[\x00-\x20\x7f]/.test(value)) return false;
+    const match = /^([a-z][a-z0-9+.-]*):/i.exec(value);
+    if (!match) return false;
+    const scheme = match[1].toLowerCase();
+    if (['javascript', 'vbscript', 'data', 'blob', 'filesystem'].includes(scheme)) return false;
+    const target = value.slice(match[0].length);
+    if (scheme === 'file' && !target) return false;
+    const authority = /^\/\/([^/?#]*)/.exec(target);
+    if (authority?.[1].includes('@')) return false;
+    if (['http', 'https', 'smb', 'ftp'].includes(scheme) && !authority?.[1]) return false;
     try {
         const url = new URL(value);
-        return ['http:', 'https:', 'smb:', 'file:', 'ftp:'].includes(url.protocol) &&
-            !url.username && !url.password && !/[\x00-\x20\x7f]/.test(value) &&
-            (url.hostname || url.protocol === 'file:');
+        return !url.username && !url.password;
     } catch {
         return false;
     }
 }
+
+export const opensInBrowser = value => /^(https?|ftp|file):/i.test(value);
 
 export class NasDocumentLink extends Record {
     constructor(data) {

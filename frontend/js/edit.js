@@ -1,19 +1,7 @@
 import { identity, structural, EditSession } from './domain.js';
 import { escape as esc } from './markdown.js';
 import { t } from './locale.js';
-
-const svg = path => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
-
-export const editIcons = {
-    undo: svg('M8 4 3 9l5 5M3 9h11a5 5 0 0 1 0 10h-3'),
-    redo: svg('m16 4 5 5-5 5M21 9H10a5 5 0 0 0 0 10h3'),
-    translate: svg('M12 3v18M3 12h18m-12-6 3-3 3 3m-6 12 3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3'),
-    rotate: svg('M20 8a8 8 0 1 0 0 8M20 3v5h-5'),
-    scale: svg('M4 9V4h5m6 16h5v-5M4 4l6 6m10 10-6-6'),
-    duplicate: svg('M9 4H4v13h5m0-10h11v14H9V7Zm5 4v6m-3-3h6'),
-    capture: svg('M12 3v4m0 10v4M3 12h4m10 0h4M7 7h10v10H7V7Z'),
-    settings: svg('M4 7h6m4 0h6M4 17h10m4 0h2M10 4v6m4 4v6')
-};
+import { icon } from './icons.js';
 
 export function vectorFields(transform, attributes = '', scope = 'group') {
     return ['position', 'rotation', 'scale'].map(key => `
@@ -28,10 +16,10 @@ export function vectorFields(transform, attributes = '', scope = 'group') {
 export function viewPresets(record) {
     return `<details class="view-presets"><summary>${esc(t('defaultViews'))}</summary>
         ${['top', 'three'].map(key => `<div class="preset-row">
-            <span>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span>
-            <button type="button" class="quiet" data-preview-view="${key}" title="${esc(record.views?.[key] ? t('showView') : t('viewFallback'))}">${esc(t(record.views?.[key] ? 'showView' : 'automatic'))}</button>
-            <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(t('useCurrentView'))}">${editIcons.capture}</button>
-            <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(t('automatic'))}" ${record.views?.[key] ? '' : 'disabled'}>×</button>
+            <span class="preset-type" title="${esc(t(key === 'top' ? 'view2D' : 'view3D'))}">${icon(key === 'top' ? 'grid-2x2' : 'box')}<span class="sr-only">${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span></span>
+            <button type="button" class="icon-button" data-preview-view="${key}" aria-label="${esc(t('showView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(record.views?.[key] ? t('showView') : t('viewFallback'))}">${icon('eye')}</button>
+            <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(t('useCurrentView'))}">${icon('camera')}</button>
+            <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" title="${esc(t('automatic'))}" ${record.views?.[key] ? '' : 'disabled'}>${icon('rotate-ccw')}</button>
         </div>`).join('')}
     </details>`;
 }

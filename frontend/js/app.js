@@ -50,6 +50,7 @@ let snapshot = null,
     noticeTimer, dialogCleanup = null;
 let drafts = {}, draftStorageKey = '', editStorageKey = '';
 const linkDrafts = {};
+const linkSearches = {};
 function loadDrafts() {
     draftStorageKey = 'hub-drafts-' + snapshot.datasetKey;
     editStorageKey = 'hub-edit-' + snapshot.datasetKey;
@@ -557,6 +558,8 @@ function renderPanel() {
 
 function renderLinks(e, element) {
     const draft = linkDrafts[e.id] ||= { open: false, id: null, title: '', url: '', description: '' };
+    const searchable = e.links.length > 6;
+    if (!searchable) delete linkSearches[e.id];
     element.innerHTML = `
         <form class="composer link-composer ${draft.open ? 'composing' : ''}" id="link-form" novalidate>
             <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t('addLink'))}" maxlength="160" value="${esc(draft.title)}">
@@ -567,7 +570,11 @@ function renderLinks(e, element) {
             </div>
             <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
         </form>
-        ${e.links.map(link => `
+        ${searchable ? `<div class="searchbox link-search">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
+            <input id="link-search" type="search" value="${esc(linkSearches[e.id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
+        </div>` : ''}
+        <div id="link-results">${e.links.map(link => `
             <article class="link-card">
                 <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span><span aria-hidden="true">↗</span></a>
                 ${link.description ? `<p>${esc(link.description)}</p>` : ''}
@@ -575,7 +582,25 @@ function renderLinks(e, element) {
                     <button type="button" class="quiet" data-copy="${esc(link.id)}" title="${esc(link.url)}">${esc(t('copy'))}</button>
                     <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">···</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${esc(t('edit'))}</button><button type="button" class="danger" data-delete-link="${esc(link.id)}">${esc(t('remove'))}</button></div></details>
                 </div>
-            </article>`).join('')}`;
+            </article>`).join('')}
+            <p id="link-no-results" class="empty" role="status" hidden>${esc(t('noLinkResults'))}</p>
+        </div>`;
+    const search = element.querySelector('#link-search');
+    const cards = [...element.querySelectorAll('.link-card')];
+    const empty = element.querySelector('#link-no-results');
+    const filterLinks = () => {
+        const query = search?.value.trim().toLocaleLowerCase() || '';
+        cards.forEach((card, index) => {
+            const link = e.links[index];
+            card.hidden = ![link.title, link.url, link.description].join(' ').toLocaleLowerCase().includes(query);
+        });
+        empty.hidden = !query || cards.some(card => !card.hidden);
+    };
+    search?.addEventListener('input', () => {
+        linkSearches[e.id] = search.value;
+        filterLinks();
+    });
+    filterLinks();
     const form = element.querySelector('#link-form');
     form.addEventListener('focusin', () => {
         if (!draft.open) {
@@ -1355,7 +1380,7 @@ async function refresh() {
 }
 
 async function refreshFromFiles() {
-    if (document.hidden || edit || $('#dialog').open || document.activeElement?.closest('#note-form, #link-form')) return;
+    if (document.hidden || edit || $('#dialog').open || document.activeElement?.closest('#note-form, #link-form, #link-search')) return;
     try {
         const current = await api.load();
         const stamp = value => JSON.stringify([value.revision, value.structureRevision, value.exhibits.map(item => [item.id, item.revision, item.contentTag])]);

@@ -553,6 +553,7 @@ summary {
 }
 
 #map-controls {
+    width: max-content;
     position: absolute;
     bottom: 25px;
     left: 50%;
@@ -1098,36 +1099,9 @@ summary {
     --reader: min(56vw, 720px);
 }
 
-#editbar {
-    position: fixed;
-    left: calc(var(--list) + 14px);
-    right: calc(var(--reader) + 14px);
-    top: 78px;
-    z-index: 7;
-    background: #fff6e8;
-    border-radius: 8px;
-    padding: 12px;
-    box-shadow: var(--shadow);
-    max-height: 260px;
-    overflow: auto;
-}
 
-#editbar .edit-label {
-    display: block;
-    font-size: .8125rem;
-    color: #8c6734;
-    padding: 2px 3px 9px;
-}
 
-#editbar .row {
-    gap: 5px;
-}
 
-#editbar button {
-    min-height: 34px;
-    font-size: .75rem;
-    padding: 5px 9px;
-}
 
 #notice {
     position: fixed;
@@ -1534,16 +1508,7 @@ dialog::backdrop {
         height: 44px;
     }
 
-    #editbar {
-        left: 14px;
-        right: 14px;
-        top: 12px;
-        max-height: 160px;
-    }
 
-    body:has(#editbar:not([hidden])) #workspace {
-        padding-top: 170px;
-    }
 
     #notice {
         bottom: 90px;
@@ -1745,11 +1710,6 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
     min-width: 0;
 }
 
-.exhibit-trash {
-    width: 40px;
-    min-height: 44px;
-    color: var(--red);
-}
 
 body.editing {
     --accent: #8056cb;
@@ -1762,40 +1722,14 @@ body.editing {
     background: var(--accent);
 }
 
-.edit-context {
-    font-size: .75rem;
-    font-weight: 600;
-    color: #8056cb;
-    margin-bottom: 8px;
-}
 
-#editbar {
-    top: 18px;
-    width: fit-content;
-    max-width: calc(100% - var(--list) - var(--reader) - 130px);
-    right: auto;
-    background: #f7f3fded;
-    backdrop-filter: blur(18px);
-}
 
-#editbar .edit-label {
-    color: #8056cb;
-}
 
 #structure-panel {
-    padding-top: 0;
+    padding-top: 14px;
 }
 
-.spatial-tools {
-    background: #e7e0f0;
-    border-radius: 8px;
-    padding: 14px;
-    margin-bottom: 20px;
-}
 
-.spatial-tools .row {
-    margin-top: 12px;
-}
 
 #axis {
     width: auto;
@@ -1852,25 +1786,6 @@ body.editing {
     #map-heading {
         left: auto;
         right: 16px;
-    }
-    #editbar {
-        position: fixed;
-        top: 8px;
-        left: 12px;
-        right: 12px;
-        width: auto;
-        max-width: none;
-        padding: 8px 12px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-    }
-    #editbar .edit-label {
-        padding: 0;
-    }
-    body:has(#editbar:not([hidden])) #workspace {
-        padding-top: 70px;
     }
     .signature-actions button, .note-options>summary {
         min-height: 44px;
@@ -2235,12 +2150,6 @@ body.editing {
         right: calc(var(--inspector-overlay) + 18px);
         max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
     }
-    #editbar {
-        max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
-    }
-    body.editing #map-heading {
-        top: calc(var(--editbar-height, 0px) + 36px);
-    }
     #map-controls {
         left: calc((100% + var(--list) - var(--inspector-overlay)) / 2);
         max-width: calc(100% - var(--list) - var(--inspector-overlay) - 28px);
@@ -2268,9 +2177,8 @@ body.editing {
         #map-heading { transition: right 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
         #map-controls { transition: left 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
         #map-message { transition: right 280ms cubic-bezier(.22,.68,0,1); }
-        #editbar { transition: max-width 280ms cubic-bezier(.22,.68,0,1); }
-        body.resizing :is(#map-heading, #map-controls, #map-message, #editbar),
-        body:has(#resizer:focus) :is(#map-heading, #map-controls, #map-message, #editbar) { transition: none; }
+        body.resizing :is(#map-heading, #map-controls, #map-message),
+        body:has(#resizer:focus) :is(#map-heading, #map-controls, #map-message) { transition: none; }
     }
 }
 @media (max-width: 860px) {
@@ -2283,9 +2191,6 @@ body.editing {
     }
     #map-heading {
         max-height: calc(100% - 190px - env(safe-area-inset-bottom));
-    }
-    body.editing #map-heading {
-        top: calc(var(--editbar-height, 0px) + 24px);
     }
     #map-controls {
         bottom: calc(87px + env(safe-area-inset-bottom));
@@ -2313,44 +2218,474 @@ body.editing {
     }
 }
 
-.instance-heading {
-    margin: 18px 0 10px;
+/* Editing uses the same panels and reading edges as the service view. */
+body.editing {
+    --panel: #f0f1f3;
 }
-.model-instance {
-    padding: 12px;
-    margin-bottom: 12px;
-    border-radius: 8px;
-    background: #ffffffb8;
-    box-shadow: 0 2px 8px #23334109;
+
+#editbar {
+    position: fixed;
+    z-index: 7;
+    left: 23px;
+    bottom: 76px;
+    top: auto;
+    right: auto;
+    width: calc(var(--list) - 46px);
+    max-height: calc(100dvh - 180px);
+    overflow-y: auto;
+    padding: 0;
+    background: transparent;
 }
-.model-instance.active {
-    box-shadow: 0 2px 8px #23334109, 0 0 0 1px #8056cb36;
+
+body.editing .sidebar-footer {
+    padding-top: calc(var(--editbar-height, 0px) + 16px);
 }
-.model-instance .row {
+
+.edit-session-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.edit-session-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: .8125rem;
+    font-weight: 550;
+    color: var(--accent);
+}
+
+.edit-session-label i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+button.edit-session-label {
+    padding: 0;
+    min-height: 32px;
+    text-align: left;
+    justify-content: flex-start;
+}
+
+.edit-history {
+    display: flex;
+    gap: 2px;
+}
+
+.edit-history .icon-button {
+    width: 30px;
+    height: 32px;
+    min-height: 32px;
+}
+
+.edit-session-actions, .creation-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.edit-session-actions > button {
+    flex: 1;
+    padding-inline: 8px;
+}
+
+#edit-signature {
+    margin-bottom: 10px;
+}
+
+#edit-signature:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+#edit-save-error {
+    display: grid;
     gap: 6px;
+    font-size: .8125rem;
+    padding: 10px;
 }
-.model-instance .select-wrap {
+
+#edit-save-error button {
+    padding-inline: 0;
+    text-align: left;
+    justify-content: flex-start;
+    color: inherit;
+}
+
+#notice {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+#notice:empty {
+    display: none;
+}
+#notice button {
+    color: #fff;
+    background: #ffffff15;
+}
+
+.edit-inspector-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.edit-inspector-header h1 {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.editor-menu, .instance-menu, .hardware-picker, .exhibit-options, .transform-options {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.editor-menu .popover, .instance-menu .popover, .exhibit-options .popover {
+    width: 200px;
+    padding: 6px;
+}
+
+.hardware-picker .popover {
+    width: 220px;
+    padding: 6px;
+}
+.transform-options .popover {
+    width: 220px;
+}
+.floating-popover {
+    position: fixed;
+    z-index: 100;
+    overflow-y: auto;
+}
+
+.popover > button {
+    background: transparent;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.popover > button:hover {
+    background: #edf0f4;
+}
+.popover > button.danger:hover {
+    background: #fff0f0;
+}
+.popover .check {
+    line-height: 1.4;
+    font-size: .8125rem;
+}
+
+.exhibit-options > summary {
+    width: 30px;
+    height: 44px;
+}
+.exhibit-entry .exhibit-options {
+    margin-bottom: 4px;
+}
+body.editing .exhibit-entry {
+    position: relative;
+    padding-right: 32px;
+}
+.exhibit-entry .exhibit-options {
+    position: absolute;
+    top: 0;
+    right: 0;
+}
+
+.instance-heading {
+    margin: 24px 0 12px;
+}
+
+.instance-heading h3 {
+    font-size: .9375rem;
+}
+
+.model-instance {
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px #23334104, 0 5px 15px #23334109;
+}
+
+.model-instance.active {
+    box-shadow: 0 1px 2px #23334104, 0 5px 15px #23334109;
+}
+
+.instance-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.instance-name {
     flex: 1;
     min-width: 0;
+    padding: 6px 0;
+    text-align: left;
+    justify-content: flex-start;
+    font-weight: 550;
 }
-.model-instance .select-button {
-    width: 100%;
+
+.instance-name small {
+    color: var(--muted);
 }
-.model-instance details {
-    margin-top: 10px;
+.instance-name[aria-pressed=true] {
+    color: var(--accent);
 }
-.model-instance summary, .exhibit-transform summary {
+.instance-menu > summary {
+    margin: 0 -6px 0 0;
+}
+
+.instance-placement {
+    margin-top: 2px;
+}
+.instance-placement > summary, .exhibit-transform > summary, .view-presets > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     cursor: pointer;
     font-size: .8125rem;
-    color: var(--muted);
-    padding-block: 6px;
+    font-weight: 500;
+    color: #697078;
+    padding-block: 10px;
+    min-height: 38px;
+}
+
+.instance-placement > summary:after, .exhibit-transform > summary:after, .view-presets > summary:after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-right: 1.4px solid currentColor;
+    border-bottom: 1.4px solid currentColor;
+    transform: rotate(-45deg);
+    margin-right: 4px;
+}
+
+.instance-placement[open] > summary:after, .exhibit-transform[open] > summary:after, .view-presets[open] > summary:after {
+    transform: rotate(45deg);
+}
+
+.instance-placement .select-button {
+    background: #f3f4f6;
+    margin-block: 4px 12px;
 }
 .model-instance .vector {
-    margin-block: 12px;
+    margin-block: 14px;
 }
-.exhibit-transform {
-    margin-block: 18px;
+#structure-panel .vector h3 {
+    font-size: .8125rem;
+    margin-bottom: 8px;
 }
-#structure-form .grid2 {
+#structure-panel .vector input {
+    padding: 8px;
+    min-height: 38px;
+}
+#structure-panel .vector .grid3 {
+    gap: 8px;
+}
+.exhibit-transform, .view-presets {
+    margin-block: 16px;
+}
+.exhibit-transform > .vector {
+    padding-inline: 4px;
+}
+
+.preset-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-block: 4px;
+}
+
+.preset-row > span {
+    font-size: .8125rem;
+    min-width: 28px;
+}
+.preset-row > button[data-preview-view] {
+    margin-right: auto;
+}
+.preset-row .icon-button {
+    width: 32px;
+}
+
+.transform-tools {
+    display: flex;
+}
+.transform-controls {
+    display: flex;
+    align-items: center;
+}
+.transform-tools .icon-button[aria-pressed=true] {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.transform-options > summary svg {
+    width: 18px;
+    height: 18px;
+}
+.creation-actions {
+    margin-top: 24px;
+}
+.deletion-hint {
+    margin-top: 12px;
+}
+
+.conflict-card {
+    padding: 18px;
+    margin-bottom: 14px;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 5px 15px #23334109;
+}
+
+.conflict-values {
+    display: grid;
     gap: 12px;
+    margin-block: 14px;
+}
+.conflict-values p {
+    white-space: pre-wrap;
+    font-size: .875rem;
+    overflow-wrap: anywhere;
+}
+.model-row {
+    background: #f4f5f7;
+    padding: 10px 14px;
+}
+.model-text strong {
+    font-size: .875rem;
+    font-weight: 550;
+}
+.model-import {
+    margin-top: 24px;
+}
+.model-import input {
+    border: 0;
+    padding: 8px 0;
+    background: transparent;
+}
+
+@media (max-width: 1120px) and (min-width: 861px) {
+    #editbar {
+        left: 19px;
+        width: calc(var(--list) - 38px);
+    }
+}
+
+@media (max-width: 860px) {
+    #editbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 12px;
+        top: auto;
+        bottom: calc(77px + env(safe-area-inset-bottom));
+        left: 14px;
+        right: 14px;
+        width: auto;
+        max-height: calc(100dvh - 190px);
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #f7f8faf5;
+        box-shadow: 0 2px 4px #202b3308, 0 8px 22px #202b331a;
+        backdrop-filter: blur(18px);
+    }
+    #editbar[hidden] {
+        display: none;
+    }
+    .edit-session-heading {
+        margin: 0;
+    }
+    .edit-session-label {
+        font-size: .75rem;
+    }
+    .edit-session-actions {
+        gap: 4px;
+    }
+    .edit-session-actions > button {
+        min-height: 44px;
+        flex: none;
+    }
+    .edit-history .icon-button {
+        min-width: 36px;
+        min-height: 44px;
+    }
+    #edit-signature {
+        grid-column: 1;
+        grid-row: 2;
+        margin: 0;
+        min-width: 0;
+    }
+    #editbar.signing .edit-session-heading {
+        grid-column: 1 / -1;
+    }
+    #editbar.signing .edit-session-actions {
+        grid-column: 2;
+        grid-row: 2;
+    }
+    #edit-save-error {
+        grid-column: 1 / -1;
+        margin-top: 0;
+    }
+    body.editing .sidebar-footer {
+        padding-top: 10px;
+        padding-bottom: calc(var(--editbar-height, 0px) + 28px);
+    }
+    body.editing .panel-content {
+        padding-bottom: calc(var(--editbar-height, 0px) + 50px);
+    }
+    body.editing #map-heading {
+        top: 24px;
+        max-height: calc(100% - var(--editbar-height, 0px) - 215px);
+    }
+    body.editing #map-controls {
+        bottom: calc(93px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
+    }
+    .map-toolbar {
+        flex-wrap: wrap;
+        justify-content: center;
+        row-gap: 4px;
+    }
+    .map-toolbar .icon-button {
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+    }
+    .transform-controls {
+        order: 1;
+    }
+    .map-toolbar > .toolbar-divider:has(+ .transform-controls) {
+        display: none;
+    }
+    body.editing #map-message {
+        bottom: calc(160px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
+    }
+    body:has(#editbar:not([hidden])) #workspace {
+        padding-top: 0;
+    }
+    .instance-placement > summary, .exhibit-transform > summary, .view-presets > summary {
+        min-height: 44px;
+    }
+    .instance-menu > summary, .exhibit-options > summary, .hardware-picker > summary {
+        width: 44px;
+        min-height: 44px;
+    }
+    body.editing .exhibit-entry {
+        padding-right: 44px;
+    }
+    .conflict-card {
+        padding: 16px;
+    }
+    #notice {
+        bottom: calc(91px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
+    }
 }

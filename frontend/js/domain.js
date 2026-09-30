@@ -15,6 +15,12 @@ export const identity = () => ({
 
 const finite = number => typeof number === 'number' && Number.isFinite(number);
 
+export function validTransform(transform) {
+    return ['position', 'rotation', 'scale'].every(key => Array.isArray(transform?.[key]) &&
+        transform[key].length === 3 && transform[key].every(value => finite(value) &&
+            Math.abs(value) <= 100000 && (key !== 'scale' || value >= .001 && value <= 1000)));
+}
+
 export class MapPlacement {
     constructor(data = identity()) {
         for (const key of ['position', 'rotation', 'scale']) {
@@ -151,9 +157,11 @@ export class EditSession {
     change(change) {
         const next = structuredClone(this.value);
         change(next);
+        if (JSON.stringify(next) === JSON.stringify(this.value)) return false;
         this.undoStack.push(structuredClone(this.value));
         this.redoStack = [];
         this.value = next;
+        return true;
     }
 
     undo() {

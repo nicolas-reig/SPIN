@@ -1,4 +1,5 @@
 let active = null;
+let activePopover = null;
 let serial = 0;
 
 function close(refocus = false) {
@@ -8,6 +9,57 @@ function close(refocus = false) {
     menu.remove();
     if (refocus && button.isConnected) button.focus();
     active = null;
+}
+
+function closePopover(refocus = false) {
+    if (!activePopover) return;
+    const { details, summary, menu, placeholder, style } = activePopover;
+    activePopover = null;
+    details.open = false;
+    summary.setAttribute('aria-expanded', 'false');
+    menu.classList.remove('floating-popover');
+    if (style === null) menu.removeAttribute('style');
+    else menu.setAttribute('style', style);
+    if (details.isConnected) placeholder.replaceWith(menu);
+    else { menu.remove(); placeholder.remove(); }
+    if (refocus && summary.isConnected) summary.focus();
+}
+
+export function closeMenus(refocus = false) {
+    const opened = Boolean(active || activePopover);
+    close(refocus);
+    closePopover(refocus);
+    return opened;
+}
+
+function openPopover(details) {
+    const menu = details.querySelector(':scope > .popover');
+    const summary = details.querySelector(':scope > summary');
+    if (!menu || !summary) return;
+    closeMenus();
+    details.open = true;
+    const style = menu.getAttribute('style');
+    const width = Math.min(parseFloat(getComputedStyle(menu).width) || 220, innerWidth - 24);
+    const placeholder = document.createComment('');
+    menu.before(placeholder);
+    menu.classList.add('floating-popover');
+    (details.closest('dialog') || document.body).append(menu);
+    menu.style.width = width + 'px';
+    menu.style.maxHeight = 'min(420px, calc(100dvh - 32px))';
+    const rect = summary.getBoundingClientRect();
+    const below = innerHeight - rect.bottom - 14;
+    const above = below < Math.min(menu.scrollHeight, 240) && rect.top > below;
+    menu.style.maxHeight = Math.max(80, Math.min(420, above ? rect.top - 18 : below)) + 'px';
+    const height = Math.min(menu.scrollHeight, parseFloat(menu.style.maxHeight));
+    menu.style.left = Math.max(12, Math.min(innerWidth - width - 12, rect.right - width)) + 'px';
+    menu.style.top = Math.max(12, above ? rect.top - height - 6 : rect.bottom + 6) + 'px';
+    menu.style.bottom = 'auto';
+    menu.style.right = 'auto';
+    summary.setAttribute('aria-expanded', 'true');
+    menu.id ||= 'popover-' + ++serial;
+    summary.setAttribute('aria-controls', menu.id);
+    activePopover = { details, summary, menu, placeholder, style };
+    menu.querySelector('button:not(:disabled), input, select + button')?.focus();
 }
 
 function enhance(select) {
@@ -85,6 +137,7 @@ function enhance(select) {
             } else if (event.key === 'Escape' || event.key === 'Tab') {
                 if (event.key === 'Escape') event.preventDefault();
                 close(true);
+                if (event.key === 'Escape') event.stopPropagation();
             } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
                 prefix += event.key.toLocaleLowerCase();
                 clearTimeout(timer);
@@ -109,15 +162,42 @@ export function installSelects() {
     });
     const update = () => {
         if (active && !active.button.isConnected) close();
+        if (activePopover && !activePopover.details.isConnected) closePopover();
         document.querySelectorAll('select:not([data-custom])').forEach(enhance);
         for (const panel of panels) if (!panel.isConnected) { observer.unobserve(panel); panels.delete(panel); }
         document.querySelectorAll('.panel-content:not([data-measured])').forEach(panel => { panel.dataset.measured = 'true'; panels.add(panel); observer.observe(panel); });
     };
     new MutationObserver(update).observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('toggle', event => {
+        if (!(event.target instanceof HTMLDetailsElement)) return;
+        if (event.target.open && event.target.querySelector(':scope > .popover')) openPopover(event.target);
+        else if (!event.target.open && activePopover?.details === event.target) closePopover();
+    }, true);
     document.addEventListener('pointerdown', event => {
         if (active && !active.menu.contains(event.target) && !active.button.contains(event.target)) close();
+        if (activePopover && !activePopover.menu.contains(event.target) && !activePopover.summary.contains(event.target) && !active?.menu.contains(event.target)) closePopover();
     });
-    window.addEventListener('resize', () => close());
-    document.addEventListener('scroll', event => { if (active && !active.menu.contains(event.target)) close(); }, true);
+    document.addEventListener('click', event => {
+        const item = event.target.closest('button[data-action], button[data-add-hardware], button[data-duplicate-exhibit], button[data-trash-exhibit], button[data-remove-instance], button[data-duplicate-instance], button[data-correct], button[data-delete-note], button[data-delete-link], button[data-edit-link]');
+        if (item && activePopover?.menu.contains(item)) closePopover();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && (active || activePopover)) {
+            event.preventDefault(); event.stopPropagation(); closeMenus(true);
+        } else if (activePopover?.menu.contains(event.target) && !event.target.matches('input, select, textarea, [role=combobox]') && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+            const items = [...activePopover.menu.querySelectorAll('button:not(:disabled)')];
+            const index = items.indexOf(document.activeElement);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+            event.preventDefault(); items[next]?.focus();
+        }
+    }, true);
+    document.addEventListener('focusin', event => {
+        if (activePopover && !activePopover.menu.contains(event.target) && !activePopover.summary.contains(event.target) && !active?.menu.contains(event.target)) closePopover();
+    });
+    window.addEventListener('resize', () => closeMenus());
+    document.addEventListener('scroll', event => {
+        if (active && !active.menu.contains(event.target)) close();
+        if (activePopover && !activePopover.menu.contains(event.target)) closePopover();
+    }, true);
     update();
 }

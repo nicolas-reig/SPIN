@@ -54,7 +54,6 @@ let snapshot = null,
 let creation = null, creationOpen = false, editingFloor = null, editConflict = null;
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
-let cancelledDraft = null;
 let drafts = {}, draftStorageKey = '', editStorageKey = '';
 const linkDrafts = {};
 const linkSearches = {};
@@ -88,7 +87,6 @@ const statusOptions = (value, keep = false) => options([...(keep ? [
 function announce(message, action = null, label = 'undo') {
     clearTimeout(noticeTimer);
     clearTimeout(noticeClearTimer);
-    if (action !== 'restoreDraft') cancelledDraft = null;
     const notice = $('#notice');
     notice.classList.remove('is-exiting');
     notice.inert = false;
@@ -97,9 +95,7 @@ function announce(message, action = null, label = 'undo') {
 }
 
 function clearNotice() {
-    clearTimeout(noticeTimer);
     clearTimeout(noticeClearTimer);
-    cancelledDraft = null;
     const notice = $('#notice');
     notice.replaceChildren();
     notice.classList.remove('is-exiting');
@@ -107,8 +103,6 @@ function clearNotice() {
 }
 
 function dismissNotice() {
-    clearTimeout(noticeTimer);
-    cancelledDraft = null;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
         clearNotice();
         return;
@@ -135,45 +129,6 @@ function persistDrafts() {
         announce(t('draftFailed'));
         return false;
     }
-}
-
-function discardComposerDraft(kind) {
-    const id = selected;
-    const store = kind === 'notes' ? drafts : linkDrafts;
-    const draft = store[id];
-    if (!draft || draft.saving) return;
-    delete store[id];
-    if (kind === 'notes') persistDrafts();
-    renderPanel();
-    cancelledDraft = { kind, id, draft, replacement: store[id] };
-    announce(t(kind === 'notes' ? 'noteDraftDiscarded' : 'linkDraftCancelled'), 'restoreDraft');
-}
-
-function invalidateDraftUndo(kind, id) {
-    if (cancelledDraft?.kind === kind && cancelledDraft.id === id) dismissNotice();
-}
-
-async function restoreDraft() {
-    const saved = cancelledDraft;
-    if (!saved) return;
-    const store = saved.kind === 'notes' ? drafts : linkDrafts;
-    if (store[saved.id] !== saved.replacement) {
-        dismissNotice();
-        return;
-    }
-    cancelledDraft = null;
-    store[saved.id] = saved.draft;
-    saved.draft.open = true;
-    if (saved.kind === 'notes') persistDrafts();
-    if (!edit && data().exhibits.some(record => record.id === saved.id)) {
-        tab = saved.kind;
-        if (selected !== saved.id) await select(saved.id);
-        else renderInspector();
-        if (matchMedia('(max-width:860px)').matches) setView('detail');
-        if (saved.kind === 'notes') (saved.draft.signing ? $('#note-signature') : $('#note-body'))?.focus();
-        else $('#link-title')?.focus();
-    }
-    announce(t('draftRestored'));
 }
 
 function persistEdit() {
@@ -689,10 +644,7 @@ function renderLinks(e, element) {
         }
     });
     form.addEventListener('input', event => {
-        if (['title', 'url', 'description'].includes(event.target.name)) {
-            invalidateDraftUndo('documentation', e.id);
-            draft[event.target.name] = event.target.value;
-        }
+        if (['title', 'url', 'description'].includes(event.target.name)) draft[event.target.name] = event.target.value;
     });
     form.addEventListener('submit', async event => {
         event.preventDefault();
@@ -801,7 +753,7 @@ function renderComposer() {
     noteEditor = createNoteEditor($('#note-editor'), {
         exhibitId: e.id,
         value: d.body, label: t('noteBody'), placeholder: t('writeNote'), disabled: Boolean(d.saving),
-        onChange: value => { invalidateDraftUndo('notes', e.id); d.body = value; delete d.error; persistDrafts(); },
+        onChange: value => { d.body = value; delete d.error; persistDrafts(); },
         onFocus: () => {
             d.open = true;
             form.classList.add('composing');
@@ -824,7 +776,6 @@ function renderComposer() {
     });
     if (d.saving) form.querySelectorAll('input, textarea, select, button').forEach(control => { control.disabled = true; });
     $('#note-signature')?.addEventListener('input', ev => {
-        invalidateDraftUndo('notes', e.id);
         d.signature = ev.target.value;
         $('[data-action=confirmNote]').disabled = !d.signature.trim();
         persistDrafts();
@@ -836,7 +787,6 @@ function renderComposer() {
         }
     });
     $('#note-status')?.addEventListener('change', ev => {
-        invalidateDraftUndo('notes', e.id);
         d.status = ev.target.value;
         persistDrafts();
     });
@@ -889,7 +839,6 @@ function renderComposer() {
 async function addImages(files, id) {
     const draft = drafts[id];
     if (!draft || draft.saving || draft.readingImages) return;
-    invalidateDraftUndo('notes', id);
     draft.open = true;
     draft.readingImages = true;
     delete draft.error;
@@ -901,7 +850,7 @@ async function addImages(files, id) {
         for (const file of files) {
             if (draft.images.length + draft.existingImages.length >= 8) throw Error('tooManyImages');
             const image = await readNoteImage(file);
-            if (drafts[id] !== draft && cancelledDraft?.draft !== draft) return;
+            if (drafts[id] !== draft) return;
             draft.images.push({ ...image, id: uid() });
             persistDrafts();
         }
@@ -1151,7 +1100,6 @@ function editLink(id = null) {
     const record = exhibit();
     const link = record.links.find(item => item.id === id);
     if (id && !link) return;
-    invalidateDraftUndo('documentation', record.id);
     linkDrafts[record.id] = { open: true, id, title: link?.title || '', url: link?.url || '', description: link?.description || '' };
     renderPanel();
     $('#link-title')?.focus();
@@ -1757,8 +1705,7 @@ const actions = {
     enterEdit,
     resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },
     backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
-    discardDraft: () => discardComposerDraft('notes'),
-    restoreDraft,
+    discardDraft: () => { delete drafts[selected]; persistDrafts(); renderPanel(); },
     cancelCreation,
     cancelEdit,
     cancelEditSignature,
@@ -1783,7 +1730,10 @@ const actions = {
     noteConflict,
     status: statusDialog,
     addLink: () => editLink(),
-    cancelLink: () => discardComposerDraft('documentation'),
+    cancelLink: () => {
+        delete linkDrafts[selected];
+        renderPanel();
+    },
     closeDialog,
     clear: () => {
         query = '';
@@ -1833,7 +1783,6 @@ document.addEventListener('click', async event => {
             }
             const note = record.notes.find(n => n.id === element.dataset.correct);
             if (!note || note.deleted) return;
-            invalidateDraftUndo('notes', record.id);
             drafts[record.id] = newDraft(record, note);
             persistDrafts();
             renderPanel();

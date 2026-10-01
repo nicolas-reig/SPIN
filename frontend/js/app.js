@@ -603,7 +603,13 @@ function renderLinks(e, element) {
         </div>` : ''}
         <div id="link-results">${e.links.map(link => `
             <article class="link-card">
-                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}"><span>${esc(link.title)}</span>${icon('link')}</a>
+                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">
+                    <span class="document-label">
+                        <span class="document-title">${esc(link.title)}</span>
+                        <small class="document-url">${esc(link.url)}</small>
+                    </span>
+                    ${icon('link')}
+                </a>
                 ${link.description ? `<p>${esc(link.description)}</p>` : ''}
                 <div class="link-actions">
                     <button type="button" class="icon-button" data-copy="${esc(link.id)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>

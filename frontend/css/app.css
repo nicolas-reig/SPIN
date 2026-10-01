@@ -1092,7 +1092,7 @@ summary {
 
 .document-url {
     display: block;
-    margin-top: 2px;
+    margin-top: 4px;
     color: var(--muted);
     font-size: .75rem;
     font-weight: 400;
@@ -1170,7 +1170,6 @@ summary {
 
 .link-fields textarea {
     min-height: 48px;
-    font-size: .875rem;
 }
 
 .link-fields .row {

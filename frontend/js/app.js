@@ -28,8 +28,7 @@ import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, reba
 import { icon } from './icons.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
-import { DraftStore, hasNoteDraft, hasLinkDraft } from './drafts.js';
-import { hasEditDraft, packEditDraft, unpackEditDraft } from './draft-edit.js';
+import { DraftStore } from './drafts.js';
 let noteEditor = null;
 installSelects();
 const $ = s => document.querySelector(s),
@@ -57,8 +56,7 @@ let creation = null, creationOpen = false, editingFloor = null, editConflict = n
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
 let cancelledDraft = null;
-let clearedDrafts = null;
-let drafts = {}, draftStore = null, localDraftErrors = {};
+let drafts = {}, draftStore = null, localDraftError = false;
 let linkDrafts = {}, dialogDrafts = {}, modelDraft = null, editorFields = {};
 let dialogDraftKey = null;
 const linkSearches = {};
@@ -77,7 +75,7 @@ async function loadDrafts() {
         linkDrafts = saved[1] || {};
         dialogDrafts = saved[2] || {};
         modelDraft = saved[3] || null;
-        recoverableEdit = unpackEditDraft(saved[4] || recoverableEdit, snapshot);
+        recoverableEdit = saved[4] || recoverableEdit;
         Object.values(drafts).forEach(draft => {
             draft.saving = false;
             draft.readingImages = false;
@@ -85,13 +83,7 @@ async function loadDrafts() {
             draft.localId ||= draft.requestId;
         });
         Object.values(linkDrafts).forEach(draft => { draft.saving = false; });
-        for (const key of Object.keys(dialogDrafts)) {
-            if (key.startsWith('noteLink:') && !Object.entries(drafts).some(([id, draft]) => key === 'noteLink:' + id + ':' + draft.localId)) delete dialogDrafts[key];
-            if (key.startsWith('deleteNote:') && !snapshot.exhibits.some(record => record.notes.some(note =>
-                key === 'deleteNote:' + record.id + ':' + note.id && !note.deleted))) delete dialogDrafts[key];
-        }
         const migrated = await Promise.all([persistDrafts(), persistEdit()]);
-        await Promise.all([persistLinks(), persistDialogs()]);
         if (migrated[0]) localStorage.removeItem('hub-drafts-' + snapshot.datasetKey);
         if (migrated[1]) localStorage.removeItem('hub-edit-' + snapshot.datasetKey);
     } catch {
@@ -115,8 +107,6 @@ function announce(message, action = null, label = 'undo') {
     clearTimeout(noticeTimer);
     clearTimeout(noticeClearTimer);
     if (action !== 'restoreDraft') cancelledDraft = null;
-    if (action !== 'restoreEdit') cancelledEdit = null;
-    if (action !== 'restoreLocalDrafts') clearedDrafts = null;
     const notice = $('#notice');
     notice.classList.remove('is-exiting');
     notice.inert = false;
@@ -128,8 +118,6 @@ function clearNotice() {
     clearTimeout(noticeTimer);
     clearTimeout(noticeClearTimer);
     cancelledDraft = null;
-    cancelledEdit = null;
-    clearedDrafts = null;
     const notice = $('#notice');
     notice.replaceChildren();
     notice.classList.remove('is-exiting');
@@ -139,8 +127,6 @@ function clearNotice() {
 function dismissNotice() {
     clearTimeout(noticeTimer);
     cancelledDraft = null;
-    cancelledEdit = null;
-    clearedDrafts = null;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
         clearNotice();
         return;
@@ -159,38 +145,23 @@ function errorText(e) {
     return t(e.key || e.message || 'storage');
 }
 
-function localDraftFailure(error = null, name = 'storage') {
-    const key = ['draftFull', 'draftsChanged'].includes(error?.message) ? error.message : 'draftFailed';
-    if (!localDraftErrors[name]) {
-        announce(t(key), key === 'draftFull' ? 'localDrafts' : null, 'review');
+function localDraftFailure() {
+    if (!localDraftError) {
+        localDraftError = true;
+        announce(t('draftFailed'));
     }
-    localDraftErrors[name] = key;
-    updateDraftWarnings();
-}
-
-function updateDraftWarnings() {
-    document.querySelectorAll('[data-local-draft-warning]').forEach(element => {
-        const error = localDraftErrors[element.dataset.localDraftWarning] || localDraftErrors.storage;
-        element.textContent = error ? t(error) : '';
-        element.hidden = !error;
-    });
 }
 
 function saveLocalDraft(name, value) {
     if (!draftStore) return Promise.resolve(false);
-    return draftStore.write(name, value).then(() => {
-        delete localDraftErrors[name];
-        updateDraftWarnings();
-        return true;
-    }, error => {
-        localDraftFailure(error, name);
+    return draftStore.write(name, value).then(() => true, () => {
+        localDraftFailure();
         return false;
     });
 }
 
 function persistDrafts() {
-    const saved = Object.fromEntries(Object.entries(drafts).filter(([id, draft]) => hasNoteDraft(draft) ||
-        hasDialogDraft(dialogDrafts['noteLink:' + id + ':' + draft.localId])).map(([id, draft]) => {
+    const saved = Object.fromEntries(Object.entries(drafts).map(([id, draft]) => {
         const value = { ...draft };
         delete value.saving;
         delete value.readingImages;
@@ -200,7 +171,7 @@ function persistDrafts() {
 }
 
 function persistLinks() {
-    return saveLocalDraft('links', Object.fromEntries(Object.entries(linkDrafts).filter(([_id, draft]) => hasLinkDraft(draft)).map(([id, draft]) => {
+    return saveLocalDraft('links', Object.fromEntries(Object.entries(linkDrafts).map(([id, draft]) => {
         const value = { ...draft };
         delete value.saving;
         return [id, value];
@@ -208,21 +179,7 @@ function persistLinks() {
 }
 
 function persistDialogs() {
-    const saved = Object.fromEntries(Object.entries(dialogDrafts).filter(([key, draft]) => hasDialogDraft(draft) ||
-        key.startsWith('status:') && snapshot.exhibits.some(record => key === 'status:' + record.id && draft.status !== record.status)));
-    return saveLocalDraft('dialogs', saved);
-}
-
-function hasDialogDraft(draft) {
-    return Object.values(draft?.fields || {}).some(value => typeof value === 'string' ? value.trim() : value === true);
-}
-
-function takeNoteDialogs(id, draft) {
-    const key = 'noteLink:' + id + ':' + draft.localId;
-    const saved = dialogDrafts[key] ? { [key]: dialogDrafts[key] } : {};
-    delete dialogDrafts[key];
-    persistDialogs();
-    return saved;
+    return saveLocalDraft('dialogs', dialogDrafts);
 }
 
 function touchNoteDraft(draft, signatureChanged = false) {
@@ -237,11 +194,10 @@ function discardComposerDraft(kind) {
     const draft = store[id];
     if (!draft || draft.saving) return;
     delete store[id];
-    const dialogs = kind === 'notes' ? takeNoteDialogs(id, draft) : {};
     if (kind === 'notes') persistDrafts();
     else persistLinks();
     renderPanel();
-    cancelledDraft = { kind, id, draft, dialogs, replacement: store[id] };
+    cancelledDraft = { kind, id, draft, replacement: store[id] };
     announce(t(kind === 'notes' ? 'noteDraftDiscarded' : 'linkDraftCancelled'), 'restoreDraft');
 }
 
@@ -259,8 +215,6 @@ async function restoreDraft() {
     }
     cancelledDraft = null;
     store[saved.id] = saved.draft;
-    Object.assign(dialogDrafts, saved.dialogs);
-    persistDialogs();
     saved.draft.open = true;
     if (saved.kind === 'notes') persistDrafts();
     else persistLinks();
@@ -276,7 +230,7 @@ async function restoreDraft() {
 }
 
 function persistEdit() {
-    const saved = edit ? {
+    return saveLocalDraft('edit', edit ? {
         base: edit.base,
         value: edit.value,
         creation,
@@ -296,61 +250,7 @@ function persistEdit() {
         } : null,
         undoStack: edit.undoStack,
         redoStack: edit.redoStack
-    } : recoverableEdit;
-    return saveLocalDraft('edit', packEditDraft(saved));
-}
-
-async function localDraftsDialog() {
-    const stats = await draftStore.stats();
-    try {
-        for (const key of Object.keys(localStorage)) {
-            if (key.startsWith('hub-drafts-') || key.startsWith('hub-edit-')) stats.bytes +=
-                (key.length + (localStorage.getItem(key)?.length || 0)) * 2;
-        }
-    } catch {}
-    const size = value => value < 1024 * 1024 ? Math.ceil(value / 1024) + ' KB' :
-        (value / (1024 * 1024)).toLocaleString(lang(), { maximumFractionDigits: 1 }) + ' MB';
-    showDialog('localDrafts', `<p>${esc(size(stats.bytes))} / ${esc(size(stats.limit))}</p><p class="small muted" style="margin-top:12px">${esc(t('localDraftsHint'))}</p><div class="dialog-footer">${button('close', 'closeDialog', 'quiet')}${button('clearLocalDrafts', 'clearLocalDrafts', 'danger')}</div>`);
-}
-
-async function clearLocalDrafts() {
-    if (editSave?.saving || Object.values(drafts).some(draft => draft.saving || draft.readingImages) ||
-        Object.values(linkDrafts).some(draft => draft.saving)) throw Error('busy');
-    map?.cancelTransform();
-    const state = { drafts, linkDrafts, dialogDrafts, modelDraft, edit, recoverableEdit, creation, creationOpen,
-        editingFloor, selected, floorId, activeInstance, gizmo, editorFields, editSave, editConflict, localDraftErrors };
-    const backup = await draftStore.clear();
-    const legacy = {};
-    try {
-        for (const key of Object.keys(localStorage)) {
-            if (!key.startsWith('hub-drafts-') && !key.startsWith('hub-edit-')) continue;
-            legacy[key] = localStorage.getItem(key);
-            localStorage.removeItem(key);
-        }
-    } catch {}
-    closeDialog();
-    drafts = {}; linkDrafts = {}; dialogDrafts = {}; modelDraft = null;
-    edit = null; recoverableEdit = null; creation = null; creationOpen = false; editingFloor = null;
-    editorFields = {}; editSave = null; editConflict = null; gizmo = '';
-    localDraftErrors = {};
-    render(); syncEditTools(); syncUrl();
-    clearedDrafts = { state, backup, legacy };
-    announce(t('localDraftsCleared'), 'restoreLocalDrafts');
-}
-
-async function restoreLocalDrafts() {
-    const saved = clearedDrafts;
-    if (!saved) return;
-    const work = edit ? { base: edit.base, value: edit.value, creation, editorFields, undoStack: edit.undoStack, redoStack: edit.redoStack } : recoverableEdit;
-    if (Object.values(drafts).some(hasNoteDraft) || Object.values(linkDrafts).some(hasLinkDraft) ||
-        Object.values(dialogDrafts).some(hasDialogDraft) || modelDraft || hasEditDraft(work)) throw Error('draftsChanged');
-    await draftStore.restore(saved.backup);
-    for (const [key, value] of Object.entries(saved.legacy)) localStorage.setItem(key, value);
-    ({ drafts, linkDrafts, dialogDrafts, modelDraft, edit, recoverableEdit, creation, creationOpen,
-        editingFloor, selected, floorId, activeInstance, gizmo, editorFields, editSave, editConflict, localDraftErrors } = saved.state);
-    clearedDrafts = null;
-    render(); syncEditTools(); syncUrl();
-    announce(t('draftRestored'));
+    } : recoverableEdit);
 }
 
 function setView(value) {
@@ -404,10 +304,7 @@ function deleteNoteDialog(noteId) {
     const requestId = uid();
     showDialog('deleteNote', `<p>${esc(t('noteBy'))} ${esc(note.author)} · ${esc(date(note.at))}</p><p class="muted small" style="margin:12px 0 20px">${esc(t('deleteNoteHint'))}</p>${signatureField()}${footer('deleteNote')}`, async (form, element) => {
         const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, contentTag: record.contentTag, requestId, signature: requireSignature(form) });
-        if (drafts[record.id]?.noteId === noteId) {
-            takeNoteDialogs(record.id, drafts[record.id]);
-            delete drafts[record.id];
-        }
+        if (drafts[record.id]?.noteId === noteId) delete drafts[record.id];
         persistDrafts();
         closeDialog(element);
         acceptSnapshot(result.snapshot);
@@ -461,7 +358,6 @@ function renderSidebar() {
                     <div class="popover">
                         ${edit ? (creation ? menuButton('resumeCreation', 'resumeCreation', 'pencil-line') : '') + menuButton('editFloor', 'editFloor', 'layers') + menuButton('newFloor', 'newFloor', 'layers-plus') + menuButton('models', 'models', 'library') : menuButton('editStructure', 'enterEdit', 'pencil-line')}
                         ${menuButton('refresh', 'refresh', 'refresh-cw')}
-                        ${menuButton('localDrafts', 'localDrafts', 'pencil-line')}
                     </div>
                 </details>
             </div>
@@ -801,7 +697,6 @@ function renderLinks(e, element) {
                 <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t('save'))}</button></div>
             </div>
             <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
-            <p class="error" data-local-draft-warning="links" role="alert" hidden></p>
             ${draft.conflict ? button('reviewConflict', 'linkConflict', 'quiet') : ''}
         </form>
         ${searchable ? `<div class="searchbox link-search">
@@ -893,7 +788,6 @@ function renderLinks(e, element) {
         }
     });
     if (draft.saving) form.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = true; });
-    updateDraftWarnings();
 }
 
 function newLinkDraft(record, link = null) {
@@ -995,11 +889,9 @@ function renderComposer() {
                     <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : 'publish'))}</button></div>
                 </div>` : ''}
             <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(t(d.error)) : ''}</div>
-            <p class="error" data-local-draft-warning="notes" role="alert" hidden></p>
             ${d.conflict ? button('reviewConflict', 'noteConflict', 'quiet') : ''}
         </form>`;
     const form = $('#note-form');
-    updateDraftWarnings();
     let choosingImage = false;
     noteEditor = createNoteEditor($('#note-editor'), {
         exhibitId: e.id,
@@ -1158,10 +1050,7 @@ async function postNote(id) {
         if (d.noteId) payload.noteId = d.noteId;
         else if (d.status) payload.status = d.status;
         const result = await api.postNote(payload, d.images.filter(image => !image.uploaded));
-        if (drafts[id] === d) {
-            takeNoteDialogs(id, d);
-            delete drafts[id];
-        }
+        if (drafts[id] === d) delete drafts[id];
         persistDrafts();
         acceptSnapshot(result.snapshot);
         announce(t('saved'));
@@ -1221,8 +1110,7 @@ function renderEditBar() {
         <div class="edit-history">${iconButton('undo', 'undo', 'undo-2', !edit.undoStack.length || editSave?.saving ? 'disabled' : '', 'undoEditHint')}${iconButton('redo', 'redo', 'redo-2', !edit.redoStack.length || editSave?.saving ? 'disabled' : '', 'redoEditHint')}</div></div>
         ${signing ? `<label class="sr-only" for="edit-signature">${esc(t('signature'))}</label><input id="edit-signature" ${editHelp('editSignatureHint')} autocomplete="off" maxlength="120" placeholder="${esc(t('yourName'))}" value="${esc(editSave.signature)}" aria-describedby="edit-save-error">` : ''}
         <div class="edit-session-actions" role="group" aria-label="${esc(t('editStructure'))}">${button('cancel', signing ? 'cancelEditSignature' : 'cancelEdit', 'quiet', editHelp(signing ? 'cancelSignatureHint' : 'cancelEditHint'))}<button type="button" class="primary" data-action="${signing ? 'confirmEditSave' : 'saveExit'}" ${editHelp(creation ? 'finishCreation' : editConflict ? 'resolveChanges' : signing ? 'saveEditHint' : 'signEditHint')} ${editSave?.saving || creation || editConflict || !dirty || (signing && !editSave.signature.trim()) ? 'disabled' : ''}>${esc(t(editSave?.saving ? 'saving' : 'save'))}</button></div>
-        <div class="error" id="edit-save-error" role="alert" ${editSave?.error ? '' : 'hidden'}><span>${esc(editSave?.error ? t(editSave.error === 'conflict' ? 'editConflictHint' : editSave.error) : '')}</span>${editSave?.error === 'conflict' ? button('resolveChanges', 'structureConflict', 'quiet') : ''}</div><p class="error" data-local-draft-warning="edit" role="alert" hidden></p>`;
-    updateDraftWarnings();
+        <div class="error" id="edit-save-error" role="alert" ${editSave?.error ? '' : 'hidden'}><span>${esc(editSave?.error ? t(editSave.error === 'conflict' ? 'editConflictHint' : editSave.error) : '')}</span>${editSave?.error === 'conflict' ? button('resolveChanges', 'structureConflict', 'quiet') : ''}</div>`;
     $('#edit-signature')?.addEventListener('input', event => {
         editSave.signature = event.target.value;
         $('[data-action=confirmEditSave]').disabled = editSave.saving || Boolean(creation || editConflict) || !edit.changes().length || !editSave.signature.trim();
@@ -1318,14 +1206,12 @@ function captureDialogDraft() {
     if (!draft || !form) return;
     draft.fields = Object.fromEntries([...form.querySelectorAll('input:not([type=file]), textarea, select')].map(input => [input.name || input.id, input.type === 'checkbox' ? input.checked : input.value]));
     persistDialogs();
-    if (dialogDraftKey.startsWith('noteLink:')) persistDrafts();
 }
 
 function showDialog(title, html, onSubmit = null, draftKey = null) {
     closeDialog();
     const dialog = $('#dialog');
-    dialog.innerHTML = `<div class="dialog-header"><h2>${esc(t(title))}</h2><button type="button" data-action="closeDialog" class="quiet" aria-label="${esc(t('close'))}" title="${esc(t('close'))}">${icon('x')}</button></div><form class="dialog-body" id="dialog-form" novalidate>${html}<div id="dialog-error" class="error" role="alert" hidden></div><p class="error" data-local-draft-warning="${title === 'models' ? 'model' : 'dialogs'}" role="alert" hidden></p></form>`;
-    updateDraftWarnings();
+    dialog.innerHTML = `<div class="dialog-header"><h2>${esc(t(title))}</h2><button type="button" data-action="closeDialog" class="quiet" aria-label="${esc(t('close'))}" title="${esc(t('close'))}">${icon('x')}</button></div><form class="dialog-body" id="dialog-form" novalidate>${html}<div id="dialog-error" class="error" role="alert" hidden></div></form>`;
     const draft = draftKey ? dialogDrafts[draftKey] = structuredClone(dialogDrafts[draftKey] || { fields: {} }) : null;
     dialogDraftKey = draftKey;
     if (draft) {
@@ -1350,7 +1236,6 @@ function showDialog(title, html, onSubmit = null, draftKey = null) {
             if (draftKey && saved !== false && dialogDrafts[draftKey] === draft && JSON.stringify(draft.fields) === fields) {
                 delete dialogDrafts[draftKey];
                 persistDialogs();
-                if (draftKey.startsWith('noteLink:')) persistDrafts();
             }
         } catch (error) {
             const err = e.target.querySelector('#dialog-error');
@@ -2081,9 +1966,6 @@ function setEditTool(tool) {
 const actions = {
     refresh,
     enterEdit,
-    localDrafts: localDraftsDialog,
-    clearLocalDrafts,
-    restoreLocalDrafts,
     resumeNote: () => { drafts[selected].readOnly = false; persistDrafts(); renderPanel(); },
     backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
     discardDraft: () => discardComposerDraft('notes'),

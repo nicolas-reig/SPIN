@@ -600,5 +600,5 @@ export function date(value, exact = false) {
         hourCycle: 'h23',
         ...(exact ? { second: '2-digit' } : {})
     }).formatToParts(new Date(value)).map(part => [part.type, part.value]));
-    return `${parts.day}-${parts.month}-${parts.year}, ${parts.hour}:${parts.minute}${exact ? ':' + parts.second : ''}`;
+    return `${parts.day}/${parts.month}/${parts.year}, ${parts.hour}:${parts.minute}${exact ? ':' + parts.second : ''}`;
 }

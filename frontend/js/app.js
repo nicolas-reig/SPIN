@@ -26,7 +26,7 @@ import { installSelects, closeMenus } from './select.js';
 import { cameraMode } from './camera.js';
 import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
 import { icon } from './icons.js';
-import { safeUrl, opensInBrowser } from './domain.js';
+import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 let noteEditor = null;
 installSelects();
@@ -648,10 +648,13 @@ function renderLinks(e, element) {
         form.querySelector('[type=submit]').disabled = true;
         try {
             if (!draft.title.trim()) throw Error('invalidInput');
-            if (!safeUrl(draft.url.trim())) throw Error('invalidUrl');
+            const url = documentUrl(draft.url);
+            if (!url) throw Error('invalidUrl');
+            draft.url = url;
+            form.querySelector('#link-url').value = url;
             const result = await api.save({
                 action: 'putLink', exhibitId: current.id, linkId: draft.id,
-                title: draft.title.trim(), url: draft.url.trim(), description: draft.description.trim(),
+                title: draft.title.trim(), url, description: draft.description.trim(),
                 baseRevision: current.revision, contentTag: current.contentTag, requestId: uid()
             });
             delete linkDrafts[current.id];

@@ -178,6 +178,17 @@ export function structural(record, kind) {
     return Object.fromEntries(keys.map(key => [key, structuredClone(record[key] ?? null)]));
 }
 
+const editHistory = value => structuredClone({
+    ...value, exhibits: value.exhibits.map(({ notes, links, ...record }) => record)
+});
+const restoreContent = (value, current) => ({
+    ...value, assets: current.assets,
+    exhibits: value.exhibits.map(record => {
+        const shared = current.exhibits.find(item => item.id === record.id);
+        return { ...record, notes: shared?.notes || [], links: shared?.links || [] };
+    })
+});
+
 export class EditSession {
     constructor(snapshot) {
         this.base = structuredClone(snapshot);
@@ -191,7 +202,7 @@ export class EditSession {
         const next = structuredClone(this.value);
         change(next);
         if (JSON.stringify(next) === JSON.stringify(this.value)) return false;
-        this.undoStack.push(structuredClone(this.value));
+        this.undoStack.push(editHistory(this.value));
         this.redoStack = [];
         this.value = next;
         return true;
@@ -199,15 +210,15 @@ export class EditSession {
 
     undo() {
         if (this.undoStack.length) {
-            this.redoStack.push(this.value);
-            this.value = this.undoStack.pop();
+            this.redoStack.push(editHistory(this.value));
+            this.value = restoreContent(this.undoStack.pop(), this.value);
         }
     }
 
     redo() {
         if (this.redoStack.length) {
-            this.undoStack.push(this.value);
-            this.value = this.redoStack.pop();
+            this.undoStack.push(editHistory(this.value));
+            this.value = restoreContent(this.redoStack.pop(), this.value);
         }
     }
 

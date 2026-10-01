@@ -61,6 +61,11 @@ final class Store
     public static function url(mixed $value): string
     {
         $url = self::text($value, 2048);
+        $hasScheme = preg_match('/^[a-z][a-z0-9+.-]*:/i', $url) === 1;
+        $hostWithPort = !str_contains($url, '://') && preg_match('~^[^/?#:]+\.[^/?#:]*:\d*(?:[/?#]|$)~', $url) === 1;
+        if (!$hasScheme || $hostWithPort) {
+            $url = self::httpUrl($url);
+        }
         if (!preg_match('/^([a-z][a-z0-9+.-]*):/i', $url, $match) || preg_match('/[\x00-\x20\x7f]/', $url)) {
             throw new ApiError('invalidUrl');
         }
@@ -79,6 +84,34 @@ final class Store
             throw new ApiError('invalidUrl');
         }
         return $url;
+    }
+
+    private static function httpUrl(string $value): string
+    {
+        if (preg_match('/[\s\\\\\x00-\x20\x7f]/u', $value) ||
+            !preg_match('~^(\[[^\]]+\]|[^/?#:]+)(?::([0-9]+))?([/?#].*)?$~D', $value, $parts) ||
+            (isset($parts[2]) && $parts[2] !== '' && (strlen($parts[2]) > 5 || (int)$parts[2] > 65535))) {
+            throw new ApiError('invalidUrl');
+        }
+        $host = $parts[1];
+        if (str_starts_with($host, '[')) {
+            $valid = filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
+        } elseif (preg_match('/^[0-9.]+$/D', $host)) {
+            $valid = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        } else {
+            $domain = preg_replace('/\.$/D', '', $host);
+            if (preg_match('/[^\x00-\x7f]/', $domain)) {
+                $domain = function_exists('idn_to_ascii') ? idn_to_ascii($domain, IDNA_USE_STD3_RULES, INTL_IDNA_VARIANT_UTS46) : false;
+            }
+            $labels = $domain === false ? [] : explode('.', $domain);
+            $valid = count($labels) >= 2 && strlen($domain ?: '') <= 253 &&
+                !preg_match('/^(?:[0-9]+|0x[0-9a-f]*)$/iD', end($labels) ?: '') &&
+                !array_filter($labels, fn($label) => preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iD', $label) !== 1);
+        }
+        if (!$valid || strlen($value) + 7 > 2048) {
+            throw new ApiError('invalidUrl');
+        }
+        return 'http://' . $value;
     }
 
     private static function floorId(mixed $value): string

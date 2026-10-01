@@ -104,6 +104,39 @@ export function safeUrl(value) {
     }
 }
 
+export function documentUrl(value) {
+    if (typeof value !== 'string') return null;
+    const input = value.trim();
+    if (input.length > 2048) return null;
+    const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(input);
+    const hostWithPort = !input.includes('://') && /^[^/?#:]+\.[^/?#:]*:\d*(?:[/?#]|$)/.test(input);
+    if (hasScheme && !hostWithPort) return safeUrl(input) ? input : null;
+    if (/[\s\\\x00-\x20\x7f]/u.test(input)) return null;
+    const parts = /^(\[[^\]]+\]|[^/?#:]+)(?::([0-9]+))?([/?#].*)?$/.exec(input);
+    if (!parts || parts[2] && (parts[2].length > 5 || Number(parts[2]) > 65535)) return null;
+    const host = parts[1];
+    if (host.includes('%')) return null;
+    const result = 'http://' + input;
+    if (result.length > 2048) return null;
+    try {
+        const parsed = new URL(result);
+        if (host.startsWith('[')) {
+            if (!parsed.hostname.startsWith('[')) return null;
+        } else if (/^[0-9.]+$/.test(parsed.hostname)) {
+            const octets = host.split('.');
+            if (octets.length !== 4 || !octets.every(part => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)) return null;
+        } else {
+            const domain = parsed.hostname.replace(/\.$/, '');
+            const labels = domain.split('.');
+            if (domain.length > 253 || labels.length < 2 ||
+                !labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) return null;
+        }
+        return safeUrl(result) ? result : null;
+    } catch {
+        return null;
+    }
+}
+
 export const opensInBrowser = value => /^(https?|ftp|file):/i.test(value);
 
 export class NasDocumentLink extends Record {

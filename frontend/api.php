@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/backend/Store.php';
+require dirname(__DIR__) . '/backend/RequestCache.php';
 require dirname(__DIR__) . '/backend/HumanFiles.php';
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');

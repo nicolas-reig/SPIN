@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 final class HumanFiles
 {
+    private RequestCache $requests;
+
     public function __construct(private readonly string $root)
     {
         if (!is_dir($root) || is_link($root)) {
             throw new ApiError('storage', 503);
         }
+        $this->requests = new RequestCache(realpath($root) ?: $root);
     }
 
     public static function filename(string $value): string
@@ -108,6 +111,70 @@ final class HumanFiles
         return 'p' . substr(hash('sha256', $folder . '/' . $name), 0, 40);
     }
 
+    private static function datedFilename(string $name): ?array
+    {
+        if (!preg_match('/^(.+) (\d{2}_\d{2}_\d{4}|\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})(?: (\d{2}\.\d{2}(?:\.\d{2})?|\d{2}-\d{2}-\d{2}))?(?: \[[a-f0-9]{12}\]| \(\d+\))?\.(md|jpe?g|png|webp)$/iu', $name, $parts)) {
+            return null;
+        }
+        $format = str_contains($parts[2], '_') ? 'd_m_Y' : (preg_match('/^\d{4}-/', $parts[2]) ? 'Y-m-d' : 'd-m-Y');
+        $time = $parts[3] !== '' ? str_replace('.', '-', $parts[3]) : '12-00-00';
+        if (strlen($time) === 5) {
+            $time .= '-00';
+        }
+        $value = $parts[2] . ' ' . $time;
+        $when = DateTimeImmutable::createFromFormat('!' . $format . ' H-i-s', $value, new DateTimeZone('Europe/Berlin'));
+        if (!$when || $when->format($format . ' H-i-s') !== $value) {
+            return null;
+        }
+        return ['author' => $parts[1], 'when' => $when, 'extension' => strtolower($parts[4])];
+    }
+
+    private function availableFilename(string $folder, string $signature, string $extension, array $reserved, DateTimeImmutable $when): string
+    {
+        $used = [];
+        foreach (array_keys($this->files($folder, '')) as $name) {
+            $used[mb_strtolower($name)] = true;
+            $dated = self::datedFilename($name);
+            if ($dated && $dated['extension'] === $extension) {
+                $used[mb_strtolower($dated['author'] . ' ' . $dated['when']->format('d_m_Y H.i') . '.' . $extension)] = true;
+            }
+        }
+        foreach ($reserved as $relative) {
+            if (dirname($relative) === $folder) {
+                $used[mb_strtolower(basename($relative))] = true;
+            }
+        }
+        do {
+            $name = self::filename($signature . ' ' . $when->format('d_m_Y H.i') . '.' . $extension);
+            $when = $when->modify('+1 minute');
+        } while (isset($used[mb_strtolower($name)]));
+        return $name;
+    }
+
+    private function newFile(string $folder, string $signature, string $extension, string $body, string $requestId): string
+    {
+        $this->directory($folder);
+        $fingerprint = hash('sha256', $signature . "\0" . $extension . "\0" . $body);
+        $relative = $this->requests->filename($folder . '/' . $requestId, $fingerprint, function ($reserved) use ($folder, $signature, $extension, $requestId) {
+            $suffix = substr(hash('sha256', $requestId), 0, 12);
+            foreach (array_keys($this->files($folder, '')) as $name) {
+                if (str_ends_with($name, ' [' . $suffix . '].' . $extension)) {
+                    return $folder . '/' . $name;
+                }
+            }
+            return $folder . '/' . $this->availableFilename($folder, $signature, $extension, $reserved, new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')));
+        });
+        $path = $this->path($relative);
+        if (file_exists($path)) {
+            if (!is_file($path) || hash_file('sha256', $path) !== hash('sha256', $body)) {
+                throw new ApiError('requestConflict', 409);
+            }
+        } else {
+            $this->write($relative, $body, true);
+        }
+        return basename($relative);
+    }
+
     public function read(string $exhibit): array
     {
         self::filename($exhibit);
@@ -116,22 +183,18 @@ final class HumanFiles
         $fingerprints = [];
         $noteFolder = $exhibit . '/Notizen';
         foreach ($this->files($noteFolder, '.md') as $name => $path) {
-            if (!preg_match('/^(.+) (\d{4}-\d{2}-\d{2})(?: (\d{2}-\d{2}-\d{2}))?(?: \[[a-f0-9]{12}\]| \(\d+\))?\.md$/u', $name, $parts)) {
+            $dated = self::datedFilename($name);
+            if (!$dated) {
                 continue;
             }
             $body = file_get_contents($path);
             if ($body === false || strlen($body) > 100000) {
                 continue;
             }
-            $time = $parts[2] . ' ' . ($parts[3] ?? '12-00-00');
-            $when = DateTimeImmutable::createFromFormat('!Y-m-d H-i-s', $time, new DateTimeZone('Europe/Berlin'));
-            if (!$when || $when->format('Y-m-d H-i-s') !== $time) {
-                continue;
-            }
             $note = [
                 'id' => self::noteId($noteFolder, $name),
-                'author' => $parts[1],
-                'at' => $when->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
+                'author' => $dated['author'],
+                'at' => $dated['when']->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
                 'body' => trim($body),
                 'fileHash' => hash('sha256', $body),
                 'images' => [],
@@ -225,18 +288,7 @@ final class HumanFiles
             $body .= "\n";
         }
         if ($action === 'note') {
-            $suffix = substr(hash('sha256', $requestId), 0, 12);
-            foreach ($this->files($folder, '.md') as $name => $path) {
-                if (str_ends_with($name, ' [' . $suffix . '].md')) {
-                    if (file_get_contents($path) !== $body) {
-                        throw new ApiError('requestConflict', 409);
-                    }
-                    return;
-                }
-            }
-            $stamp = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d H-i-s');
-            $name = self::filename($signature) . ' ' . $stamp . ' [' . $suffix . '].md';
-            $this->write($folder . '/' . $name, $body, true);
+            $this->newFile($folder, $signature, 'md', $body, $requestId);
             return;
         }
         $name = $this->findNote($exhibit, $note['id']) ?? throw new ApiError('notFound', 404);
@@ -294,18 +346,7 @@ final class HumanFiles
     {
         $extension = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$mime] ?? throw new ApiError('invalidImage');
         $folder = $exhibit . '/Fotos';
-        $this->directory($folder);
-        $suffix = substr(hash('sha256', $requestId), 0, 12);
-        $name = self::filename($signature) . ' ' . (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d H-i-s') . ' [' . $suffix . '].' . $extension;
-        foreach ($this->files($folder, '') as $existing => $path) {
-            if (str_contains($existing, ' [' . $suffix . '].')) {
-                if (hash_file('sha256', $path) !== hash('sha256', $bytes)) {
-                    throw new ApiError('requestConflict', 409);
-                }
-                return ['id' => self::photoId($folder, $existing), 'name' => $existing];
-            }
-        }
-        $this->write($folder . '/' . $name, $bytes, true);
+        $name = $this->newFile($folder, $signature, $extension, $bytes, $requestId);
         return ['id' => self::photoId($folder, $name), 'name' => $name];
     }
 

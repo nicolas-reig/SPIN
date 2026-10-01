@@ -37,34 +37,10 @@ try {
                 throw new ApiError('invalidRequest', 403);
             }
         }
-        if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 68 * 1024 * 1024) {
+        if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 34 * 1024 * 1024) {
             throw new ApiError('fileTooLarge');
         }
-        if (isset($_POST['payload'])) {
-            if (strlen($_POST['payload']) > 2 * 1024 * 1024) {
-                throw new ApiError('fileTooLarge');
-            }
-            $payload = json_decode($_POST['payload'], true, 128, JSON_THROW_ON_ERROR);
-            if (!is_array($payload) || !in_array($payload['action'] ?? '', ['note', 'correctNote'], true)) {
-                throw new ApiError('invalidInput');
-            }
-            $attachments = $payload['attachments'] ?? [];
-            if (!is_array($attachments) || count($attachments) > 8 || count($_FILES) !== count($attachments)) {
-                throw new ApiError('invalidImage');
-            }
-            $photos = [];
-            foreach ($attachments as $attachment) {
-                if (!is_array($attachment) || !is_string($attachment['field'] ?? null)) {
-                    throw new ApiError('invalidImage');
-                }
-                $file = $_FILES[$attachment['field']] ?? null;
-                if (!$file || !is_int($file['error']) || $file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
-                    throw new ApiError('invalidUpload');
-                }
-                $photos[] = ['requestId' => $attachment['requestId'] ?? null, 'bytes' => file_get_contents($file['tmp_name'])];
-            }
-            $result = $store->mutate($payload, $photos);
-        } elseif (isset($_FILES['file'])) {
+        if (isset($_FILES['file'])) {
             if ($_FILES['file']['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($_FILES['file']['tmp_name'])) {
                 throw new ApiError('invalidUpload');
             }

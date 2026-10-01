@@ -589,7 +589,7 @@ function renderLinks(e, element) {
     if (!searchable) delete linkSearches[e.id];
     element.innerHTML = `
         <form class="composer link-composer ${draft.open ? 'composing' : ''}" id="link-form" novalidate>
-            <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t('addLink'))}" maxlength="160" value="${esc(draft.title)}">
+            <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t(draft.open ? 'title' : 'addLink'))}" maxlength="160" value="${esc(draft.title)}">
             <div class="link-fields" ${draft.open ? '' : 'hidden'}>
                 <input id="link-url" name="url" type="text" inputmode="url" aria-label="${esc(t('url'))}" placeholder="${esc(t('url'))}" value="${esc(draft.url)}">
                 <textarea id="link-description" name="description" aria-label="${esc(t('description'))}" placeholder="${esc(t('description'))}" maxlength="1000">${esc(draft.description)}</textarea>
@@ -633,6 +633,7 @@ function renderLinks(e, element) {
         if (!draft.open) {
             draft.open = true;
             form.classList.add('composing');
+            form.querySelector('#link-title').placeholder = t('title');
             form.querySelector('.link-fields').hidden = false;
         }
     });

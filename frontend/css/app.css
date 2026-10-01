@@ -1092,7 +1092,7 @@ summary {
 
 .document-url {
     display: block;
-    margin-top: 4px;
+    margin-top: 2px;
     color: var(--muted);
     font-size: .75rem;
     font-weight: 400;

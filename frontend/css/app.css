@@ -1170,6 +1170,7 @@ summary {
 
 .link-fields textarea {
     min-height: 48px;
+    font-size: .875rem;
 }
 
 .link-fields .row {

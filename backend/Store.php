@@ -605,33 +605,13 @@ final class Store
         }
     }
 
-    public function mutate(array $payload, array $photos = []): array
+    public function mutate(array $payload): array
     {
         self::requestId($payload['requestId'] ?? null);
         $action = $payload['action'] ?? '';
         $signed = !in_array($action, ['putLink', 'deleteLink'], true);
         $signature = $signed ? self::signature($payload['signature'] ?? null) : '';
-        if (count($photos) > 8 || ($photos && !in_array($action, ['note', 'correctNote'], true))) {
-            throw new ApiError('invalidImage');
-        }
-        $requests = [];
-        foreach ($photos as &$photo) {
-            $photo['requestId'] = self::requestId($photo['requestId'] ?? null);
-            if (isset($requests[$photo['requestId']])) {
-                throw new ApiError('invalidImage');
-            }
-            $requests[$photo['requestId']] = true;
-            $bytes = $photo['bytes'] ?? null;
-            $info = is_string($bytes) ? @getimagesizefromstring($bytes) : false;
-            $mime = is_string($bytes) ? (new finfo(FILEINFO_MIME_TYPE))->buffer($bytes) : '';
-            if (!is_string($bytes) || strlen($bytes) > 8 * 1024 * 1024 || !$info || $info[0] > 10000 || $info[1] > 10000 ||
-                !in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
-                throw new ApiError('invalidImage');
-            }
-            $photo['mime'] = $mime;
-        }
-        unset($photo);
-        return $this->lock(function () use ($payload, $action, $signature, $photos) {
+        return $this->lock(function () use ($payload, $action, $signature) {
             $snapshot = $this->snapshot();
             if ($action === 'structure') {
                 $this->structure($payload, $snapshot, $signature);
@@ -676,7 +656,7 @@ final class Store
                     $note = null;
                     if ($action === 'note') {
                         $images = $payload['images'] ?? [];
-                        if (!is_array($images) || count($images) + count($photos) > 8) {
+                        if (!is_array($images) || count($images) > 8) {
                             throw new ApiError('invalidImage');
                         }
                         $note = [
@@ -684,7 +664,7 @@ final class Store
                             'body' => self::text($payload['body'] ?? '', 50000, false),
                             'images' => $images
                         ];
-                        if ($note['body'] === '' && !$images && !$photos) {
+                        if ($note['body'] === '' && !$images) {
                             throw new ApiError('bodyRequired');
                         }
                     } else {
@@ -695,13 +675,13 @@ final class Store
                         if ($action === 'correctNote') {
                             $note['body'] = self::text($payload['body'] ?? '', 50000, false);
                             $note['images'] = $payload['images'] ?? [];
-                            if (!is_array($note['images']) || count($note['images']) + count($photos) > 8 ||
-                                ($note['body'] === '' && !$note['images'] && !$photos)) {
+                            if (!is_array($note['images']) || count($note['images']) > 8 ||
+                                ($note['body'] === '' && !$note['images'])) {
                                 throw new ApiError('bodyRequired');
                             }
                         }
                     }
-                    $this->human->saveNote($id, $action, $note, $signature, $payload['requestId'], $photos);
+                    $this->human->saveNote($id, $action, $note, $signature, $payload['requestId']);
                     if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
                         $this->status($id, $record, $payload['status'], $signature);
                     }

@@ -47,24 +47,6 @@ export class Api {
         validateSnapshot(r.snapshot);
         return r;
     }
-    async postNote(payload, images) {
-        const form = new FormData();
-        const attachments = [];
-        for (const [index, image] of images.entries()) {
-            const blob = await (await fetch(image.data)).blob();
-            const field = 'photo_' + index;
-            form.set(field, new File([blob], image.name, { type: blob.type }));
-            attachments.push({ field, requestId: image.id });
-        }
-        form.set('payload', JSON.stringify({ ...payload, attachments }));
-        const result = await this.request('api.php', {
-            method: 'POST',
-            headers: { 'X-Hub-Request': '1' },
-            body: form
-        });
-        validateSnapshot(result.snapshot);
-        return result;
-    }
     async upload(file, kind, signature, id, dimensions = null, exhibitId = null, options = {}) {
         const f = new FormData();
         f.set('file', file);

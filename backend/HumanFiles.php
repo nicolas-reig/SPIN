@@ -151,9 +151,8 @@ final class HumanFiles
         return $name;
     }
 
-    private function newFile(string $folder, string $signature, string $extension, string $body, string $requestId, ?bool &$created = null): string
+    private function newFile(string $folder, string $signature, string $extension, string $body, string $requestId): string
     {
-        $created = false;
         $this->directory($folder);
         $fingerprint = hash('sha256', $signature . "\0" . $extension . "\0" . $body);
         $relative = $this->requests->filename($folder . '/' . $requestId, $fingerprint, function ($reserved) use ($folder, $signature, $extension, $requestId) {
@@ -172,7 +171,6 @@ final class HumanFiles
             }
         } else {
             $this->write($relative, $body, true);
-            $created = true;
         }
         return basename($relative);
     }
@@ -274,47 +272,30 @@ final class HumanFiles
         return null;
     }
 
-    public function saveNote(string $exhibit, string $action, array $note, string $signature, string $requestId, array $photos = []): void
+    public function saveNote(string $exhibit, string $action, array $note, string $signature, string $requestId): void
     {
         $folder = $exhibit . '/Notizen';
+        $this->directory($folder);
         $body = $action === 'deleteNote' ? 'deleted by ' . $signature . "\n" : rtrim($note['body']);
-        $name = $action === 'note' ? null : $this->findNote($exhibit, $note['id']) ?? throw new ApiError('notFound', 404);
-        if ($name !== null && hash_file('sha256', $this->path($folder . '/' . $name)) !== ($note['fileHash'] ?? null)) {
-            throw new ApiError('conflict', 409);
-        }
         if ($action !== 'deleteNote') {
             foreach ($note['images'] as $image) {
-                if (!is_string($image)) {
-                    throw new ApiError('invalidImage');
-                }
                 $photo = $this->findPhoto($exhibit, $image) ?? throw new ApiError('invalidImage');
                 $body .= "\n\n![Foto](../Fotos/" . rawurlencode($photo) . ')';
             }
+            if ($action === 'correctNote') {
+                $body .= "\n\n<!-- edited by " . str_replace(['<', '>', "\n"], '', $signature) . ' -->';
+            }
+            $body .= "\n";
         }
-        $created = [];
-        try {
-            foreach ($photos as $photo) {
-                $saved = $this->savePhoto($exhibit, $signature, $photo['requestId'], $photo['bytes'], $photo['mime']);
-                if ($saved['created']) $created[] = $saved['name'];
-                $body .= "\n\n![Foto](../Fotos/" . rawurlencode($saved['name']) . ')';
-            }
-            if ($action !== 'deleteNote') {
-                if ($action === 'correctNote') $body .= "\n\n<!-- edited by " . str_replace(['<', '>', "\n"], '', $signature) . ' -->';
-                $body .= "\n";
-            }
-            $this->directory($folder);
-            if ($action === 'note') {
-                $this->newFile($folder, $signature, 'md', $body, $requestId);
-            } else {
-                if (hash_file('sha256', $this->path($folder . '/' . $name)) !== ($note['fileHash'] ?? null)) {
-                    throw new ApiError('conflict', 409);
-                }
-                $this->write($folder . '/' . $name, $body);
-            }
-        } catch (Throwable $error) {
-            foreach ($created as $photo) @unlink($this->path($exhibit . '/Fotos/' . $photo));
-            throw $error;
+        if ($action === 'note') {
+            $this->newFile($folder, $signature, 'md', $body, $requestId);
+            return;
         }
+        $name = $this->findNote($exhibit, $note['id']) ?? throw new ApiError('notFound', 404);
+        if (hash_file('sha256', $this->path($folder . '/' . $name)) !== ($note['fileHash'] ?? null)) {
+            throw new ApiError('conflict', 409);
+        }
+        $this->write($folder . '/' . $name, $body);
     }
 
     private function findLink(string $exhibit, string $id): ?string
@@ -365,8 +346,8 @@ final class HumanFiles
     {
         $extension = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$mime] ?? throw new ApiError('invalidImage');
         $folder = $exhibit . '/Fotos';
-        $name = $this->newFile($folder, $signature, $extension, $bytes, $requestId, $created);
-        return ['id' => self::photoId($folder, $name), 'name' => $name, 'created' => $created];
+        $name = $this->newFile($folder, $signature, $extension, $bytes, $requestId);
+        return ['id' => self::photoId($folder, $name), 'name' => $name];
     }
 
     public function photo(string $id): array

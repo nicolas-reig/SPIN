@@ -28,7 +28,6 @@ import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, reba
 import { icon } from './icons.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
-import { DraftStore } from './drafts.js';
 let noteEditor = null;
 installSelects();
 const $ = s => document.querySelector(s),
@@ -56,38 +55,21 @@ let creation = null, creationOpen = false, editingFloor = null, editConflict = n
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
 let cancelledDraft = null;
-let drafts = {}, draftStore = null, localDraftError = false;
-let linkDrafts = {}, dialogDrafts = {}, modelDraft = null, editorFields = {};
-let dialogDraftKey = null;
+let drafts = {}, draftStorageKey = '', editStorageKey = '';
+const linkDrafts = {};
 const linkSearches = {};
-async function loadDrafts() {
-    draftStore = new DraftStore(snapshot.datasetKey);
-    const legacy = (name, fallback) => {
-        try { return JSON.parse(localStorage.getItem(name + snapshot.datasetKey) || 'null') || fallback; }
-        catch { return fallback; }
-    };
-    drafts = legacy('hub-drafts-', {});
-    recoverableEdit = legacy('hub-edit-', null);
+function loadDrafts() {
+    draftStorageKey = 'hub-drafts-' + snapshot.datasetKey;
+    editStorageKey = 'hub-edit-' + snapshot.datasetKey;
     try {
-        await draftStore.open();
-        const saved = await Promise.all(['notes', 'links', 'dialogs', 'model', 'edit'].map(key => draftStore.read(key)));
-        drafts = saved[0] || drafts;
-        linkDrafts = saved[1] || {};
-        dialogDrafts = saved[2] || {};
-        modelDraft = saved[3] || null;
-        recoverableEdit = saved[4] || recoverableEdit;
+        drafts = JSON.parse(localStorage.getItem(draftStorageKey) || '{}');
         Object.values(drafts).forEach(draft => {
             draft.saving = false;
             draft.readingImages = false;
             if (draft.status === 'unset') draft.status = 'ok';
-            draft.localId ||= draft.requestId;
         });
-        Object.values(linkDrafts).forEach(draft => { draft.saving = false; });
-        const migrated = await Promise.all([persistDrafts(), persistEdit()]);
-        if (migrated[0]) localStorage.removeItem('hub-drafts-' + snapshot.datasetKey);
-        if (migrated[1]) localStorage.removeItem('hub-edit-' + snapshot.datasetKey);
     } catch {
-        localDraftFailure();
+        drafts = {};
     }
 }
 const data = () => edit?.value || snapshot;
@@ -145,47 +127,14 @@ function errorText(e) {
     return t(e.key || e.message || 'storage');
 }
 
-function localDraftFailure() {
-    if (!localDraftError) {
-        localDraftError = true;
-        announce(t('draftFailed'));
-    }
-}
-
-function saveLocalDraft(name, value) {
-    if (!draftStore) return Promise.resolve(false);
-    return draftStore.write(name, value).then(() => true, () => {
-        localDraftFailure();
-        return false;
-    });
-}
-
 function persistDrafts() {
-    const saved = Object.fromEntries(Object.entries(drafts).map(([id, draft]) => {
-        const value = { ...draft };
-        delete value.saving;
-        delete value.readingImages;
-        return [id, value];
-    }));
-    return saveLocalDraft('notes', saved);
-}
-
-function persistLinks() {
-    return saveLocalDraft('links', Object.fromEntries(Object.entries(linkDrafts).map(([id, draft]) => {
-        const value = { ...draft };
-        delete value.saving;
-        return [id, value];
-    })));
-}
-
-function persistDialogs() {
-    return saveLocalDraft('dialogs', dialogDrafts);
-}
-
-function touchNoteDraft(draft, signatureChanged = false) {
-    draft.localId ||= draft.requestId;
-    draft.requestId = uid();
-    if (signatureChanged) draft.images.filter(image => !image.uploaded).forEach(image => { image.id = uid(); });
+    try {
+        if (draftStorageKey) localStorage.setItem(draftStorageKey, JSON.stringify(drafts, (key, value) => ['saving', 'readingImages'].includes(key) ? undefined : value));
+        return true;
+    } catch {
+        announce(t('draftFailed'));
+        return false;
+    }
 }
 
 function discardComposerDraft(kind) {
@@ -195,7 +144,6 @@ function discardComposerDraft(kind) {
     if (!draft || draft.saving) return;
     delete store[id];
     if (kind === 'notes') persistDrafts();
-    else persistLinks();
     renderPanel();
     cancelledDraft = { kind, id, draft, replacement: store[id] };
     announce(t(kind === 'notes' ? 'noteDraftDiscarded' : 'linkDraftCancelled'), 'restoreDraft');
@@ -217,7 +165,6 @@ async function restoreDraft() {
     store[saved.id] = saved.draft;
     saved.draft.open = true;
     if (saved.kind === 'notes') persistDrafts();
-    else persistLinks();
     if (!edit && data().exhibits.some(record => record.id === saved.id)) {
         tab = saved.kind;
         if (selected !== saved.id) await select(saved.id);
@@ -230,27 +177,24 @@ async function restoreDraft() {
 }
 
 function persistEdit() {
-    return saveLocalDraft('edit', edit ? {
-        base: edit.base,
-        value: edit.value,
-        creation,
-        creationOpen,
-        editingFloor,
-        selected,
-        floorId,
-        activeInstance,
-        gizmo,
-        snap,
-        axisConstraint,
-        editorFields,
-        editConflict,
-        editSave: editSave ? {
-            signing: editSave.signing, signature: editSave.signature,
-            requestId: editSave.requestId, error: editSave.error
-        } : null,
-        undoStack: edit.undoStack,
-        redoStack: edit.redoStack
-    } : recoverableEdit);
+    try {
+        if (edit) localStorage.setItem(editStorageKey, JSON.stringify({
+            base: edit.base,
+            value: edit.value,
+            creation,
+            creationOpen,
+            editingFloor,
+            selected,
+            floorId,
+            activeInstance,
+            gizmo,
+            undoStack: edit.undoStack,
+            redoStack: edit.redoStack
+        }));
+        else if (editStorageKey) localStorage.removeItem(editStorageKey);
+    } catch {
+        announce(t('draftFailed'));
+    }
 }
 
 function setView(value) {
@@ -302,14 +246,14 @@ function deleteNoteDialog(noteId) {
     const note = record.notes.find(n => n.id === noteId);
     if (!note || note.deleted) return;
     const requestId = uid();
-    showDialog('deleteNote', `<p>${esc(t('noteBy'))} ${esc(note.author)} · ${esc(date(note.at))}</p><p class="muted small" style="margin:12px 0 20px">${esc(t('deleteNoteHint'))}</p>${signatureField()}${footer('deleteNote')}`, async (form, element) => {
+    showDialog('deleteNote', `<p>${esc(t('noteBy'))} ${esc(note.author)} · ${esc(date(note.at))}</p><p class="muted small" style="margin:12px 0 20px">${esc(t('deleteNoteHint'))}</p>${signatureField()}${footer('deleteNote')}`, async form => {
         const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, contentTag: record.contentTag, requestId, signature: requireSignature(form) });
         if (drafts[record.id]?.noteId === noteId) delete drafts[record.id];
         persistDrafts();
-        closeDialog(element);
+        closeDialog();
         acceptSnapshot(result.snapshot);
         announce(t('saved'));
-    }, 'deleteNote:' + record.id + ':' + noteId);
+    });
     $('#dialog button[type=submit]').className = 'danger';
 }
 
@@ -685,7 +629,7 @@ function renderPanel() {
 }
 
 function renderLinks(e, element) {
-    const draft = linkDrafts[e.id] ||= newLinkDraft(e);
+    const draft = linkDrafts[e.id] ||= { open: false, id: null, title: '', url: '', description: '' };
     const searchable = e.links.length > 6;
     if (!searchable) delete linkSearches[e.id];
     element.innerHTML = `
@@ -697,7 +641,6 @@ function renderLinks(e, element) {
                 <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t('save'))}</button></div>
             </div>
             <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
-            ${draft.conflict ? button('reviewConflict', 'linkConflict', 'quiet') : ''}
         </form>
         ${searchable ? `<div class="searchbox link-search">
             ${icon('search', 'search-icon')}
@@ -743,92 +686,55 @@ function renderLinks(e, element) {
             form.classList.add('composing');
             form.querySelector('#link-title').placeholder = t('title');
             form.querySelector('.link-fields').hidden = false;
-            persistLinks();
         }
     });
     form.addEventListener('input', event => {
         if (['title', 'url', 'description'].includes(event.target.name)) {
             invalidateDraftUndo('documentation', e.id);
             draft[event.target.name] = event.target.value;
-            draft.requestId = uid();
-            persistLinks();
         }
     });
     form.addEventListener('submit', async event => {
         event.preventDefault();
         if (draft.saving) return;
         const current = exhibit();
-        const submitted = { ...draft };
         draft.saving = true;
-        persistLinks();
-        form.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = true; });
+        form.querySelector('[type=submit]').disabled = true;
         try {
             if (!draft.title.trim()) throw Error('invalidInput');
             const url = documentUrl(draft.url);
             if (!url) throw Error('invalidUrl');
             draft.url = url;
             form.querySelector('#link-url').value = url;
-            persistLinks();
             const result = await api.save({
-                action: 'putLink', exhibitId: current.id, linkId: submitted.id,
-                title: submitted.title.trim(), url, description: submitted.description.trim(),
-                baseRevision: submitted.baseRevision, contentTag: submitted.contentTag, requestId: submitted.requestId
+                action: 'putLink', exhibitId: current.id, linkId: draft.id,
+                title: draft.title.trim(), url, description: draft.description.trim(),
+                baseRevision: current.revision, contentTag: current.contentTag, requestId: uid()
             });
-            if (linkDrafts[current.id] === draft) delete linkDrafts[current.id];
-            persistLinks();
+            delete linkDrafts[current.id];
             acceptSnapshot(result.snapshot);
             announce(t('saved'));
         } catch (error) {
             draft.error = error.key || error.message || 'storage';
-            draft.conflict = error.status === 409;
-            persistLinks();
+            const message = form.querySelector('.link-error');
+            message.textContent = errorText(error);
+            message.hidden = false;
+            form.querySelector('[type=submit]').disabled = false;
         } finally {
             draft.saving = false;
-            if (linkDrafts[current.id] === draft && selected === current.id && tab === 'documentation' && !edit) renderPanel();
         }
-    });
-    if (draft.saving) form.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = true; });
-}
-
-function newLinkDraft(record, link = null) {
-    return {
-        open: Boolean(link), id: link?.id || null,
-        title: link?.title || '', url: link?.url || '', description: link?.description || '',
-        baseRevision: record.revision, contentTag: record.contentTag, requestId: uid()
-    };
-}
-
-async function linkConflict() {
-    const id = selected, draft = linkDrafts[id];
-    if (!draft || draft.saving) return;
-    const live = await api.load();
-    const current = live.exhibits.find(record => record.id === id);
-    if (!current) throw Error('notFound');
-    const link = current.links.find(item => item.id === draft.id);
-    if (draft.id && !link) throw Error('notFound');
-    const text = value => [value.title, value.url, value.description].filter(Boolean).join('\n');
-    showDialog('reviewConflict', `<h3>${esc(t('current'))}</h3><div class="diff">${esc(link ? text(link) : current.links.map(text).join('\n\n'))}</div><h3 style="margin-top:20px">${esc(t('yours'))}</h3><div class="diff">${esc(text(draft))}</div>${footer('rebase')}`, async () => {
-        draft.baseRevision = current.revision;
-        draft.contentTag = current.contentTag;
-        draft.requestId = uid();
-        delete draft.conflict;
-        delete draft.error;
-        persistLinks();
-        closeDialog();
-        acceptSnapshot(live);
     });
 }
 
 function noteLinkDialog() {
     if (!noteEditor) return;
     const editor = noteEditor, link = editor.link();
-    const key = 'noteLink:' + selected + ':' + drafts[selected].localId;
     showDialog('link', `<div class="field"><label for="note-link-url">URL</label><input id="note-link-url" name="url" type="text" inputmode="url" value="${esc(link.url)}" placeholder="${esc(t('url'))}"></div>${link.text ? '' : `<div class="field"><label for="note-link-text">${esc(t('title'))}</label><input id="note-link-text" name="text"></div>`}${footer('apply')}`, async form => {
         const url = String(form.get('url')).trim();
         if (url && !safeUrl(url)) throw Error('invalidUrl');
         closeDialog();
         editor.setLink(url, String(form.get('text') || ''));
-    }, key);
+    });
 }
 
 function newDraft(e, n = null) {
@@ -838,7 +744,6 @@ function newDraft(e, n = null) {
         images: [],
         existingImages: n?.images || [],
         status: '',
-        localId: uid(),
         requestId: uid(),
         baseRevision: e.revision,
         contentTag: e.contentTag,
@@ -896,12 +801,11 @@ function renderComposer() {
     noteEditor = createNoteEditor($('#note-editor'), {
         exhibitId: e.id,
         value: d.body, label: t('noteBody'), placeholder: t('writeNote'), disabled: Boolean(d.saving),
-        onChange: value => { invalidateDraftUndo('notes', e.id); touchNoteDraft(d); d.body = value; delete d.error; persistDrafts(); },
+        onChange: value => { invalidateDraftUndo('notes', e.id); d.body = value; delete d.error; persistDrafts(); },
         onFocus: () => {
             d.open = true;
             form.classList.add('composing');
             form.querySelector('.composer-expanded').hidden = false;
-            persistDrafts();
         },
         onLink: noteLinkDialog
     });
@@ -921,7 +825,6 @@ function renderComposer() {
     if (d.saving) form.querySelectorAll('input, textarea, select, button').forEach(control => { control.disabled = true; });
     $('#note-signature')?.addEventListener('input', ev => {
         invalidateDraftUndo('notes', e.id);
-        if (d.signature !== ev.target.value) touchNoteDraft(d, true);
         d.signature = ev.target.value;
         $('[data-action=confirmNote]').disabled = !d.signature.trim();
         persistDrafts();
@@ -934,7 +837,6 @@ function renderComposer() {
     });
     $('#note-status')?.addEventListener('change', ev => {
         invalidateDraftUndo('notes', e.id);
-        touchNoteDraft(d);
         d.status = ev.target.value;
         persistDrafts();
     });
@@ -1000,7 +902,6 @@ async function addImages(files, id) {
             if (draft.images.length + draft.existingImages.length >= 8) throw Error('tooManyImages');
             const image = await readNoteImage(file);
             if (drafts[id] !== draft && cancelledDraft?.draft !== draft) return;
-            touchNoteDraft(draft);
             draft.images.push({ ...image, id: uid() });
             persistDrafts();
         }
@@ -1036,7 +937,19 @@ async function postNote(id) {
         submit.textContent = t('saving');
     }
     try {
-        const imageIds = [...d.existingImages, ...d.images.filter(image => image.uploaded).map(image => image.uploaded)];
+        const imageIds = [...d.existingImages];
+        for (const image of d.images) {
+            if (!image.uploaded) {
+                const blob = await (await fetch(image.data)).blob();
+                const file = new File([blob], image.name, {
+                    type: blob.type
+                });
+                const r = await api.upload(file, 'image', d.signature, image.id, null, id);
+                image.uploaded = r.id;
+                persistDrafts();
+            }
+            imageIds.push(image.uploaded);
+        }
         const payload = {
             action: d.noteId ? 'correctNote' : 'note',
             exhibitId: id,
@@ -1049,8 +962,8 @@ async function postNote(id) {
         };
         if (d.noteId) payload.noteId = d.noteId;
         else if (d.status) payload.status = d.status;
-        const result = await api.postNote(payload, d.images.filter(image => !image.uploaded));
-        if (drafts[id] === d) delete drafts[id];
+        const result = await api.save(payload);
+        delete drafts[id];
         persistDrafts();
         acceptSnapshot(result.snapshot);
         announce(t('saved'));
@@ -1058,10 +971,10 @@ async function postNote(id) {
         d.error = error.key || 'storage';
         d.conflict = error.status === 409;
         persistDrafts();
-        if (id === selected && tab === 'notes' && !edit) renderComposer();
+        if (id === selected) renderComposer();
     } finally {
         d.saving = false;
-        if (drafts[id] && id === selected && tab === 'notes' && !edit) renderComposer();
+        if (drafts[id] && id === selected) renderComposer();
     }
 }
 
@@ -1070,11 +983,6 @@ function acceptSnapshot(value) {
     for (const record of value.exhibits) {
         const draft = drafts[record.id];
         if (draft && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.noteId) draft.baseRevision = record.revision;
-        const link = linkDrafts[record.id];
-        if (link && !link.id && !link.title.trim() && !link.url.trim() && !link.description.trim()) {
-            link.baseRevision = record.revision;
-            link.contentTag = record.contentTag;
-        }
     }
     if (edit) {
         for (const kind of ['exhibits', 'floors'])
@@ -1103,7 +1011,7 @@ function renderEditBar() {
     el.hidden = !edit;
     if (!edit) return;
     const signing = Boolean(editSave?.signing);
-    const dirty = Boolean(edit.changes().length || creation || Object.keys(editorFields).length);
+    const dirty = Boolean(edit.changes().length || creation);
     el.classList.toggle('signing', signing);
     const label = creation ? `<button type="button" class="quiet edit-session-label" data-action="resumeCreation" title="${esc(t('resumeCreation'))}">${esc(t(creation.kind === 'floors' ? 'newFloor' : 'newExhibit'))}</button>` : `<span class="edit-session-label" ${editHelp('editDraftHint')}>${esc(t('editingShort'))}${dirty ? '<i aria-hidden="true"></i>' : ''}</span>`;
     el.innerHTML = `<div class="edit-session-heading">${label}
@@ -1114,7 +1022,6 @@ function renderEditBar() {
     $('#edit-signature')?.addEventListener('input', event => {
         editSave.signature = event.target.value;
         $('[data-action=confirmEditSave]').disabled = editSave.saving || Boolean(creation || editConflict) || !edit.changes().length || !editSave.signature.trim();
-        persistEdit();
     });
     $('#edit-signature')?.addEventListener('keydown', event => {
         if (event.key === 'Enter') { event.preventDefault(); confirmEditSave(); }
@@ -1152,17 +1059,6 @@ function renderEditInspector() {
         ${viewPresets(record)}`;
     $('#structure-slot').innerHTML = `<form id="structure-form" novalidate>${content}<div class="error" id="structure-error" role="alert" hidden></div></form>`;
     const form = $('#structure-form');
-    const fieldsKey = (editingFloor ? 'floors:' : 'exhibits:') + record.id;
-    const fields = editorFields[fieldsKey] || {};
-    form.querySelectorAll('input, select').forEach(input => {
-        if (fields[input.id] !== undefined) input.value = fields[input.id];
-    });
-    form.addEventListener('input', event => {
-        if (!event.target.id) return;
-        (editorFields[fieldsKey] ||= {})[event.target.id] = event.target.value;
-        persistEdit();
-        renderEditBar();
-    });
     form.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
     form.addEventListener('change', event => applyEditorField(event.target));
     if (!editingFloor && record.models.length) form.querySelector('#ex-floor option[value=""]').disabled = true;
@@ -1189,54 +1085,24 @@ function render() {
     document.documentElement.lang = lang();
 }
 
-function closeDialog(form = null) {
-    if (form && !form.isConnected) return;
-    captureDialogDraft();
-    dialogDraftKey = null;
+function closeDialog() {
     dialogCleanup?.();
     dialogCleanup = null;
     $('#dialog').close();
     $('#dialog').innerHTML = '';
 }
 
-function captureDialogDraft() {
-    if (!dialogDraftKey) return;
-    const draft = dialogDrafts[dialogDraftKey];
-    const form = $('#dialog-form');
-    if (!draft || !form) return;
-    draft.fields = Object.fromEntries([...form.querySelectorAll('input:not([type=file]), textarea, select')].map(input => [input.name || input.id, input.type === 'checkbox' ? input.checked : input.value]));
-    persistDialogs();
-}
-
-function showDialog(title, html, onSubmit = null, draftKey = null) {
+function showDialog(title, html, onSubmit = null) {
     closeDialog();
     const dialog = $('#dialog');
     dialog.innerHTML = `<div class="dialog-header"><h2>${esc(t(title))}</h2><button type="button" data-action="closeDialog" class="quiet" aria-label="${esc(t('close'))}" title="${esc(t('close'))}">${icon('x')}</button></div><form class="dialog-body" id="dialog-form" novalidate>${html}<div id="dialog-error" class="error" role="alert" hidden></div></form>`;
-    const draft = draftKey ? dialogDrafts[draftKey] = structuredClone(dialogDrafts[draftKey] || { fields: {} }) : null;
-    dialogDraftKey = draftKey;
-    if (draft) {
-        $('#dialog-form').querySelectorAll('input:not([type=file]), textarea, select').forEach(input => {
-            const value = draft.fields?.[input.name || input.id];
-            if (value === undefined) return;
-            if (input.type === 'checkbox') input.checked = Boolean(value);
-            else input.value = value;
-        });
-        $('#dialog-form').addEventListener('input', captureDialogDraft);
-        $('#dialog-form').addEventListener('change', captureDialogDraft);
-    }
     if (onSubmit) $('#dialog-form').addEventListener('submit', async e => {
         e.preventDefault();
         const submit = e.submitter;
         if (submit?.disabled) return;
         try {
             if (submit) submit.disabled = true;
-            if (draftKey === dialogDraftKey) captureDialogDraft();
-            const fields = JSON.stringify(draft?.fields);
-            const saved = await onSubmit(new FormData(e.target), e.target);
-            if (draftKey && saved !== false && dialogDrafts[draftKey] === draft && JSON.stringify(draft.fields) === fields) {
-                delete dialogDrafts[draftKey];
-                persistDialogs();
-            }
+            await onSubmit(new FormData(e.target), e.target);
         } catch (error) {
             const err = e.target.querySelector('#dialog-error');
             if (err?.isConnected) {
@@ -1264,25 +1130,21 @@ function requireSignature(form) {
 
 function statusDialog(chosenStatus = exhibit().status) {
     const e = structuredClone(exhibit()),
-        key = 'status:' + e.id;
-    const draft = dialogDrafts[key] ||= { fields: {}, status: chosenStatus, requestId: uid() };
-    if (arguments.length) draft.status = chosenStatus;
-    else chosenStatus = draft.status;
-    persistDialogs();
-    showDialog('changeStatus', `<p style="margin-bottom:18px">${esc(e.name)}</p><p class="chosen-status">${statusHTML(chosenStatus)}</p>${signatureField()}${footer()}`, async (form, element) => {
+        requestId = uid();
+    showDialog('changeStatus', `<p style="margin-bottom:18px">${esc(e.name)}</p><p class="chosen-status">${statusHTML(chosenStatus)}</p>${signatureField()}${footer()}`, async form => {
         const signature = requireSignature(form);
         const result = await api.save({
             action: 'status',
             exhibitId: e.id,
             baseRevision: e.revision,
-            requestId: draft.requestId,
+            requestId,
             signature,
             status: chosenStatus
         });
-        closeDialog(element);
+        closeDialog();
         acceptSnapshot(result.snapshot);
         announce(t('saved'));
-    }, key);
+    });
 }
 
 function editLink(id = null) {
@@ -1290,17 +1152,7 @@ function editLink(id = null) {
     const link = record.links.find(item => item.id === id);
     if (id && !link) return;
     invalidateDraftUndo('documentation', record.id);
-    const pending = linkDrafts[record.id];
-    if (pending && (pending.title.trim() || pending.url.trim() || pending.description.trim() || pending.id)) {
-        pending.open = true;
-        renderPanel();
-        $('#link-title')?.focus();
-        announce(t('draft'));
-        return;
-    }
-    linkDrafts[record.id] = newLinkDraft(record, link);
-    linkDrafts[record.id].open = true;
-    persistLinks();
+    linkDrafts[record.id] = { open: true, id, title: link?.title || '', url: link?.url || '', description: link?.description || '' };
     renderPanel();
     $('#link-title')?.focus();
 }
@@ -1309,12 +1161,12 @@ function deleteLink(id) {
     const record = exhibit();
     const link = record.links.find(item => item.id === id);
     if (!link) return;
-    showDialog('remove', `<p>${esc(link.title)}</p>${footer('remove')}`, async (_form, element) => {
+    showDialog('remove', `<p>${esc(link.title)}</p>${footer('remove')}`, async () => {
         const result = await api.save({
             action: 'deleteLink', exhibitId: record.id, linkId: id,
             baseRevision: record.revision, contentTag: record.contentTag, requestId: uid()
         });
-        closeDialog(element);
+        closeDialog();
         acceptSnapshot(result.snapshot);
         announce(t('saved'));
     });
@@ -1329,7 +1181,6 @@ function enterEdit() {
     editingFloor = null;
     editSave = null;
     editConflict = null;
-    editorFields = {};
     gizmo = '';
     persistEdit();
     render();
@@ -1381,48 +1232,24 @@ function structureError(key, input = null) {
 }
 
 function validEditorFields() {
-    const inputs = [...($('#structure-form')?.querySelectorAll('input, select') || [])];
+    const inputs = [...($('#structure-form')?.querySelectorAll('input') || [])];
     const invalid = inputs.find(input => !input.checkValidity() || input.type === 'number' && !input.value.trim());
-    if (invalid) {
-        structureError(invalid.type === 'number' ? 'invalidTransform' : 'invalidInput', invalid);
-        return false;
-    }
-    const record = editingFloor ? data().floors.find(item => item.id === editingFloor) : exhibit();
-    const key = (editingFloor ? 'floors:' : 'exhibits:') + record?.id;
-    const fields = editorFields[key] || {};
-    for (const input of inputs.filter(input => fields[input.id] !== undefined)) {
-        if (!applyEditorField(input)) return false;
-    }
-    if (record) delete editorFields[key];
-    for (const pending of Object.keys(editorFields)) {
-        const separator = pending.indexOf(':');
-        const kind = pending.slice(0, separator), id = pending.slice(separator + 1);
-        const target = data()[kind]?.find(item => item.id === id);
-        if (!target) { delete editorFields[pending]; continue; }
-        if (kind === 'floors') floorId = id;
-        else {
-            selected = id;
-            if (target.floorId) floorId = target.floorId;
-        }
-        structureDialog(kind);
-        return validEditorFields();
-    }
-    persistEdit();
-    return true;
+    if (!invalid) return true;
+    structureError(invalid.type === 'number' ? 'invalidTransform' : 'invalidInput', invalid);
+    return false;
 }
 
 function applyEditorField(input) {
-    if (!edit || editSave?.saving) return false;
+    if (!edit || editSave?.saving) return;
     const record = editingFloor ? data().floors.find(item => item.id === editingFloor) : exhibit();
-    if (!record) return false;
+    if (!record) return;
     if (!input.checkValidity() || input.type === 'number' && !input.value.trim()) {
         structureError('invalidTransform', input);
-        return false;
+        return;
     }
     if ($('#structure-error')) $('#structure-error').hidden = true;
     const reset = input.id === 'ex-floor' && Boolean(input.value) && input.value !== floorId;
     const previousFloor = floorId;
-    const fieldsKey = (editingFloor ? 'floors:' : 'exhibits:') + record.id;
     try {
         if (reset) floorId = input.value;
         applyEdit(state => {
@@ -1442,14 +1269,7 @@ function applyEditorField(input) {
                 input.value = value;
             }
         }, { reset });
-        if (editorFields[fieldsKey]) {
-            delete editorFields[fieldsKey][input.id];
-            if (!Object.keys(editorFields[fieldsKey]).length) delete editorFields[fieldsKey];
-            persistEdit();
-        }
-        return true;
     } catch (error) { floorId = previousFloor; structureError(error.key || error.message, input); }
-    return false;
 }
 
 function updateTransformFields() {
@@ -1594,8 +1414,8 @@ function duplicateHardware(index) {
 function cancelEdit() {
     if (!edit) return;
     map?.cancelTransform();
-    cancelledEdit = { edit, creation, creationOpen, editingFloor, selected, floorId, activeInstance, gizmo, editorFields, editSave, editConflict };
-    const dirty = edit.changes().length || creation || Object.keys(editorFields).length || edit.undoStack.length || edit.redoStack.length;
+    cancelledEdit = { edit, creation, creationOpen, editingFloor, selected, floorId, activeInstance, gizmo };
+    const dirty = edit.changes().length || creation;
     edit = null;
     creation = null;
     creationOpen = false;
@@ -1603,7 +1423,6 @@ function cancelEdit() {
     editSave = null;
     editConflict = null;
     recoverableEdit = null;
-    editorFields = {};
     gizmo = '';
     persistEdit();
     render();
@@ -1614,8 +1433,10 @@ function cancelEdit() {
 
 function restoreEdit() {
     if (edit || !cancelledEdit) return;
-    ({ edit, creation, creationOpen, editingFloor, selected, floorId, activeInstance, gizmo, editorFields, editSave, editConflict } = cancelledEdit);
+    ({ edit, creation, creationOpen, editingFloor, selected, floorId, activeInstance, gizmo } = cancelledEdit);
     cancelledEdit = null;
+    editSave = null;
+    editConflict = null;
     changed();
     announce(t('editsRestored'));
 }
@@ -1634,7 +1455,6 @@ async function saveExit() {
     if (!validEditorFields()) return;
     if (!edit.changes().length) { cancelEdit(); return; }
     editSave = { signing: true, signature: editSave?.signature || '', saving: false, error: null, requestId: uid() };
-    persistEdit();
     renderEditBar();
     $('#edit-signature').focus();
 }
@@ -1663,7 +1483,6 @@ async function confirmEditSave() {
         editConflict = null;
         editSave = null;
         cancelledEdit = null;
-        editorFields = {};
         gizmo = '';
         persistEdit();
         acceptSnapshot(result.snapshot);
@@ -1683,7 +1502,6 @@ async function confirmEditSave() {
             $('#inspector').inert = false;
             renderEditBar();
             syncEditTools();
-            persistEdit();
         }
     }
 }
@@ -1692,8 +1510,7 @@ function cancelEditSignature() {
     if (!editSave) return;
     const save = editSave;
     save.controller?.abort();
-    editSave = { signing: false, saving: false, signature: save.signature, requestId: save.requestId, error: null };
-    persistEdit();
+    editSave = null;
     $('#sidebar').inert = false;
     $('#inspector').inert = false;
     renderEditBar();
@@ -1733,50 +1550,32 @@ async function modelsDialog() {
     const controller = new AbortController();
     showDialog('models', `
         <div class="model-grid">${rows || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div>
-        <div class="field model-import"><button type="button" id="choose-model-file" class="quiet" title="${esc(t('chooseFile'))}">${icon('plus')}<span>${esc(modelDraft?.file?.name || t('chooseFile'))}</span></button><input type="file" name="model" id="model-file" accept=".glb,model/gltf-binary" hidden></div>
-        ${footer()}`, async () => {
-        const pending = modelDraft;
-        const file = pending?.file;
+        <div class="field model-import"><label for="model-file">${esc(t('chooseFile'))}</label><input type="file" name="model" id="model-file" accept=".glb,model/gltf-binary"></div>
+        ${footer()}`, async form => {
+        const file = form.get('model');
         if (!file?.size) throw Error('invalidModel');
         if (file.size > 32 * 1024 * 1024) throw Error('fileTooLarge');
-        $('#choose-model-file').disabled = true;
+        const { inspectModel } = await import('./map.js');
+        const dimensions = await inspectModel(file);
+        if (closed) return;
         try {
-            const { inspectModel } = await import('./map.js');
-            const dimensions = await inspectModel(file);
-            if (closed) return false;
-            await api.upload(file, 'model', '', pending.requestId, dimensions, null, { signal: controller.signal });
+            await api.upload(file, 'model', '', uid(), dimensions, null, { signal: controller.signal });
             const live = await api.load();
             if (edit) {
                 edit.value.assets = structuredClone(live.assets);
                 edit.base.assets = structuredClone(live.assets);
-                persistEdit();
-            }
-            if (modelDraft === pending) {
-                modelDraft = null;
-                saveLocalDraft('model', null);
             }
             if (!closed) closeDialog();
             acceptSnapshot(live);
             announce(t('saved'));
         } catch (error) {
             if (error.name !== 'AbortError') throw error;
-            return false;
-        } finally {
-            if (!closed) $('#choose-model-file').disabled = false;
         }
     });
     dialogCleanup = () => { closed = true; controller.abort(); };
     const submit = $('#dialog button[type=submit]');
-    submit.disabled = !modelDraft?.file;
-    $('#choose-model-file').addEventListener('click', () => $('#model-file').click());
-    $('#model-file').addEventListener('change', event => {
-        const file = event.target.files[0];
-        if (!file) return;
-        modelDraft = { file, requestId: uid() };
-        saveLocalDraft('model', modelDraft);
-        $('#choose-model-file span').textContent = file.name;
-        submit.disabled = false;
-    });
+    submit.disabled = true;
+    $('#model-file').addEventListener('change', event => { submit.disabled = !event.target.files.length; });
 }
 
 async function modelPreview(id) {
@@ -1837,7 +1636,6 @@ async function structureConflict(expectedSave = null) {
     }
     editConflict = { live, conflicts: result.conflicts, choices: {}, open: true };
     creationOpen = false;
-    persistEdit();
     renderInspector();
     renderMapUI();
     syncEditTools();
@@ -1864,7 +1662,6 @@ function renderEditConflict() {
         if (!event.target.dataset.conflictKey) return;
         editConflict.choices[event.target.dataset.conflictKey] = event.target.value;
         $('#resolve-edit').disabled = editConflict.conflicts.some(item => !editConflict.choices[item.key]);
-        persistEdit();
     });
     $('#conflict-form').addEventListener('submit', event => {
         event.preventDefault();
@@ -1902,18 +1699,14 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 
 function recoverDraft() {
     try {
-        const saved = recoverableEdit;
+        const saved = JSON.parse(localStorage.getItem(editStorageKey) || 'null');
         if (!saved?.base || !saved.value) return;
         const session = new EditSession(saved.base);
         session.value = saved.value;
-        if (!session.changes().length && !saved.creation && !Object.keys(saved.editorFields || {}).length && !saved.undoStack?.length && !saved.redoStack?.length) {
-            recoverableEdit = null;
-            persistEdit();
-            return;
-        }
+        if (!session.changes().length && !saved.creation) { localStorage.removeItem(editStorageKey); return; }
         recoverableEdit = saved;
         announce(t('unsavedEdits'), 'recoverEdit', 'recover');
-    } catch { recoverableEdit = null; persistEdit(); }
+    } catch { localStorage.removeItem(editStorageKey); }
 }
 
 function recoverEdit() {
@@ -1931,11 +1724,7 @@ function recoverEdit() {
     floorId = saved.floorId || floorId;
     activeInstance = saved.activeInstance || 0;
     gizmo = saved.gizmo || '';
-    editorFields = saved.editorFields || {};
-    snap = Boolean(saved.snap);
-    axisConstraint = saved.axisConstraint || '';
-    editSave = saved.editSave ? { ...saved.editSave, saving: false } : null;
-    editConflict = saved.editConflict || null;
+    editSave = null;
     recoverableEdit = null;
     changed();
     announce(t('editsRestored'));
@@ -1966,7 +1755,7 @@ function setEditTool(tool) {
 const actions = {
     refresh,
     enterEdit,
-    resumeNote: () => { drafts[selected].readOnly = false; persistDrafts(); renderPanel(); },
+    resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },
     backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
     discardDraft: () => discardComposerDraft('notes'),
     restoreDraft,
@@ -1978,7 +1767,7 @@ const actions = {
     recoverEdit,
     resumeCreation: () => structureDialog(creation.kind, true),
     duplicateExhibit: () => duplicateSelected(),
-    cancelConflict: () => { editConflict.open = false; persistEdit(); renderInspector(); renderMapUI(); syncEditTools(); },
+    cancelConflict: () => { editConflict.open = false; renderInspector(); renderMapUI(); syncEditTools(); },
     cancelSignature: () => {
         drafts[selected].signing = false;
         persistDrafts();
@@ -1992,7 +1781,6 @@ const actions = {
         renderComposer();
     },
     noteConflict,
-    linkConflict,
     status: statusDialog,
     addLink: () => editLink(),
     cancelLink: () => discardComposerDraft('documentation'),
@@ -2014,8 +1802,8 @@ const actions = {
     editFloor: () => structureDialog('floors'),
     newExhibit: () => { setView('detail'); structureDialog('exhibits', true); },
     newFloor: () => structureDialog('floors', true),
-    undo: () => { if (editSave?.saving || !edit?.undoStack.length) return; map?.cancelTransform(); edit.undo(); editorFields = {}; editConflict = null; changed(); },
-    redo: () => { if (editSave?.saving || !edit?.redoStack.length) return; map?.cancelTransform(); edit.redo(); editorFields = {}; editConflict = null; changed(); },
+    undo: () => { if (editSave?.saving) return; map?.cancelTransform(); edit?.undo(); editConflict = null; changed(); },
+    redo: () => { if (editSave?.saving) return; map?.cancelTransform(); edit?.redo(); editConflict = null; changed(); },
     saveExit,
     models: modelsDialog,
     structureConflict: () => {
@@ -2061,12 +1849,10 @@ document.addEventListener('click', async event => {
             return;
         }
         if (element.dataset.removeImage !== undefined) {
-            touchNoteDraft(drafts[selected]);
             drafts[selected].images.splice(Number(element.dataset.removeImage), 1);
             persistDrafts(); renderComposer(); return;
         }
         if (element.dataset.removeExisting) {
-            touchNoteDraft(drafts[selected]);
             drafts[selected].existingImages = drafts[selected].existingImages.filter(id => id !== element.dataset.removeExisting);
             persistDrafts(); renderComposer(); return;
         }
@@ -2217,14 +2003,14 @@ resizer.addEventListener('keydown', event => {
     resizeInspector(width);
 });
 window.addEventListener('beforeunload', () => {
-    captureDialogDraft(); persistDrafts(); persistLinks(); persistEdit();
+    persistDrafts(); persistEdit();
 });
 setView('list');
 renderHeader();
 $('#sidebar').innerHTML = '<p>' + esc(t('loading')) + '</p>';
 try {
     snapshot = await api.load();
-    await loadDrafts();
+    loadDrafts();
     if (!snapshot.exhibits.some(e => e.id === selected)) selected = snapshot.exhibits[0]?.id || null;
     const params = new URLSearchParams(location.search);
     const requestedFloor = snapshot.floors.find(f => f.id === params.get('floor'));

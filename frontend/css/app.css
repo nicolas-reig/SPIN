@@ -1128,6 +1128,7 @@ summary {
 .link-composer #link-title {
     font-weight: 500;
     min-height: 30px;
+    padding: 10px 20px;
 }
 
 .link-composer #link-title::placeholder {
@@ -1141,7 +1142,7 @@ summary {
 
 .link-fields input,
 .link-fields textarea {
-    padding: 8px 0;
+    padding: 8px 20px;
     margin: 0 0 8px;
 }
 
@@ -2145,6 +2146,8 @@ body.editing {
 .is-empty .ProseMirror:before {
     content: attr(data-placeholder);
     color: var(--muted);
+    font-size: .875rem;
+    font-weight: 400;
     pointer-events: none;
     position: absolute;
     inset: 0 0 auto;
@@ -2199,7 +2202,7 @@ body.editing {
     margin-left: auto;
 }
 @media (max-width: 860px) {
-    .ProseMirror { font-size: 16px; }
+    .ProseMirror, .is-empty .ProseMirror:before { font-size: 16px; }
 }
 .view-presets h3 {
     font-size: .8125rem;

@@ -591,14 +591,14 @@ export function setLanguage(value) {
     } catch {}
 }
 export function date(value, exact = false) {
-    return new Intl.DateTimeFormat(language === 'de' ? 'de-DE' : 'en-GB', exact ? {
-        dateStyle: 'full',
-        timeStyle: 'short'
-    } : {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat(language === 'de' ? 'de-DE' : 'en-GB', {
         day: '2-digit',
-        month: 'short',
+        month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
-    }).format(new Date(value));
+        minute: '2-digit',
+        hourCycle: 'h23',
+        ...(exact ? { second: '2-digit' } : {})
+    }).formatToParts(new Date(value)).map(part => [part.type, part.value]));
+    return `${parts.day}-${parts.month}-${parts.year}, ${parts.hour}:${parts.minute}${exact ? ':' + parts.second : ''}`;
 }

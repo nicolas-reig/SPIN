@@ -29,7 +29,7 @@ export function viewPresets(record) {
                 ? saved ? 'previewTopHint' : 'automaticTopHint'
                 : saved ? 'previewThreeHint' : 'automaticThreeHint';
             return `<div class="preset-row">
-            <span class="preset-type" ${editHelp(key === 'top' ? 'topViewHint' : 'threeViewHint')}>${icon(key === 'top' ? 'grid-2x2' : 'box')}<span class="sr-only">${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span></span>
+            <span class="preset-type" ${editHelp(key === 'top' ? 'topViewHint' : 'threeViewHint')}>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span>
             <button type="button" class="icon-button" data-preview-view="${key}" aria-label="${esc(t('showView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(previewHelp)}>${icon('eye')}</button>
             <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(key === 'top' ? 'captureTopHint' : 'captureThreeHint')}>${icon('camera')}</button>
             <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(saved ? 'resetViewHint' : 'alreadyAutomaticHint')} ${saved ? '' : 'disabled'}>${icon('rotate-ccw')}</button>

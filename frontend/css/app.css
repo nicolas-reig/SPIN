@@ -2623,8 +2623,9 @@ body.editing .exhibit-entry {
 .preset-row .icon-button {
     width: 36px;
 }
-.preset-type .lucide {
-    margin-inline: 4px;
+.preset-type {
+    font-size: .8125rem;
+    font-weight: 600;
 }
 
 .transform-tools {

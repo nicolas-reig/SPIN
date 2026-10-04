@@ -21,8 +21,15 @@
     --panel: #f0f1f3;
     --canvas: #e1e4e7;
     --line: #dfe2e6;
-    --accent: #0872df;
-    --accent-soft: #e5f1ff;
+    --normal-accent: #0872df;
+    --edit-accent: #8056cb;
+    --accent: var(--normal-accent);
+    --accent-soft: color-mix(in srgb, var(--accent) 10%, white);
+    --link: #096ece;
+    --focus: #438fe4;
+    --error-ink: #9e343c;
+    --error-bg: #fff0f0;
+    --compass-north: #cb514f;
     --green: #287c51;
     --red: #b44c4d;
     --slate: #727b85;
@@ -97,7 +104,7 @@ button.primary {
 }
 
 button.primary:hover {
-    background: #006be0;
+    background: color-mix(in srgb, var(--accent) 88%, black);
 }
 
 button.quiet {
@@ -114,16 +121,16 @@ button.danger {
 
 button.active {
     background: var(--accent-soft);
-    color: #086bcb;
+    color: var(--accent);
 }
 
 a {
-    color: #096ece;
+    color: var(--link);
     text-underline-offset: 3px;
 }
 
 :focus-visible {
-    outline: 3px solid #438fe4;
+    outline: 3px solid var(--focus);
     outline-offset: 3px;
 }
 
@@ -226,8 +233,8 @@ small,
 }
 
 .error {
-    color: #9e343c;
-    background: #fff0f0;
+    color: var(--error-ink);
+    background: var(--error-bg);
     padding: 12px;
     border-radius: 5px;
     font-size: .875rem;
@@ -473,7 +480,7 @@ summary {
 .exhibit-row.active {
     background: var(--accent);
     color: #fff;
-    box-shadow: 0 2px 7px #087cf024;
+    box-shadow: 0 2px 7px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .exhibit-row:hover:not(.active) {
@@ -487,6 +494,17 @@ summary {
     flex: 1;
     min-width: 0;
     gap: 3px;
+}
+
+.exhibit-status-name {
+    color: var(--muted);
+    font-size: .6875rem;
+    font-weight: 400;
+    line-height: 1.4;
+}
+
+.exhibit-row.active .exhibit-status-name {
+    color: inherit;
 }
 
 .exhibit-name {
@@ -986,7 +1004,7 @@ summary {
 }
 
 .photo-button:has(+ .file-input:focus-visible) {
-    outline: 3px solid #438fe4;
+    outline: 3px solid var(--focus);
 }
 
 .post-button {
@@ -1502,7 +1520,7 @@ dialog::backdrop {
 
     #mobile-nav button.active {
         background: #e9edf3;
-        color: #0971d8;
+        color: var(--accent);
     }
 
     #mobile-nav button .lucide {
@@ -1706,7 +1724,7 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 
 .floor-selector button[aria-current=true] {
     background: #fff;
-    color: #086bcb;
+    color: var(--accent);
     font-weight: 600;
     box-shadow: 0 1px 6px #1d293518;
 }
@@ -1800,8 +1818,8 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 
 
 body.editing {
-    --accent: #8056cb;
-    --accent-soft: #eee6fc;
+    --accent: var(--edit-accent);
+    --accent-soft: color-mix(in srgb, var(--edit-accent) 10%, white);
     --panel: #f1eef6;
 }
 
@@ -1921,6 +1939,19 @@ body.editing {
 
 .status-symbol.retired, .exhibit-row.active .status-symbol.retired {
     background: var(--status-retired, #65717d);
+}
+
+html[data-color-mode]:not([data-color-mode=default]) .status-symbol {
+    border: 1px solid color-mix(in srgb, var(--ink) 50%, transparent);
+}
+
+html[data-color-mode]:not([data-color-mode=default]) .unplaced-flag {
+    color: var(--ink);
+    background: #e1e3e6;
+}
+
+html[data-color-mode]:not([data-color-mode=default]) {
+    --error-bg: #eeeff1;
 }
 
 .exhibit-row.active .status-symbol {
@@ -2473,7 +2504,7 @@ button.edit-session-label {
     background: #edf0f4;
 }
 .popover > button.danger:hover {
-    background: #fff0f0;
+    background: var(--error-bg);
 }
 .popover .check {
     line-height: 1.4;
@@ -2906,7 +2937,7 @@ body.editing .exhibit-entry {
     transform-origin: calc(4px * var(--compass-scale)) calc(24px * var(--compass-scale));
 }
 
-.compass-north { border-bottom-color: #cb514f; }
+.compass-north { border-bottom-color: var(--compass-north); }
 .compass-east { transform: rotate(90deg); }
 .compass-south { transform: rotate(180deg); }
 .compass-west { transform: rotate(270deg); }

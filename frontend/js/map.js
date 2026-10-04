@@ -10,7 +10,8 @@ import {
 } from 'three/addons/controls/TransformControls.js';
 
 import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset } from './camera.js';
-import { STATUS_COLORS, SELECTION_COLORS, validTransform } from './domain.js';
+import { validTransform } from './domain.js';
+import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -78,12 +79,7 @@ export class MapView {
         this.root = new THREE.Group();
         this.scene.add(this.root);
         this.objects = new Map();
-        this.materials = Object.fromEntries(Object.entries({
-            ...STATUS_COLORS,
-            selection: SELECTION_COLORS.normal,
-            editSelection: SELECTION_COLORS.edit,
-            floor: '#afb7be'
-        }).map(([name, color]) => {
+        this.materials = Object.fromEntries(Object.entries(colorScheme().materials).map(([name, color]) => {
             const material = new THREE.MeshStandardMaterial({
                 color,
                 roughness: .9,
@@ -94,6 +90,7 @@ export class MapView {
             return [name, material];
         }));
         this.sharedMaterials = new Set(Object.values(this.materials));
+        this.stopColorUpdates = onColorModeChange(() => this.updateColors());
         this.generation = 0;
         this.mode = 'perspective';
         this.selected = null;
@@ -130,6 +127,7 @@ export class MapView {
         this.controls.addEventListener('start', () => cancelAnimationFrame(this.cameraFrame));
         this.transform = new TransformControls(this.camera, this.renderer.domElement);
         this.scene.add(this.transform.getHelper());
+        this.updateColors();
         this.transform.addEventListener('dragging-changed', e => {
             this.controls.enabled = !e.value;
             if (!e.value && this.transform.object && !this.cancelledTransform) {
@@ -208,6 +206,14 @@ export class MapView {
             this.camera.bottom = -span;
         }
         this.camera.updateProjectionMatrix();
+        this.requestRender();
+    }
+    updateColors() {
+        const { materials } = colorScheme();
+        for (const [name, color] of Object.entries(materials)) this.materials[name].color.set(color);
+        const axes = colorMode() === 'default' ? ['#ff0000', '#00ff00', '#0000ff', '#ffff00'] :
+            [materials.problem, materials.ok, materials.selection, materials.editSelection];
+        this.transform?.setColors(...axes);
         this.requestRender();
     }
     requestRender() {
@@ -608,6 +614,7 @@ export class MapView {
         this.requestRender();
     }
     destroy() {
+        this.stopColorUpdates();
         this.generation++;
         cancelAnimationFrame(this.frame);
         cancelAnimationFrame(this.cameraFrame);

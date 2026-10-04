@@ -6,7 +6,6 @@ import {
     EditSession,
     identity,
     STATUSES,
-    STATUS_COLORS,
     normalizeStatus,
     structural
 } from './domain.js';
@@ -27,6 +26,7 @@ import { cameraMode } from './camera.js';
 import { CameraControls } from './camera-controls.js';
 import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
 import { icon } from './icons.js';
+import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
@@ -99,7 +99,7 @@ const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const floor = () => data()?.floors.find(f => f.id === floorId);
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
-for (const [status, value] of Object.entries(STATUS_COLORS)) document.documentElement.style.setProperty('--status-' + status, value);
+onColorModeChange(() => { if (snapshot) renderList(); });
 const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
 const button = (label, action, cls = '', extra = '') => `<button type="button" data-action="${action}" class="${cls}" ${extra}>${esc(t(label))}</button>`;
 const menuButton = (label, action, name, extra = '') => `<button type="button" data-action="${action}" class="quiet menu-action" ${extra}>${icon(name)}<span>${esc(t(label))}</span></button>`;
@@ -331,6 +331,7 @@ function renderSidebar() {
                 ${edit ? '' : `<details class="app-menu">
                     <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
                     <div class="popover">
+                        ${menuButton('accessibility', 'accessibility', 'eye', `title="${esc(t('accessibilityHint'))}"`)}
                         ${menuButton('editStructure', 'enterEdit', 'pencil-line')}
                     </div>
                 </details>`}
@@ -372,9 +373,10 @@ function renderList() {
         else if (!edit) details.push(t(e.status));
         return `
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
-            ${edit ? '' : `<span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>`}
+            ${edit ? '' : `<span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>`}
             <span class="exhibit-label">
                 <span class="exhibit-name">${esc(displayName(e))}</span>
+                ${!edit && colorMode() !== 'default' ? `<span class="exhibit-status-name">${esc(t(e.status))}</span>` : ''}
                 ${e.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
             </span>
         </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}" title="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`;
@@ -1750,6 +1752,11 @@ function setEditTool(tool) {
 }
 
 const actions = {
+    accessibility: () => {
+        const url = new URL('accessibility.html', location.href);
+        url.searchParams.set('return', location.pathname + location.search + location.hash);
+        location.assign(url.href);
+    },
     refresh,
     enterEdit,
     resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },

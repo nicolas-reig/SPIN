@@ -1,0 +1,179 @@
+body.accessibility-page {
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+    background: var(--panel);
+}
+
+.accessibility-shell {
+    max-width: 960px;
+    margin: auto;
+    padding: 28px 32px 40px;
+}
+
+.accessibility-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 32px;
+}
+
+.accessibility-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    color: var(--ink);
+    font-size: .875rem;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.accessibility-heading h1 {
+    margin: 0 0 8px;
+    font-size: 1.875rem;
+    letter-spacing: -.035em;
+    font-weight: 600;
+}
+
+.accessibility-heading p {
+    max-width: 65ch;
+    margin: 0 0 28px;
+    color: var(--muted);
+    font-size: .9375rem;
+}
+
+.palette-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.palette-option {
+    display: block;
+    position: relative;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.palette-option:first-of-type {
+    grid-column: 1 / -1;
+}
+
+.palette-card {
+    display: block;
+    height: 100%;
+    padding: 20px;
+    background: var(--paper);
+    border: 2px solid transparent;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.palette-option:hover .palette-card {
+    background: #fafbfc;
+}
+
+.palette-option input:checked + .palette-card {
+    border-color: var(--accent);
+}
+
+.palette-option input:focus-visible {
+    outline: none;
+}
+
+.palette-option input:focus-visible + .palette-card {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+}
+
+.palette-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-height: 24px;
+}
+
+.palette-heading strong {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.palette-check {
+    display: inline-flex;
+    visibility: hidden;
+    color: var(--accent);
+}
+
+.palette-option input:checked + .palette-card .palette-check {
+    visibility: visible;
+}
+
+.palette-description {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: .8125rem;
+}
+
+.palette-option:not(:first-of-type) .palette-description {
+    min-height: 3em;
+}
+
+.palette-swatches {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.palette-option:first-of-type .palette-swatches {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.palette-sample {
+    min-width: 0;
+    font-size: .6875rem;
+    color: var(--muted);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.palette-color {
+    display: block;
+    height: 32px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    background: var(--swatch);
+    box-shadow: inset 0 0 0 1px #00000012;
+}
+
+.accessibility-footer {
+    margin-top: 24px;
+    font-size: .8125rem;
+    color: var(--muted);
+}
+
+.accessibility-footer p {
+    margin: 4px 0;
+}
+
+@media (max-width: 640px) {
+    .accessibility-shell {
+        padding: 16px 18px 28px;
+    }
+    .accessibility-nav {
+        margin-bottom: 20px;
+    }
+    .palette-options {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .palette-option:first-of-type .palette-swatches {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}

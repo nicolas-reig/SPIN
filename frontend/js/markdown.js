@@ -1,9 +1,8 @@
 import { defaultMarkdownParser } from '../vendor/editor.js';
 import { safeUrl, opensInBrowser } from './domain.js';
+import { escape } from './html.js';
 
-export const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-}[c]));
+export { escape } from './html.js';
 
 export function markdown(source, exhibitId = '') {
     function render(node) {

@@ -2957,23 +2957,64 @@ body.editing .exhibit-entry {
 .elevation-control {
     width: 32px;
     height: 88px;
-}
-
-.elevation-control input[type=range] {
-    display: block;
-    width: 100%;
-    height: 100%;
-    min-height: 88px;
-    padding: 8px 0;
-    margin: 0;
-    border: 0;
+    padding-block: 8px;
     border-radius: 16px;
     background: #fafbfc;
     box-shadow: 0 1px 2px #202b3310, 0 6px 16px #202b3318;
-    accent-color: #687785;
+}
+
+.elevation-control input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
     writing-mode: vertical-lr;
     direction: rtl;
     cursor: pointer;
+}
+
+.elevation-control input[type=range]::-webkit-slider-runnable-track {
+    width: 4px;
+    height: 100%;
+    border: 0;
+    border-radius: 2px;
+    background: #b7c1ca;
+}
+
+.elevation-control input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-left: -6px;
+    border: 0;
+    border-radius: 50%;
+    background: #687785;
+    box-shadow: 0 1px 3px #202b3329;
+}
+
+.elevation-control input[type=range]::-moz-range-track {
+    width: 4px;
+    height: 100%;
+    border: 0;
+    border-radius: 2px;
+    background: #b7c1ca;
+}
+
+.elevation-control input[type=range]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border: 0;
+    border-radius: 50%;
+    background: #687785;
+    box-shadow: 0 1px 3px #202b3329;
 }
 
 .camera-toolbar > .transform-controls {
@@ -3036,8 +3077,6 @@ body.editing .exhibit-entry {
     }
     .elevation-control {
         width: 44px;
-    }
-    .elevation-control input[type=range] {
         border-radius: 22px;
     }
     .camera-toolbar > .toolbar-divider {

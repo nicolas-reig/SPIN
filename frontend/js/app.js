@@ -49,6 +49,7 @@ let snapshot = null,
     scope = 'name',
     floorFilter = '',
     statusFilter = '',
+    statusSaving = false,
     mapMode = 'top',
     gizmo = '',
     axisConstraint = '',
@@ -70,6 +71,11 @@ function loadDrafts() {
         drafts = Object.assign(Object.create(null), draftStore?.read('notes') || {});
         linkDrafts = Object.assign(Object.create(null), draftStore?.read('links') || {});
         dialogDrafts = Object.assign(Object.create(null), draftStore?.read('dialogs') || {});
+        const statusDrafts = Object.keys(dialogDrafts).filter(key => key.startsWith('changeStatus:'));
+        if (statusDrafts.length) {
+            statusDrafts.forEach(key => delete dialogDrafts[key]);
+            saveDraftCategory('dialogs', dialogDrafts);
+        }
         modelDraft = draftStore?.read('model');
         for (const [id, saved] of Object.entries(drafts)) {
             if (!saved || typeof saved !== 'object') { delete drafts[id]; continue; }
@@ -558,7 +564,7 @@ function renderInspector() {
             <div class="inspector-tools">
                 <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
                 <div class="status-picker">
-                    <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" title="${esc(t(e.status))}">${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
+                    <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" aria-busy="${statusSaving}" title="${esc(t(e.status))}" ${statusSaving ? 'disabled' : ''}>${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
                         ${STATUSES.map(status => `<button type="button" class="status-choice" data-status-choice="${status}" role="menuitemradio" tabindex="-1" aria-label="${esc(t(status))}" aria-checked="${status === e.status}">${statusHTML(status)}</button>`).join('')}
                     </div>
@@ -597,6 +603,7 @@ function bindStatusPicker() {
     const menu = picker.querySelector('.status-menu');
     const choices = [...menu.querySelectorAll('button')];
     const open = () => {
+        if (statusSaving) return;
         picker.classList.add('open');
         toggle.setAttribute('aria-expanded', 'true');
         menu.inert = false;
@@ -624,9 +631,8 @@ function bindStatusPicker() {
     });
     for (const choice of choices) choice.addEventListener('click', () => {
         const status = choice.dataset.statusChoice;
-        closeStatusPicker();
-        if (status !== exhibit().status) statusDialog(status);
-        else toggle.focus();
+        closeStatusPicker(true);
+        changeStatus(status);
     });
 }
 
@@ -1020,7 +1026,6 @@ function acceptSnapshot(value) {
                     const base = edit.base.exhibits.find(x => x.id === r.id);
                     if (r.status === base?.status) {
                         r.status = live.status;
-                        r.statusBy = live.statusBy;
                     }
                 }
             }
@@ -1177,23 +1182,42 @@ function requireSignature(form) {
     return value;
 }
 
-function statusDialog(chosenStatus = exhibit().status) {
-    const e = structuredClone(exhibit()),
-        requestId = uid();
-    showDialog('changeStatus', `<p style="margin-bottom:18px">${esc(e.name)}</p><p class="chosen-status">${statusHTML(chosenStatus)}</p>${signatureField()}${footer()}`, async (form, element) => {
-        const signature = requireSignature(form);
+async function changeStatus(chosenStatus) {
+    const record = exhibit();
+    if (!record || edit || statusSaving || chosenStatus === record.status) return;
+    statusSaving = true;
+    const toggle = $('.status-toggle');
+    const restoreFocus = document.activeElement === toggle;
+    if (toggle) {
+        toggle.disabled = true;
+        toggle.setAttribute('aria-busy', 'true');
+    }
+    try {
         const result = await api.save({
             action: 'status',
-            exhibitId: e.id,
-            baseRevision: e.revision,
-            requestId,
-            signature,
+            exhibitId: record.id,
+            baseRevision: record.revision,
+            requestId: uid(),
             status: chosenStatus
         });
-        closeDialog(element);
         acceptSnapshot(result.snapshot);
         announce(t('saved'));
-    }, 'changeStatus:' + e.id + ':' + chosenStatus);
+    } catch (error) {
+        if (error.status === 409) {
+            try {
+                acceptSnapshot(await api.load());
+                announce(t('statusConflict'));
+            } catch (refreshError) { announce(errorText(refreshError)); }
+        } else announce(errorText(error));
+    } finally {
+        statusSaving = false;
+        const currentToggle = $('.status-toggle');
+        if (currentToggle) {
+            currentToggle.disabled = false;
+            currentToggle.setAttribute('aria-busy', 'false');
+            if (restoreFocus && selected === record.id && document.activeElement === document.body) currentToggle.focus({ preventScroll: true });
+        }
+    }
 }
 
 function editLink(id = null) {
@@ -1777,7 +1801,7 @@ async function refresh() {
 }
 
 async function refreshFromFiles() {
-    if (document.hidden || edit || $('#dialog').open || document.activeElement?.closest('#note-form, #link-form, #link-search')) return;
+    if (document.hidden || edit || statusSaving || $('#dialog').open || document.activeElement?.closest('#note-form, #link-form, #link-search')) return;
     try {
         const current = await api.load();
         const stamp = value => JSON.stringify([value.revision, value.structureRevision, value.exhibits.map(item => [item.id, item.revision, item.contentTag])]);
@@ -1876,7 +1900,6 @@ const actions = {
         renderComposer();
     },
     noteConflict,
-    status: statusDialog,
     addLink: () => editLink(),
     cancelLink: () => discardComposer('links'),
     closeDialog,

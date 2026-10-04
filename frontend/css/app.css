@@ -2053,15 +2053,6 @@ body.editing {
     background: #edf0f4;
 }
 
-.chosen-status {
-    margin-bottom: 20px;
-}
-
-.chosen-status .status-badge {
-    font-size: .9375rem;
-    gap: 10px;
-}
-
 #resizer {
     width: 24px;
     transform: translateX(-6px);

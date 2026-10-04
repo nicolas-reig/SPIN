@@ -288,7 +288,7 @@ export class MapView {
                     holder.userData.exhibitId = exhibit.id;
                     holder.userData.instanceIndex = index;
                     applyTransform(holder, instance.transform);
-                    holder.add(await this.model(data.assets.find(asset => asset.id === instance.model), this.materials[exhibit.status] || this.materials.ok));
+                    holder.add(await this.model(data.assets.find(asset => asset.id === instance.model), this.exhibitMaterial(exhibit.status)));
                     group.add(holder);
                 }
                 objects.set(exhibit.id, group);
@@ -320,12 +320,14 @@ export class MapView {
             }
         }
     }
+    exhibitMaterial(status, selected = false) {
+        if (selected) return this.materials[this.editing ? 'editSelection' : 'selection'];
+        return this.editing ? this.materials.retired : this.materials[status] || this.materials.ok;
+    }
     highlight(id) {
         this.selected = id;
         for (const [exhibitId, group] of this.objects) {
-            const material = exhibitId === id ?
-                this.materials[this.editing ? 'editSelection' : 'selection'] :
-                this.materials[group.userData.status] || this.materials.ok;
+            const material = this.exhibitMaterial(group.userData.status, exhibitId === id);
             group.traverse(mesh => {
                 if (mesh.isMesh) mesh.material = material;
             });
@@ -607,7 +609,7 @@ export class MapView {
     }
     async preview(asset) {
         const generation = ++this.generation;
-        const material = asset.kind === 'floor' ? this.materials.floor : this.materials.ok;
+        const material = asset.kind === 'floor' ? this.materials.floor : this.materials.retired;
         const model = await this.model(asset, material);
         if (generation !== this.generation) {
             dispose(model, this.sharedMaterials);

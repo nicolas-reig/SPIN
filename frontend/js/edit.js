@@ -77,7 +77,7 @@ export function duplicateExhibit(record, records) {
 const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const fields = {
     floors: ['names.de', 'names.en', 'views.top', 'views.three'],
-    exhibits: ['floorId', 'status', 'transform', 'models', 'views.top', 'views.three']
+    exhibits: ['floorId', 'transform', 'models', 'views.top', 'views.three']
 };
 const get = (record, field) => field.split('.').reduce((value, key) => value?.[key], record);
 function put(record, field, value) {

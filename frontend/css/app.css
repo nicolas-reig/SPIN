@@ -301,12 +301,6 @@ details[open] > summary > .disclosure-icon {
     min-width: 0;
 }
 
-.camera-actions {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
 summary::-webkit-details-marker {
     display: none;
 }
@@ -375,7 +369,6 @@ summary {
 
 .filter-menu,
 .app-menu,
-.camera-menu,
 .note-options {
     position: relative;
 }
@@ -663,7 +656,7 @@ summary {
     background: #e9ecf0;
 }
 
-.view-toggle .icon-button {
+.view-toggle .view-button {
     min-height: 32px;
     height: 32px;
     padding: 0;
@@ -671,14 +664,10 @@ summary {
     color: #737d88;
 }
 
-.view-toggle .icon-button[aria-pressed=true] {
+.view-toggle .view-button[aria-pressed=true] {
     color: #263442;
     background: #fff;
     box-shadow: 0 1px 3px #202b331c;
-}
-
-.view-toggle svg {
-    display: block;
 }
 
 .toolbar-divider {
@@ -686,16 +675,6 @@ summary {
     width: 1px;
     background: #dcdfe3;
     margin: 0 5px;
-}
-
-.camera-menu .popover {
-    bottom: 49px;
-    right: 0;
-    width: 240px;
-}
-
-.camera-menu .popover p {
-    padding: 10px 5px 2px;
 }
 
 #resizer {
@@ -1617,7 +1596,7 @@ dialog::backdrop {
         height: 42px;
     }
 
-    .view-toggle .icon-button {
+    .view-toggle .view-button {
         min-width: 44px;
         min-height: 44px;
         height: 44px;
@@ -2800,7 +2779,7 @@ body.editing .exhibit-entry {
         min-height: 44px;
     }
 
-    .preset-row .icon-button, .camera-actions .icon-button, .camera-pan .icon-button {
+    .preset-row .icon-button {
         width: 44px;
         height: 44px;
         min-height: 44px;
@@ -2813,5 +2792,230 @@ body.editing .exhibit-entry {
     }
     body:not([data-view=map]) #notice {
         bottom: calc(91px + var(--editbar-height, 0px) + env(safe-area-inset-bottom));
+    }
+}
+
+.camera-toolbar {
+    gap: 8px 12px;
+    padding: 8px 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.camera-primary,
+.camera-orbit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    max-width: 100%;
+}
+
+.camera-orbit {
+    gap: 12px;
+}
+
+.view-toggle .view-button {
+    width: 34px;
+    font-size: .8125rem;
+    font-weight: 600;
+}
+
+.compass-control {
+    width: 60px;
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+}
+
+.compass-steps {
+    display: flex;
+    gap: 4px;
+}
+
+.camera-toolbar .compass-steps .icon-button {
+    width: 28px;
+    min-height: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    color: #68727e;
+}
+
+.compass-steps .lucide {
+    width: 16px;
+    height: 16px;
+}
+
+.compass-face {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    min-height: 56px;
+    padding: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+}
+
+.compass-face.dragging {
+    cursor: grabbing;
+}
+
+.compass-rose {
+    position: absolute;
+    inset: 0;
+    border: 1.5px solid #87909a;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.compass-tick {
+    position: absolute;
+    width: 2px;
+    height: 4px;
+    top: 4px;
+    left: calc(50% - 1px);
+    background: #ced3d8;
+    border-radius: 1px;
+    transform-origin: 1px 23px;
+    transform: rotate(var(--tick));
+}
+
+.compass-point {
+    position: absolute;
+    top: 3px;
+    left: calc(50% - 4px);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 7px solid #87909a;
+    transform-origin: 4px 24px;
+}
+
+.compass-north { border-bottom-color: #cb514f; }
+.compass-east { transform: rotate(90deg); }
+.compass-south { transform: rotate(180deg); }
+.compass-west { transform: rotate(270deg); }
+
+.compass-letter {
+    position: relative;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.elevation-control {
+    width: 110px;
+}
+
+.elevation-scale {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    color: #78818c;
+    font-size: .625rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.elevation-scale output {
+    color: var(--ink);
+    font-size: .75rem;
+    font-weight: 500;
+}
+
+.elevation-control input[type=range] {
+    display: block;
+    width: 100%;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    accent-color: #687785;
+    cursor: pointer;
+}
+
+.camera-toolbar > .transform-controls {
+    padding-left: 2px;
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.camera-toolbar .transform-tools {
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.preview-controls {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
+}
+
+.preview-controls .camera-toolbar {
+    max-width: 100%;
+}
+
+@media (max-width: 860px) {
+    .camera-toolbar {
+        gap: 8px 14px;
+        padding: 8px;
+    }
+    .view-toggle .view-button {
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+    }
+    .camera-primary {
+        gap: 1px;
+    }
+    .camera-primary .toolbar-divider {
+        margin-inline: 2px;
+    }
+    .camera-orbit {
+        gap: 8px;
+    }
+    .compass-control {
+        width: 148px;
+        grid-template-columns: 44px 56px 44px;
+        align-items: center;
+    }
+    .compass-steps {
+        display: contents;
+    }
+    .compass-steps button {
+        grid-row: 1;
+        grid-column: 1;
+    }
+    .compass-steps button:last-child {
+        grid-column: 3;
+    }
+    .camera-toolbar .compass-steps .icon-button {
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+    }
+    .compass-face {
+        grid-row: 1;
+        grid-column: 2;
+    }
+    .elevation-control {
+        width: 110px;
+    }
+    .preview-controls .elevation-control {
+        width: 80px;
+    }
+    .elevation-control input[type=range] {
+        height: 44px;
+        min-height: 44px;
+    }
+    .camera-toolbar > .toolbar-divider {
+        display: none;
     }
 }

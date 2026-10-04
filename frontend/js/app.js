@@ -24,6 +24,7 @@ import { readNoteImage, fileData } from './images.js';
 import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
 import { cameraMode } from './camera.js';
+import { CameraControls } from './camera-controls.js';
 import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
 import { icon } from './icons.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
@@ -41,6 +42,7 @@ let snapshot = null,
     edit = null,
     map = null,
     mapPromise = null,
+    mapControls = null,
     mapState = 'mapLoading',
     view = 'list',
     query = '',
@@ -376,24 +378,13 @@ function renderMapUI() {
         changeFloor(buttons[next].dataset.floor);
         $('.floor-selector').querySelectorAll('button')[next].focus();
     });
-    $('#map-controls').innerHTML = `
-        <div class="map-toolbar" aria-label="${esc(t('keyboardMap'))}">
-            <div class="view-toggle" role="group" aria-label="${esc(t('cameraView'))}">
-                ${['top', 'perspective'].map(mode => `<button type="button" class="icon-button" data-action="camera:${mode}" aria-label="${esc(t(mode))}" title="${esc(t(mode))}" aria-pressed="${mapMode === mode}">${icon(mode === 'top' ? 'grid-2x2' : 'box')}</button>`).join('')}
-            </div>
-            <span class="toolbar-divider"></span>
-            ${iconButton('focus', 'focus', 'crosshair', !selected ? 'disabled' : '')}
-            ${iconButton('zoomOut', 'camera:zoomOut', 'minus') + iconButton('zoomIn', 'camera:zoomIn', 'plus')}
-            ${edit && exhibit()?.models.length && !creationOpen && !editingFloor && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''}
-            <details class="camera-menu">
-                <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
-                <div class="popover">
-                    <div class="camera-actions">${iconButton('fit', 'camera:fit', 'maximize')}${iconButton('rotate', 'camera:rotate', 'rotate-cw', mapMode === 'top' ? 'disabled' : '')}</div>
-                    <div class="row camera-pan">${[['panLeft', 'arrow-left'], ['panUp', 'arrow-up'], ['panDown', 'arrow-down'], ['panRight', 'arrow-right']].map(([action, name]) => iconButton(action, 'camera:' + action, name)).join('')}</div>
-                    <p class="small muted">${esc(t('mapHelp'))}</p>
-                </div>
-            </details>
-        </div>`;
+    mapControls?.destroy();
+    mapControls = new CameraControls($('#map-controls'), {
+        id: 'map', mode: mapMode, getView: () => map,
+        focus: () => actions.focus(),
+        canFocus: () => Boolean(selected && map?.objects.has(selected)),
+        extras: edit && exhibit()?.models.length && !creationOpen && !editingFloor && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''
+    });
     $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); });
     $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); });
     $('#map-message').textContent = mapState === 'mapReady' ? '' : t(mapState);
@@ -415,7 +406,8 @@ async function initializeMap() {
         } = await import('./map.js');
         instance = new MapView($('#map-canvas'), {
             onSelect: select,
-            onMode: mode => { mapMode = mode; syncUrl(); renderMapUI(); },
+            onMode: mode => { mapMode = mode; syncUrl(); mapControls?.update(); },
+            onCamera: () => mapControls?.update(),
             onState: key => {
                 mapState = key;
                 $('#map-canvas').classList.toggle('floor-loading', key === 'mapLoading');
@@ -434,6 +426,7 @@ async function initializeMap() {
         await instance.init();
         map = instance;
         map.setView(mapMode);
+        mapControls?.update();
         await updateMap(true);
     } catch (e) {
         instance?.destroy();
@@ -1667,16 +1660,19 @@ async function modelPreview(id) {
     const asset = data().assets.find(item => item.id === id);
     if (!asset) return;
     let closed = false;
-    let preview = null;
-    showDialog('modelPreview', `<h3>${esc(asset.name)}</h3><div class="preview-stage" id="asset-preview"></div><p id="preview-error" role="status"></p><div class="dialog-footer">${button('models', 'models', 'quiet')}${button('close', 'closeDialog')}</div>`);
-    dialogCleanup = () => { closed = true; preview?.destroy(); };
+    let preview = null, previewControls = null;
+    showDialog('modelPreview', `<h3>${esc(asset.name)}</h3><div class="preview-stage" id="asset-preview"></div><div class="preview-controls" id="preview-controls"></div><p id="preview-error" role="status"></p><div class="dialog-footer">${button('models', 'models', 'quiet')}${button('close', 'closeDialog')}</div>`);
+    previewControls = new CameraControls($('#preview-controls'), { id: 'preview', mode: 'perspective', getView: () => preview });
+    dialogCleanup = () => { closed = true; previewControls?.destroy(); preview?.destroy(); };
     try {
         const { MapView } = await import('./map.js');
         if (closed) return;
-        preview = new MapView($('#asset-preview'));
+        preview = new MapView($('#asset-preview'), { onCamera: () => previewControls?.update(), onMode: () => previewControls?.update() });
         await preview.init();
         if (closed) { preview.destroy(); return; }
         await preview.preview(asset);
+        if (closed) return;
+        previewControls?.update();
     } catch {
         if (!closed && $('#preview-error')) $('#preview-error').textContent = t('mapUnavailable');
     }
@@ -1985,18 +1981,6 @@ document.addEventListener('click', async event => {
         if (element.dataset.previewModel) { await modelPreview(element.dataset.previewModel); return; }
         const action = element.dataset.action;
         if (action?.startsWith('view:')) { setView(action.split(':')[1]); return; }
-        if (action?.startsWith('camera:')) {
-            const command = action.split(':')[1];
-            const modeChange = ['top', 'perspective'].includes(command);
-            if (modeChange && command === mapMode) return;
-            if (modeChange) mapMode = command;
-            await ensureMap();
-            map?.command(command);
-            syncUrl();
-            renderMapUI();
-            if (modeChange) $('#map-controls').querySelector(`[data-action="camera:${command}"]`).focus({ preventScroll: true });
-            return;
-        }
         if (actions[action]) await actions[action]();
     } catch (error) { announce(errorText(error)); }
 });

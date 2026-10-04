@@ -7,6 +7,28 @@ export function cameraOffset(mode, distance) {
     return direction.map(value => value * distance / length);
 }
 
+export const normalizeHeading = degrees => ((degrees % 360) + 360) % 360;
+
+export function orbitState(position, target) {
+    const [x, y, z] = position.map((value, index) => value - target[index]);
+    return {
+        heading: normalizeHeading(-Math.atan2(x, z) * 180 / Math.PI),
+        elevation: Math.max(0, Math.min(90, Math.atan2(y, Math.hypot(x, z)) * 180 / Math.PI)),
+        distance: Math.hypot(x, y, z)
+    };
+}
+
+export function orbitOffset(distance, heading, elevation) {
+    const theta = -heading * Math.PI / 180;
+    const phi = Math.max(.000001, (90 - Math.max(0, Math.min(90, elevation))) * Math.PI / 180);
+    const horizontal = distance * Math.sin(phi);
+    return [horizontal * Math.sin(theta), distance * Math.cos(phi), horizontal * Math.cos(theta)];
+}
+
+export function cardinalDirection(heading) {
+    return ['north', 'northEast', 'east', 'southEast', 'south', 'southWest', 'west', 'northWest'][Math.round(normalizeHeading(heading) / 45) % 8];
+}
+
 export function navigationGesture(button, shift, mode) {
     const orbit = button === 0 ? shift : !shift;
     return {

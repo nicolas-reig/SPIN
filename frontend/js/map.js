@@ -9,7 +9,7 @@ import {
     TransformControls
 } from 'three/addons/controls/TransformControls.js';
 
-import { cameraMode, cameraOffset, navigationGesture } from './camera.js';
+import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset } from './camera.js';
 import { STATUS_COLORS, SELECTION_COLORS, validTransform } from './domain.js';
 
 const radians = v => v * Math.PI / 180;
@@ -63,7 +63,8 @@ export class MapView {
         onTransform = () => {},
         onInvalidTransform = () => {},
         onState = () => {},
-        onMode = () => {}
+        onMode = () => {},
+        onCamera = () => {}
     } = {}) {
         this.container = container;
         this.onSelect = onSelect;
@@ -71,6 +72,7 @@ export class MapView {
         this.onInvalidTransform = onInvalidTransform;
         this.onState = onState;
         this.onMode = onMode;
+        this.onCamera = onCamera;
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color('#e8edf0');
         this.root = new THREE.Group();
@@ -122,8 +124,8 @@ export class MapView {
         this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE };
         this.controls.minDistance = 2;
         this.controls.maxDistance = 450;
-        this.controls.maxPolarAngle = Math.PI / 2 - .045;
-        this.controls.minPolarAngle = .02;
+        this.controls.maxPolarAngle = Math.PI / 2;
+        this.controls.minPolarAngle = .000001;
         this.controls.addEventListener('change', () => this.requestRender());
         this.controls.addEventListener('start', () => cancelAnimationFrame(this.cameraFrame));
         this.transform = new TransformControls(this.camera, this.renderer.domElement);
@@ -163,7 +165,6 @@ export class MapView {
             const gesture = this.orbitFromTop;
             this.orbitFromTop = null;
             this.setView('perspective', true);
-            this.onMode('perspective');
             this.controls._onMouseDown(gesture);
         }, true);
         canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
@@ -216,6 +217,7 @@ export class MapView {
             try {
                 const offset = this.camera.position.clone().sub(this.controls.target);
                 this.renderer.domElement.dataset.cameraOffset = offset.toArray().join(',');
+                this.onCamera(this.navigationState());
                 await this.renderer.renderAsync(this.scene, this.camera);
             } catch (e) {
                 this.onState('mapUnavailable');
@@ -416,9 +418,10 @@ export class MapView {
         const target = this.controls.target.toArray();
         const distance = this.camera.position.distanceTo(this.controls.target);
         const top = mode === 'top';
+        const offset = orbitOffset(distance, this.navigationState().heading, top ? 90 : 35);
         return {
             mode,
-            position: top && this.mode !== 'top' ? [target[0], target[1] + distance, target[2] + .00001] : !top && this.mode === 'top' ? new THREE.Vector3(...target).add(new THREE.Vector3(...cameraOffset('perspective', distance))).toArray() : this.camera.position.toArray(),
+            position: (top && this.mode !== 'top') || (!top && this.mode === 'top') ? target.map((value, index) => value + offset[index]) : this.camera.position.toArray(),
             target,
             span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3, distance * .36)
         };
@@ -443,7 +446,6 @@ export class MapView {
         const mode = cameraMode(preset.mode);
         if (this.mode !== mode) {
             this.setView(mode, true);
-            this.onMode(mode);
         }
         const center = new THREE.Vector3(...preset.target);
         const position = new THREE.Vector3(...preset.position);
@@ -527,6 +529,7 @@ export class MapView {
     setView(mode, preserve = false) {
         mode = cameraMode(mode);
         cancelAnimationFrame(this.cameraFrame);
+        const state = this.navigationState();
         const target = this.controls.target.clone();
         const distance = this.camera.position.distanceTo(target);
         this.mode = mode;
@@ -535,23 +538,52 @@ export class MapView {
         const halfFov = Math.tan(THREE.MathUtils.degToRad(19));
         this.orthoSpan = old.isOrthographicCamera ? this.orthoSpan / old.zoom : distance * halfFov / old.zoom;
         const nextDistance = mode === 'perspective' && old.isOrthographicCamera ? this.orthoSpan / halfFov : distance;
-        const offset = !preserve ? new THREE.Vector3(...cameraOffset(mode, nextDistance)) :
-            old.position.clone().sub(target).normalize().multiplyScalar(nextDistance);
+        const offset = new THREE.Vector3(...orbitOffset(nextDistance, state.heading,
+            mode === 'top' ? 90 : preserve ? state.elevation : state.mode === 'top' ? 35 : state.elevation));
         this.camera.position.copy(target).add(offset);
         this.controls.object = this.camera;
-        this.controls.enableRotate = mode !== 'top';
-        this.controls.minPolarAngle = mode === 'top' ? 0 : .02;
+        this.controls.enableRotate = true;
+        this.controls.minPolarAngle = .000001;
+        this.controls.maxPolarAngle = mode === 'top' ? .000001 : Math.PI / 2;
         this.renderer.domElement.dataset.view = mode;
         this.renderer.domElement.dataset.projection = this.camera.isOrthographicCamera ? 'orthographic' : 'perspective';
         this.transform.camera = this.camera;
         this.resize();
         this.controls.update();
+        this.onMode(mode);
+    }
+    navigationState() {
+        return { ...orbitState(this.camera.position.toArray(), this.controls?.target.toArray() || [0, 0, 0]), mode: this.mode };
+    }
+    setHeading(heading) {
+        if (!Number.isFinite(heading)) return;
+        cancelAnimationFrame(this.cameraFrame);
+        const state = this.navigationState();
+        this.camera.position.copy(this.controls.target).add(new THREE.Vector3(...orbitOffset(state.distance, heading, state.elevation)));
+        this.controls.update();
+        this.requestRender();
+    }
+    setElevation(elevation) {
+        if (!Number.isFinite(elevation)) return;
+        cancelAnimationFrame(this.cameraFrame);
+        const state = this.navigationState();
+        elevation = Math.max(0, Math.min(90, elevation));
+        if (this.mode === 'top' && elevation < 90) this.setView('perspective', true);
+        const distance = this.camera.position.distanceTo(this.controls.target);
+        this.camera.position.copy(this.controls.target).add(new THREE.Vector3(...orbitOffset(distance, state.heading, elevation)));
+        this.controls.update();
+        this.requestRender();
     }
     command(action) {
         if (action === 'home') return this.home();
         if (action === 'fit') return this.fit();
         if (action === 'focus') return this.focus();
         if (['top', 'perspective'].includes(action)) return this.setView(action);
+        if (action === 'north') return this.setHeading(0);
+        if (action === 'turnLeft' || action === 'turnRight') {
+            return this.setHeading(this.navigationState().heading + (action === 'turnLeft' ? 15 : -15));
+        }
+        cancelAnimationFrame(this.cameraFrame);
         if (action === 'zoomIn' || action === 'zoomOut') {
             const factor = action === 'zoomIn' ? .8 : 1.25;
             if (this.camera.isOrthographicCamera) {
@@ -562,21 +594,6 @@ export class MapView {
                 v.clampLength(2, 450);
                 this.camera.position.copy(this.controls.target).add(v);
             }
-        }
-        if (action === 'rotate' && this.mode !== 'top') {
-            const offset = this.camera.position.clone().sub(this.controls.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 12);
-            this.camera.position.copy(this.controls.target).add(offset);
-        }
-        const deltas = {
-            panLeft: [-2, 0, 0],
-            panRight: [2, 0, 0],
-            panUp: [0, 0, -2],
-            panDown: [0, 0, 2]
-        };
-        if (deltas[action]) {
-            const d = new THREE.Vector3(...deltas[action]);
-            this.camera.position.add(d);
-            this.controls.target.add(d);
         }
         this.controls.update();
         this.requestRender();
@@ -589,8 +606,13 @@ export class MapView {
         this.requestRender();
     }
     async preview(asset) {
+        const generation = ++this.generation;
         const material = asset.kind === 'floor' ? this.materials.floor : this.materials.ok;
         const model = await this.model(asset, material);
+        if (generation !== this.generation) {
+            dispose(model, this.sharedMaterials);
+            return;
+        }
         this.scene.remove(this.root);
         dispose(this.root, this.sharedMaterials);
         this.root = model;

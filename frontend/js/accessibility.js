@@ -20,7 +20,7 @@ try {
 function render() {
     const focused = document.activeElement?.id;
     document.documentElement.lang = lang();
-    document.title = t('accessibility') + ' · Service';
+    document.title = t('accessibility') + ' · ' + t('hub');
     main.innerHTML = `
         <nav class="accessibility-nav" aria-label="${esc(t('accessibility'))}">
             <a class="accessibility-back" href="${esc(returnUrl.href)}">${icon('arrow-left')}<span>${esc(t('backToMap'))}</span></a>

@@ -607,20 +607,6 @@ export class MapView {
         this.transform.showZ = !axis || axis === 'Z';
         this.requestRender();
     }
-    async preview(asset) {
-        const generation = ++this.generation;
-        const material = asset.kind === 'floor' ? this.materials.floor : this.materials.retired;
-        const model = await this.model(asset, material);
-        if (generation !== this.generation) {
-            dispose(model, this.sharedMaterials);
-            return;
-        }
-        this.scene.remove(this.root);
-        dispose(this.root, this.sharedMaterials);
-        this.root = model;
-        this.scene.add(model);
-        this.fit();
-    }
     destroy() {
         this.generation++;
         cancelAnimationFrame(this.frame);
@@ -633,17 +619,4 @@ export class MapView {
         this.renderer?.dispose();
         this.renderer?.domElement.remove();
     }
-}
-export async function inspectModel(file) {
-    const bytes = await file.arrayBuffer();
-    const view = new DataView(bytes);
-    if (bytes.byteLength < 20 || view.getUint32(0, true) !== 0x46546c67) throw Error('invalidModel');
-    const length = view.getUint32(12, true);
-    const json = JSON.parse(new TextDecoder().decode(new Uint8Array(bytes, 20, length)));
-    if ([...(json.buffers || []), ...(json.images || [])].some(x => x.uri)) throw Error('externalModelResource');
-    const gltf = await new GLTFLoader().parseAsync(bytes, '');
-    const box = new THREE.Box3().setFromObject(gltf.scene);
-    const size = box.getSize(new THREE.Vector3()).toArray();
-    dispose(gltf.scene);
-    return size;
 }

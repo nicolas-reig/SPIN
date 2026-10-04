@@ -81,12 +81,7 @@ try {
             }
             $result = $store->mutate($payload, $uploads);
         } elseif (isset($_FILES['file'])) {
-            if ($_FILES['file']['error'] === UPLOAD_ERR_INI_SIZE) throw new ApiError('uploadLimit', 503);
-            if ($_FILES['file']['error'] === UPLOAD_ERR_FORM_SIZE) throw new ApiError('fileTooLarge');
-            if ($_FILES['file']['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($_FILES['file']['tmp_name'])) {
-                throw new ApiError('invalidUpload');
-            }
-            $result = $store->upload($_POST, $_FILES['file']['tmp_name']);
+            throw new ApiError(($_POST['kind'] ?? '') === 'model' ? 'assetsReadOnly' : 'invalidInput');
         } else {
             if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 2 * 1024 * 1024) {
                 throw new ApiError('fileTooLarge');

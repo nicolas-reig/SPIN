@@ -40,7 +40,7 @@ export function editSnapshot(value) {
 }
 
 export function restoreEditSnapshot(value, live) {
-    return { ...value, assets: live.assets, exhibits: value.exhibits.map(record => {
+    return { ...value, floors: structuredClone(live.floors), assets: live.assets, exhibits: value.exhibits.map(record => {
         const current = live.exhibits.find(item => item.id === record.id);
         return { ...record, notes: current?.notes || [], links: current?.links || [] };
     }) };

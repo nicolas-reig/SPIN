@@ -20,7 +20,7 @@ import {
     escape as esc,
     markdown
 } from './markdown.js';
-import { readNoteImage, fileData } from './images.js';
+import { readNoteImage } from './images.js';
 import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
 import { cameraMode } from './camera.js';
@@ -54,13 +54,12 @@ let snapshot = null,
     gizmo = '',
     axisConstraint = '',
     snap = false,
-    noticeTimer, noticeClearTimer, dialogCleanup = null;
-let creation = null, creationOpen = false, editingFloor = null, editConflict = null;
+    noticeTimer, noticeClearTimer;
+let creation = null, creationOpen = false, editConflict = null;
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
 let drafts = Object.create(null), draftStore = null, cancelledDraft = null;
-let linkDrafts = Object.create(null), dialogDrafts = Object.create(null), modelDraftFile = null;
-let modelDraft = null;
+let linkDrafts = Object.create(null), dialogDrafts = Object.create(null);
 const linkSearches = Object.create(null), draftErrors = new Set();
 function loadDrafts() {
     try {
@@ -71,12 +70,12 @@ function loadDrafts() {
         drafts = Object.assign(Object.create(null), draftStore?.read('notes') || {});
         linkDrafts = Object.assign(Object.create(null), draftStore?.read('links') || {});
         dialogDrafts = Object.assign(Object.create(null), draftStore?.read('dialogs') || {});
-        const statusDrafts = Object.keys(dialogDrafts).filter(key => key.startsWith('changeStatus:'));
-        if (statusDrafts.length) {
-            statusDrafts.forEach(key => delete dialogDrafts[key]);
+        const obsoleteDrafts = Object.keys(dialogDrafts).filter(key => ['changeStatus:', 'models:', 'modelPreview:'].some(prefix => key.startsWith(prefix)));
+        if (obsoleteDrafts.length) {
+            obsoleteDrafts.forEach(key => delete dialogDrafts[key]);
             saveDraftCategory('dialogs', dialogDrafts);
         }
-        modelDraft = draftStore?.read('model');
+        draftStore?.write('model', null);
         for (const [id, saved] of Object.entries(drafts)) {
             if (!saved || typeof saved !== 'object') { delete drafts[id]; continue; }
             const record = snapshot.exhibits.find(item => item.id === id);
@@ -190,7 +189,6 @@ function persistEdit() {
         value: editSnapshot(edit.value),
         creation,
         creationOpen,
-        editingFloor,
         selected,
         floorId,
         activeInstance,
@@ -229,7 +227,7 @@ function restoreComposer() {
 }
 
 function setView(value) {
-    if (value === 'detail' && !exhibit() && !(edit && (creationOpen || editingFloor || editConflict?.open))) value = 'map';
+    if (value === 'detail' && !exhibit() && !(edit && (creationOpen || editConflict?.open))) value = 'map';
     collapseEmptyDraft();
     view = value;
     document.body.dataset.view = value;
@@ -330,12 +328,12 @@ function renderSidebar() {
                     <button data-language="de" class="${lang() === 'de' ? 'active' : ''}" lang="de" aria-pressed="${lang() === 'de'}">DE</button>
                     <button data-language="en" class="${lang() === 'en' ? 'active' : ''}" lang="en" aria-pressed="${lang() === 'en'}">EN</button>
                 </div>
-                <details class="app-menu">
+                ${edit ? '' : `<details class="app-menu">
                     <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
                     <div class="popover">
-                        ${edit ? (creation ? menuButton('resumeCreation', 'resumeCreation', 'pencil-line') : '') + menuButton('editFloor', 'editFloor', 'layers') + menuButton('newFloor', 'newFloor', 'layers-plus') + menuButton('models', 'models', 'library') : menuButton('editStructure', 'enterEdit', 'pencil-line')}
+                        ${menuButton('editStructure', 'enterEdit', 'pencil-line')}
                     </div>
-                </details>
+                </details>`}
             </div>
         </div>`;
     $('#search').addEventListener('input', e => {
@@ -401,7 +399,7 @@ function renderMapUI() {
         id: 'map', mode: mapMode, getView: () => map,
         focus: () => actions.focus(),
         canFocus: () => Boolean(selected && map?.objects.has(selected)),
-        extras: edit && exhibit()?.models.length && !creationOpen && !editingFloor && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''
+        extras: edit && exhibit()?.models.length && !creationOpen && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''
     });
     $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); });
     $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); });
@@ -463,7 +461,6 @@ async function select(id, instanceIndex = 0) {
     if (editSave?.saving) return;
     map?.cancelTransform();
     creationOpen = false;
-    editingFloor = null;
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
     const e = data().exhibits.find(x => x.id === id);
@@ -493,7 +490,6 @@ function changeFloor(id) {
     if (editSave?.saving) return;
     map?.cancelTransform();
     creationOpen = false;
-    if (editingFloor) editingFloor = id;
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
     floorId = id;
@@ -537,7 +533,7 @@ function noteHTML(n) {
 }
 
 function renderInspector() {
-    const visible = Boolean(exhibit() || edit && (creationOpen || editingFloor || editConflict?.open));
+    const visible = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     document.body.classList.toggle('inspector-hidden', !visible);
     $('#inspector').inert = !visible || Boolean(editSave?.saving);
     $('#inspector').setAttribute('aria-hidden', String(!visible));
@@ -1018,23 +1014,23 @@ function acceptSnapshot(value) {
         if (draft && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.noteId) draft.baseRevision = record.revision;
     }
     if (edit) {
-        for (const kind of ['exhibits', 'floors'])
-            for (const r of edit.value[kind]) {
-                const live = value[kind].find(x => x.id === r.id);
-                if (live && kind === 'exhibits') {
-                    for (const k of ['notes', 'links']) r[k] = structuredClone(live[k]);
-                    const base = edit.base.exhibits.find(x => x.id === r.id);
-                    if (r.status === base?.status) {
-                        r.status = live.status;
-                    }
+        edit.value.floors = structuredClone(value.floors);
+        for (const record of edit.value.exhibits) {
+            const live = value.exhibits.find(item => item.id === record.id);
+            if (live) {
+                for (const key of ['notes', 'links']) record[key] = structuredClone(live[key]);
+                const base = edit.base.exhibits.find(item => item.id === record.id);
+                if (record.status === base?.status) {
+                    record.status = live.status;
                 }
             }
+        }
     }
     render();
 }
 
 function renderMobile() {
-    const detail = Boolean(exhibit() || edit && (creationOpen || editingFloor || editConflict?.open));
+    const detail = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     $('#mobile-nav').innerHTML = [['list', 'list'], ['map', 'map'], ['detail', 'panel-right']].map(([key, name]) => `<button type="button" data-action="view:${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}>${icon(name)}<span>${esc(t(key === 'list' ? 'exhibits' : key))}</span></button>`).join('');
 }
 
@@ -1045,7 +1041,7 @@ function renderEditBar() {
     const signing = Boolean(editSave?.signing);
     const dirty = Boolean(edit.changes().length || creation);
     el.classList.toggle('signing', signing);
-    const label = creation ? `<button type="button" class="quiet edit-session-label" data-action="resumeCreation" title="${esc(t('resumeCreation'))}">${esc(t(creation.kind === 'floors' ? 'newFloor' : 'newExhibit'))}</button>` : `<span class="edit-session-label" ${editHelp('editDraftHint')}>${esc(t('editingShort'))}${dirty ? '<i aria-hidden="true"></i>' : ''}</span>`;
+    const label = creation ? `<button type="button" class="quiet edit-session-label" data-action="resumeCreation" title="${esc(t('resumeCreation'))}">${esc(t('newExhibit'))}</button>` : `<span class="edit-session-label" ${editHelp('editDraftHint')}>${esc(t('editingShort'))}${dirty ? '<i aria-hidden="true"></i>' : ''}</span>`;
     el.innerHTML = `<div class="edit-session-heading">${label}
         <div class="edit-history">${iconButton('undo', 'undo', 'undo-2', !edit.undoStack.length || editSave?.saving ? 'disabled' : '', 'undoEditHint')}${iconButton('redo', 'redo', 'redo-2', !edit.redoStack.length || editSave?.saving ? 'disabled' : '', 'redoEditHint')}</div></div>
         ${signing ? `<label class="sr-only" for="edit-signature">${esc(t('signature'))}</label><input id="edit-signature" ${editHelp('editSignatureHint')} autocomplete="off" maxlength="120" placeholder="${esc(t('yourName'))}" value="${esc(editSave.signature)}" aria-describedby="edit-save-error">` : ''}
@@ -1063,24 +1059,21 @@ function renderEditBar() {
 }
 
 function editorMenu(record) {
-    if (!record || editingFloor) return '';
+    if (!record) return '';
     return `<details class="editor-menu"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${menuButton('duplicate', 'duplicateExhibit', 'copy-plus', editHelp('duplicateExhibitHint'))}<button type="button" class="quiet danger" data-trash-exhibit="${esc(record.id)}" ${editHelp(record.notes.length || record.links.length ? 'notEmpty' : 'removeExhibitHint')} ${record.notes.length || record.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>`;
 }
 
 function renderEditInspector() {
     if (editConflict?.open) { renderEditConflict(); return; }
-    const record = editingFloor ? data().floors.find(item => item.id === editingFloor) : exhibit();
-    const title = creationOpen ? t(creation.kind === 'floors' ? 'newFloor' : 'newExhibit') :
-        editingFloor ? titleFloor(editingFloor) : displayName(record);
-    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><h1 title="${esc(creationOpen ? '' : editingFloor ? editingFloor : record?.name || '')}">${esc(title)}</h1>${creationOpen ? '' : editorMenu(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
+    const record = exhibit();
+    const title = creationOpen ? t('newExhibit') : displayName(record);
+    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${creationOpen ? '' : editorMenu(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
-    const content = editingFloor ? `
-        <div class="grid2"><div class="field"><label for="floor-name-de">${esc(t('nameDe'))}</label><input id="floor-name-de" ${editHelp('floorNameHint')} data-floor-name="de" maxlength="200" value="${esc(record.names.de)}" placeholder="${esc(record.id)}"></div><div class="field"><label for="floor-name-en">${esc(t('nameEn'))}</label><input id="floor-name-en" ${editHelp('floorNameHint')} data-floor-name="en" maxlength="200" value="${esc(record.names.en)}" placeholder="${esc(record.id)}"></div></div>
-        ${viewPresets(record)}` : `
+    const content = `
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId" ${editHelp('floorAssignmentHint')}>${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div>
-        <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}${button('models', 'models', 'quiet')}</div></details></div>
+        <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div></details></div>
         <div id="instance-list">${record.models.map((instance, index) => {
             const asset = hardware.find(item => item.id === instance.model);
             return `<article class="model-instance ${index === activeInstance ? 'active' : ''}">
@@ -1095,7 +1088,7 @@ function renderEditInspector() {
     const form = $('#structure-form');
     form.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
     form.addEventListener('change', event => applyEditorField(event.target));
-    if (!editingFloor && record.models.length) form.querySelector('#ex-floor option[value=""]').disabled = true;
+    if (record.models.length) form.querySelector('#ex-floor option[value=""]').disabled = true;
     map?.setActiveInstance(activeInstance);
     syncEditTools();
 }
@@ -1106,7 +1099,6 @@ function render() {
     renderHeader();
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
-    if (editingFloor && !data().floors.some(f => f.id === editingFloor)) editingFloor = null;
     if (!data().exhibits.some(e => e.id === selected)) selected = null;
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
@@ -1123,13 +1115,11 @@ function closeDialog(form = null) {
     if (form && form !== $('#dialog-form')) return;
     $('#dialog').fieldController?.abort();
     $('#dialog').fieldController = null;
-    dialogCleanup?.();
-    dialogCleanup = null;
     $('#dialog').close();
     $('#dialog').innerHTML = '';
 }
 
-function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (selected || editingFloor || '')) {
+function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (selected || '')) {
     closeDialog();
     const dialog = $('#dialog');
     dialog.innerHTML = `<div class="dialog-header"><h2>${esc(t(title))}</h2><button type="button" data-action="closeDialog" class="quiet" aria-label="${esc(t('close'))}" title="${esc(t('close'))}">${icon('x')}</button></div><form class="dialog-body" id="dialog-form" novalidate>${html}<div id="dialog-error" class="error" role="alert" hidden></div>${draftWarning('dialogs')}</form>`;
@@ -1259,7 +1249,6 @@ function enterEdit() {
     edit = new EditSession(snapshot);
     creation = null;
     creationOpen = false;
-    editingFloor = null;
     editSave = null;
     editConflict = null;
     gizmo = '';
@@ -1268,7 +1257,7 @@ function enterEdit() {
 }
 
 function syncEditTools() {
-    const available = edit && !editSave?.saving && !creationOpen && !editingFloor && !editConflict?.open && exhibit()?.models.length;
+    const available = edit && !editSave?.saving && !creationOpen && !editConflict?.open && exhibit()?.models.length;
     map?.setTool(available ? gizmo : '', snap);
     map?.setAxis(axisConstraint);
 }
@@ -1322,7 +1311,7 @@ function validEditorFields() {
 
 function applyEditorField(input) {
     if (!edit || editSave?.saving) return;
-    const record = editingFloor ? data().floors.find(item => item.id === editingFloor) : exhibit();
+    const record = exhibit();
     if (!record) return;
     if (!input.checkValidity() || input.type === 'number' && !input.value.trim()) {
         structureError('invalidTransform', input);
@@ -1334,9 +1323,8 @@ function applyEditorField(input) {
     try {
         if (reset) floorId = input.value;
         applyEdit(state => {
-            const target = state[editingFloor ? 'floors' : 'exhibits'].find(item => item.id === record.id);
-            if (input.dataset.floorName) target.names[input.dataset.floorName] = input.value.trim() || target.id;
-            else if (input.id === 'ex-floor') {
+            const target = state.exhibits.find(item => item.id === record.id);
+            if (input.id === 'ex-floor') {
                 if (target.models.length && !input.value) throw Error('invalidFloor');
                 target.floorId = input.value || null;
             } else if (input.dataset.instanceModel !== undefined) target.models[Number(input.dataset.instanceModel)].model = input.value;
@@ -1363,22 +1351,18 @@ function updateTransformFields() {
     });
 }
 
-function structureDialog(kind, isNew = false) {
+function openExhibitEditor(isNew = false) {
     if (!edit || editSave?.saving) return;
     map?.cancelTransform();
     if (isNew) {
-        if (creation && creation.kind !== kind) announce(t('finishCreation'));
         if (!creation) creation = {
-            kind, previousSelected: selected, previousFloor: floorId,
-            record: kind === 'floors' ? { number: '', de: '', en: '' } : { name: '', floorId: floorId || '' }
+            previousSelected: selected, previousFloor: floorId,
+            record: { name: '', floorId: floorId || '' }
         };
         creationOpen = true;
-        editingFloor = null;
         selected = null;
     } else {
         creationOpen = false;
-        editingFloor = kind === 'floors' ? floorId : null;
-        if (editingFloor) selected = null;
     }
     if (editConflict) editConflict.open = false;
     persistEdit();
@@ -1395,13 +1379,10 @@ function structureDialog(kind, isNew = false) {
 
 function renderCreation() {
     const record = creation.record;
-    const isFloor = creation.kind === 'floors';
-    const fields = isFloor ? `
-        <div class="field"><label for="floor-number">${esc(t('floorNumber'))}</label><input id="floor-number" ${editHelp('floorNumberHint')} data-create-field="number" type="number" step="1" required value="${esc(record.number)}"></div>
-        <div class="grid2"><div class="field"><label for="floor-name-de">${esc(t('nameDe'))}</label><input id="floor-name-de" ${editHelp('floorNameHint')} data-create-field="de" maxlength="200" value="${esc(record.de)}"></div><div class="field"><label for="floor-name-en">${esc(t('nameEn'))}</label><input id="floor-name-en" ${editHelp('floorNameHint')} data-create-field="en" maxlength="200" value="${esc(record.en)}"></div></div>` : `
+    const fields = `
         <div class="field"><label for="ex-name">${esc(t('name'))}</label><input id="ex-name" ${editHelp('exhibitNameHint')} data-create-field="name" maxlength="160" required value="${esc(record.name)}" autocomplete="off"></div>
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" data-create-field="floorId" ${editHelp('floorAssignmentHint')}>${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId)}</select></div>`;
-    $('#structure-slot').innerHTML = `<form id="creation-form" novalidate>${fields}<div class="error" id="structure-error" role="alert" hidden></div><div class="creation-actions">${button('cancel', 'cancelCreation', 'quiet', editHelp('cancelCreationHint'))}<button type="submit" class="primary" ${editHelp(isFloor ? 'createFloorHint' : 'createExhibitHint')}>${esc(t('create'))}</button></div></form>`;
+    $('#structure-slot').innerHTML = `<form id="creation-form" novalidate>${fields}<div class="error" id="structure-error" role="alert" hidden></div><div class="creation-actions">${button('cancel', 'cancelCreation', 'quiet', editHelp('cancelCreationHint'))}<button type="submit" class="primary" ${editHelp('createExhibitHint')}>${esc(t('create'))}</button></div></form>`;
     $('#creation-form').addEventListener('input', event => {
         if (!event.target.dataset.createField) return;
         record[event.target.dataset.createField] = event.target.value;
@@ -1418,22 +1399,15 @@ function commitCreation() {
     if (!creation || !edit) return true;
     try {
         const raw = creation.record;
-        let record;
-        if (creation.kind === 'floors') {
-            const id = raw.number.trim();
-            if (!/^(0|-?[1-9][0-9]*)$/.test(id) || !Number.isSafeInteger(Number(id))) throw Error('invalidFloorNumber');
-            record = { id, names: { de: raw.de.trim() || id, en: raw.en.trim() || id }, order: Number(id), modelId: null, transform: identity(), views: {}, revision: null };
-        } else record = newExhibit(raw.name, raw.floorId);
-        const kind = creation.kind;
-        if (data()[kind].some(item => item.id.toLocaleLowerCase() === record.id.toLocaleLowerCase())) throw Error('duplicateName');
-        edit.change(state => state[kind].push(record));
+        const record = newExhibit(raw.name, raw.floorId);
+        if (data().exhibits.some(item => item.id.toLocaleLowerCase() === record.id.toLocaleLowerCase())) throw Error('duplicateName');
+        edit.change(state => state.exhibits.push(record));
         creation = null;
         creationOpen = false;
-        if (kind === 'floors') { floorId = record.id; selected = null; editingFloor = record.id; }
-        else { selected = record.id; editingFloor = null; if (record.floorId) floorId = record.floorId; }
+        selected = record.id;
+        if (record.floorId) floorId = record.floorId;
         activeInstance = 0;
         changed();
-        if (kind === 'floors') updateMap(true);
         return true;
     } catch (error) {
         creationOpen = true;
@@ -1495,12 +1469,11 @@ function duplicateHardware(index) {
 function cancelEdit() {
     if (!edit) return;
     map?.cancelTransform();
-    cancelledEdit = { edit, creation, creationOpen, editingFloor, selected, floorId, activeInstance, gizmo, signature: editSave?.signature || '' };
+    cancelledEdit = { edit, creation, creationOpen, selected, floorId, activeInstance, gizmo, signature: editSave?.signature || '' };
     const dirty = edit.changes().length || creation;
     edit = null;
     creation = null;
     creationOpen = false;
-    editingFloor = null;
     editSave = null;
     editConflict = null;
     recoverableEdit = null;
@@ -1515,7 +1488,7 @@ function cancelEdit() {
 function restoreEdit() {
     if (edit || !cancelledEdit) return;
     const signature = cancelledEdit.signature;
-    ({ edit, creation, creationOpen, editingFloor, selected, floorId, activeInstance, gizmo } = cancelledEdit);
+    ({ edit, creation, creationOpen, selected, floorId, activeInstance, gizmo } = cancelledEdit);
     cancelledEdit = null;
     editSave = signature ? { signature, signing: false, saving: false } : null;
     editConflict = null;
@@ -1529,7 +1502,6 @@ async function saveExit() {
     map?.cancelTransform();
     if (creation) {
         creationOpen = true;
-        editingFloor = null;
         renderInspector(); renderMapUI(); syncEditTools(); setView('detail');
         $('#creation-form input')?.focus();
         return;
@@ -1561,7 +1533,6 @@ async function confirmEditSave() {
         edit = null;
         creation = null;
         creationOpen = false;
-        editingFloor = null;
         editConflict = null;
         editSave = null;
         cancelledEdit = null;
@@ -1607,13 +1578,12 @@ async function reconcileCancelledSave(session) {
         if (edit !== session) return;
         const saved = session.changes().every(change => {
             const record = live[change.kind].find(item => item.id === change.id);
-            return change.op === 'delete' ? !record : record && JSON.stringify(structural(record, change.kind)) === JSON.stringify(change.record);
+            return change.op === 'delete' ? !record : record && JSON.stringify(structural(record)) === JSON.stringify(change.record);
         });
         if (saved) {
             edit = null;
             creation = null;
             creationOpen = false;
-            editingFloor = null;
             gizmo = '';
             persistEdit();
             acceptSnapshot(live);
@@ -1621,97 +1591,6 @@ async function reconcileCancelledSave(session) {
             announce(t('saved'));
         }
     } catch { announce(t('offline')); }
-}
-
-async function modelsDialog() {
-    if (!modelDraftFile && modelDraft?.data) {
-        const blob = await (await fetch(modelDraft.data)).blob();
-        modelDraftFile = new File([blob], modelDraft.name, { type: blob.type });
-    }
-    const rows = data().assets.filter(asset => asset.kind === 'hardware').map(asset => `
-        <div class="model-row">
-            <div class="model-text"><strong title="${esc(asset.file)}">${esc(asset.name)}</strong></div>
-            <button type="button" class="icon-button" data-preview-model="${esc(asset.id)}" aria-label="${esc(t('preview') + ': ' + asset.name)}" title="${esc(t('preview'))}">${icon('eye')}</button>
-        </div>`).join('');
-    let closed = false;
-    const controller = new AbortController();
-    showDialog('models', `
-        <div class="model-grid">${rows || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div>
-        <div class="field model-import"><label for="model-file">${esc(t('chooseFile'))}</label><input type="file" name="model" id="model-file" accept=".glb,model/gltf-binary"></div>
-        ${draftWarning('model')}
-        ${footer()}`, async form => {
-        const file = modelDraftFile || form.get('model');
-        if (!file?.size) throw Error('invalidModel');
-        if (file.size > 32 * 1024 * 1024) throw Error('fileTooLarge');
-        const { inspectModel } = await import('./map.js');
-        const dimensions = await inspectModel(file);
-        if (closed) return;
-        try {
-            await api.upload(file, 'model', '', uid(), dimensions, null, { signal: controller.signal });
-            modelDraftFile = null;
-            modelDraft = null;
-            saveDraftCategory('model', null);
-            const live = await api.load();
-            if (edit) {
-                edit.value.assets = structuredClone(live.assets);
-                edit.base.assets = structuredClone(live.assets);
-            }
-            if (!closed) closeDialog();
-            acceptSnapshot(live);
-            announce(t('saved'));
-        } catch (error) {
-            if (error.name !== 'AbortError') throw error;
-        }
-    });
-    dialogCleanup = () => { closed = true; controller.abort(); };
-    const submit = $('#dialog button[type=submit]');
-    if (modelDraftFile) {
-        const files = new DataTransfer();
-        files.items.add(modelDraftFile);
-        $('#model-file').files = files.files;
-    }
-    submit.disabled = !modelDraftFile;
-    $('#model-file').addEventListener('change', async event => {
-        const file = modelDraftFile = event.target.files[0] || null;
-        modelDraft = null;
-        saveDraftCategory('model', null);
-        submit.disabled = !modelDraftFile;
-        if (!file) return;
-        try {
-            if (file.size > 32 * 1024 * 1024) throw Error('fileTooLarge');
-            const data = await fileData(file, 'model/gltf-binary');
-            if (modelDraftFile !== file) return;
-            modelDraft = { name: file.name, data };
-            saveDraftCategory('model', modelDraft);
-        } catch (error) {
-            if (!closed && modelDraftFile === file) {
-                $('#dialog-error').textContent = errorText(error);
-                $('#dialog-error').hidden = false;
-            }
-        }
-    });
-}
-
-async function modelPreview(id) {
-    const asset = data().assets.find(item => item.id === id);
-    if (!asset) return;
-    let closed = false;
-    let preview = null, previewControls = null;
-    showDialog('modelPreview', `<h3>${esc(asset.name)}</h3><div class="preview-stage" id="asset-preview"></div><div class="preview-controls" id="preview-controls"></div><p id="preview-error" role="status"></p><div class="dialog-footer">${button('models', 'models', 'quiet')}${button('close', 'closeDialog')}</div>`);
-    previewControls = new CameraControls($('#preview-controls'), { id: 'preview', mode: 'perspective', getView: () => preview });
-    dialogCleanup = () => { closed = true; previewControls?.destroy(); preview?.destroy(); };
-    try {
-        const { MapView } = await import('./map.js');
-        if (closed) return;
-        preview = new MapView($('#asset-preview'), { onCamera: () => previewControls?.update(), onMode: () => previewControls?.update() });
-        await preview.init();
-        if (closed) { preview.destroy(); return; }
-        await preview.preview(asset);
-        if (closed) return;
-        previewControls?.update();
-    } catch {
-        if (!closed && $('#preview-error')) $('#preview-error').textContent = t('mapUnavailable');
-    }
 }
 
 async function noteConflict() {
@@ -1772,7 +1651,7 @@ function conflictValue(value) {
 }
 
 function renderEditConflict() {
-    const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.top': 'view2D', 'views.three': 'view3D', 'names.de': 'nameDe', 'names.en': 'nameEn', record: 'editExhibit' };
+    const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.top': 'view2D', 'views.three': 'view3D', record: 'editExhibit' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
     $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3><p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
@@ -1820,6 +1699,7 @@ function recoverDraft() {
         if (!saved?.base || !saved.value) return;
         saved.base = restoreEditSnapshot(saved.base, snapshot);
         saved.value = restoreEditSnapshot(saved.value, snapshot);
+        if (typeof saved.creation?.record?.name !== 'string') saved.creation = null;
         const session = new EditSession(saved.base);
         session.value = saved.value;
         if (!session.changes().length && !saved.creation) { saveDraftCategory('edit', null); return; }
@@ -1838,7 +1718,6 @@ function recoverEdit() {
     edit.redoStack = (saved.redoStack || []).map(value => restoreEditSnapshot(value, snapshot));
     creation = saved.creation || null;
     creationOpen = Boolean(saved.creationOpen && creation);
-    editingFloor = saved.editingFloor || null;
     selected = creationOpen ? null : saved.selected || selected;
     floorId = saved.floorId || floorId;
     activeInstance = saved.activeInstance || 0;
@@ -1857,7 +1736,6 @@ function duplicateSelected(id = selected) {
     const copy = duplicateExhibit(record, data().exhibits);
     selected = copy.id;
     creationOpen = false;
-    editingFloor = null;
     applyEdit(state => state.exhibits.push(copy), { rebuild: true });
     if (matchMedia('(max-width:860px)').matches) setView('detail');
 }
@@ -1884,7 +1762,7 @@ const actions = {
     confirmEditSave,
     restoreEdit,
     recoverEdit,
-    resumeCreation: () => structureDialog(creation.kind, true),
+    resumeCreation: () => openExhibitEditor(true),
     duplicateExhibit: () => duplicateSelected(),
     cancelConflict: () => { editConflict.open = false; renderInspector(); renderMapUI(); syncEditTools(); },
     cancelSignature: () => {
@@ -1916,14 +1794,11 @@ const actions = {
         map?.focus();
         setView('map');
         },
-    editExhibit: () => structureDialog('exhibits'),
-    editFloor: () => structureDialog('floors'),
-    newExhibit: () => { setView('detail'); structureDialog('exhibits', true); },
-    newFloor: () => structureDialog('floors', true),
+    editExhibit: () => openExhibitEditor(),
+    newExhibit: () => openExhibitEditor(true),
     undo: () => { if (editSave?.saving) return; map?.cancelTransform(); edit?.undo(); editConflict = null; changed(); },
     redo: () => { if (editSave?.saving) return; map?.cancelTransform(); edit?.redo(); editConflict = null; changed(); },
     saveExit,
-    models: modelsDialog,
     structureConflict: () => {
         if (!editConflict) return structureConflict();
         editConflict.open = true;
@@ -1975,20 +1850,19 @@ document.addEventListener('click', async event => {
         }
         if (element.dataset.setView || element.dataset.resetView || element.dataset.previewView) {
             if (!edit || editSave?.saving) return;
-            const record = editingFloor ? data().floors.find(item => item.id === editingFloor) : exhibit();
+            const record = exhibit();
             const key = element.dataset.setView || element.dataset.resetView || element.dataset.previewView;
             await ensureMap();
             if (!map || !record) throw Error('mapUnavailable');
             if (element.dataset.previewView) {
                 const mode = key === 'top' ? 'top' : 'perspective';
-                const ids = editingFloor ? data().exhibits.filter(item => item.floorId === record.id).map(item => item.id) : [record.id];
-                map.applyView(record.views?.[key] || map.fallbackView(ids, mode));
+                map.applyView(record.views?.[key] || map.fallbackView([record.id], mode));
                 setView('map');
                 return;
             }
             const preset = element.dataset.setView ? map.captureView(key === 'top' ? 'top' : 'perspective') : null;
             applyEdit(state => {
-                const target = state[editingFloor ? 'floors' : 'exhibits'].find(item => item.id === record.id);
+                const target = state.exhibits.find(item => item.id === record.id);
                 target.views ||= {};
                 if (preset) target.views[key] = preset;
                 else delete target.views[key];
@@ -2013,7 +1887,6 @@ document.addEventListener('click', async event => {
             else noteEditor?.command(element.dataset.format);
             return;
         }
-        if (element.dataset.previewModel) { await modelPreview(element.dataset.previewModel); return; }
         const action = element.dataset.action;
         if (action?.startsWith('view:')) { setView(action.split(':')[1]); return; }
         if (actions[action]) await actions[action]();

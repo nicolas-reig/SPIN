@@ -63,24 +63,6 @@ export class Api {
         validateSnapshot(result.snapshot);
         return result;
     }
-    async upload(file, kind, signature, id, dimensions = null, exhibitId = null, options = {}) {
-        const f = new FormData();
-        f.set('file', file);
-        f.set('kind', kind);
-        f.set('signature', signature);
-        f.set('requestId', id);
-        f.set('name', file.name);
-        if (exhibitId) f.set('exhibitId', exhibitId);
-        if (dimensions) f.set('dimensions', JSON.stringify(dimensions));
-        return this.request('api.php', {
-            method: 'POST',
-            signal: options.signal,
-            headers: {
-                'X-Hub-Request': '1'
-            },
-            body: f
-        });
-    }
 }
 export function uid() {
     if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();

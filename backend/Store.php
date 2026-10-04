@@ -512,21 +512,19 @@ final class Store
             throw new ApiError('invalidInput');
         }
         $floorIds = array_column($snapshot['floors'], 'id');
-        foreach ($changes as $change) {
-            if (($change['kind'] ?? '') === 'floors' && ($change['op'] ?? '') === 'put') {
-                $floorIds[] = self::floorId($change['id'] ?? null);
-            }
-        }
         $modelIds = array_column($snapshot['assets'], 'id');
         $operations = [];
         $seen = [];
         foreach ($changes as $change) {
             $kind = $change['kind'] ?? '';
             $op = $change['op'] ?? '';
-            if (!in_array($kind, ['floors', 'exhibits'], true) || !in_array($op, ['put', 'delete'], true)) {
+            if ($kind === 'floors') {
+                throw new ApiError('assetsReadOnly');
+            }
+            if ($kind !== 'exhibits' || !in_array($op, ['put', 'delete'], true)) {
                 throw new ApiError('invalidInput');
             }
-            $id = $kind === 'floors' ? self::floorId($change['id'] ?? null) : self::exhibitId($change['id'] ?? null);
+            $id = self::exhibitId($change['id'] ?? null);
             if (isset($seen[$kind . ':' . $id])) {
                 throw new ApiError('invalidInput');
             }
@@ -536,7 +534,7 @@ final class Store
                 throw new ApiError('conflict', 409);
             }
             if ($op === 'delete') {
-                if (!$old || $kind !== 'exhibits') {
+                if (!$old) {
                     throw new ApiError('invalidInput');
                 }
                 $this->assertEmptyExhibit($id);
@@ -547,31 +545,15 @@ final class Store
             if (!is_array($record) || ($record['id'] ?? null) !== $id) {
                 throw new ApiError('invalidId');
             }
-            if ($kind === 'floors') {
-                $operations[] = ['putFloor', $id, [
-                    'de' => self::text($record['names']['de'] ?? $id),
-                    'en' => self::text($record['names']['en'] ?? $id),
-                    'views' => (object)self::views($record['views'] ?? []),
-                    'lastEditedBy' => $signature
-                ]];
-            } else {
-                if (($record['name'] ?? null) !== $id) {
-                    throw new ApiError('invalidInput');
-                }
-                $operations[] = ['putExhibit', $id, $this->exhibitMeta($record, $floorIds, $modelIds, $signature)];
+            if (($record['name'] ?? null) !== $id) {
+                throw new ApiError('invalidInput');
             }
+            $operations[] = ['putExhibit', $id, $this->exhibitMeta($record, $floorIds, $modelIds, $signature)];
         }
         foreach ($operations as $operation) {
             [$op, $id] = $operation;
             $value = $operation[2] ?? null;
-            if ($op === 'putFloor') {
-                $path = $this->path($this->assets, 'Floors/' . $id);
-                $this->files->directory($path);
-                $labels = $this->floorNames();
-                $labels[$id] = $value;
-                $floorRoot = $this->path($this->assets, 'Floors');
-                $this->write($floorRoot . '/.floors.json', json_encode((object)$labels, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
-            } elseif ($op === 'putExhibit') {
+            if ($op === 'putExhibit') {
                 $path = $this->path($this->exhibits, $id);
                 $this->files->directory($path);
                 $this->writeJson($path . '/.exhibit.json', $value);
@@ -718,50 +700,6 @@ final class Store
                 throw new ApiError('externalModelResource');
             }
         }
-    }
-
-    public function upload(array $payload, string $temporary): array
-    {
-        $kind = $payload['kind'] ?? '';
-        $signature = $kind === 'image' ? self::signature($payload['signature'] ?? null) : '';
-        $requestId = self::requestId($payload['requestId'] ?? null);
-        $bytes = file_get_contents($temporary);
-        if ($bytes === false || strlen($bytes) > 32 * 1024 * 1024) {
-            throw new ApiError('fileTooLarge');
-        }
-        return $this->lock(function () use ($payload, $signature, $requestId, $bytes, $kind, $temporary) {
-            if ($kind === 'image') {
-                $id = self::exhibitId($payload['exhibitId'] ?? null);
-                if (!in_array($id, $this->exhibitDirectories(), true)) {
-                    throw new ApiError('notFound', 404);
-                }
-                $info = @getimagesize($temporary);
-                $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
-                if (strlen($bytes) > 8 * 1024 * 1024 || !$info || $info[0] > 10000 || $info[1] > 10000 ||
-                    !in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
-                    throw new ApiError('invalidImage');
-                }
-                $photo = $this->human->savePhoto($id, $signature, $requestId, $bytes, $mime);
-                return ['id' => $photo['id'], 'url' => 'api.php?action=asset&kind=image&id=' . $photo['id']];
-            }
-            if ($kind !== 'model') {
-                throw new ApiError('invalidInput');
-            }
-            self::validateGlb($bytes);
-            $name = HumanFiles::filename(pathinfo(self::text($payload['name'] ?? null), PATHINFO_FILENAME));
-            $folder = $this->path($this->assets, 'HardwareModels');
-            $this->files->directory($folder);
-            $file = 'HardwareModels/' . $name . '.glb';
-            $path = $this->path($this->assets, $file);
-            if (is_file($path)) {
-                if (hash_file('sha256', $path) !== hash('sha256', $bytes)) {
-                    throw new ApiError('duplicateTitle', 409);
-                }
-            } else {
-                $this->write($path, $bytes);
-            }
-            return ['id' => $file, 'url' => 'api.php?action=asset&kind=model&id=' . rawurlencode($file)];
-        });
     }
 
     public function asset(string $kind, string $id): array

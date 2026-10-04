@@ -46,7 +46,7 @@ let snapshot = null,
     mapState = 'mapLoading',
     view = 'list',
     query = '',
-    scope = 'nameFloor',
+    scope = 'name',
     floorFilter = '',
     statusFilter = '',
     mapMode = 'top',
@@ -288,9 +288,10 @@ function renderHeader() {
 
 function renderSidebar() {
     const appliedStatusFilter = edit ? '' : statusFilter;
-    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'nameFloor');
+    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'name');
     const frows = [
-        ['', t('allFloors')], ...data().floors.map(f => [f.id, f.names[lang()]])
+        ['', t('allFloors')], ...data().floors.map(f => [f.id, f.names[lang()]]),
+        ['unplaced', t('unplacedShort')]
     ];
     $('#sidebar').setAttribute('aria-label', t('exhibits'));
     $('#sidebar').innerHTML = `
@@ -304,7 +305,7 @@ function renderSidebar() {
                 <summary class="icon-button ${filtered ? 'active' : ''}" title="${esc(t('filters'))}" aria-label="${esc(t('filters'))}">${icon('funnel')}${filtered ? '<i class="filter-dot"></i>' : ''}</summary>
                 <div class="popover">
                     <label for="scope">${esc(t('scope'))}</label>
-                    <select id="scope">${options(['nameFloor', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
+                    <select id="scope">${options(['name', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
                     <label for="floor-filter">${esc(t('floor'))}</label>
                     <select id="floor-filter">${options(frows, floorFilter)}</select>
                     ${edit ? '' : `<label for="status-filter">${esc(t('status'))}</label>
@@ -352,13 +353,15 @@ function renderList() {
     const q = query.trim().toLocaleLowerCase(lang());
     const appliedStatusFilter = edit ? '' : statusFilter;
     const records = data().exhibits.filter(e => {
-        if (floorFilter && e.floorId !== floorFilter || appliedStatusFilter && e.status !== appliedStatusFilter) return false;
-        const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + titleFloor(e.floorId);
+        const matchesFloor = !floorFilter || (floorFilter === 'unplaced' ? !e.placed : e.floorId === floorFilter);
+        if (!matchesFloor || appliedStatusFilter && e.status !== appliedStatusFilter) return false;
+        const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name;
         return text.toLocaleLowerCase(lang()).includes(q);
     });
-    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'nameFloor');
+    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'name');
     $('.active-filters').hidden = !filtered;
-    $('#filter-description').textContent = [scope !== 'nameFloor' ? t(scope) : '', floorFilter ? titleFloor(floorFilter) : '', appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
+    const floorDescription = floorFilter === 'unplaced' ? t('unplacedShort') : floorFilter ? titleFloor(floorFilter) : '';
+    $('#filter-description').textContent = [scope !== 'name' ? t(scope) : '', floorDescription, appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
     $('#exhibit-list').innerHTML = records.length ? records.map(e => {
         const details = [titleFloor(e.floorId)];
         if (!e.placed) details.push(t('unplaced'));
@@ -1881,7 +1884,7 @@ const actions = {
         query = '';
         floorFilter = '';
         if (!edit) statusFilter = '';
-        scope = 'nameFloor';
+        scope = 'name';
         renderSidebar();
     },
     focus: async () => {

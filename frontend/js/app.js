@@ -333,7 +333,7 @@ function renderSidebar() {
                 </div>
                 ${edit ? '' : `<details class="app-menu">
                     <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
-                    <div class="popover">
+                    <div class="popover app-menu-popover">
                         ${menuButton('accessibility', 'accessibility', 'eye', `title="${esc(t('accessibilityHint'))}"`)}
                         ${menuButton('editStructure', 'enterEdit', 'pencil-line')}
                     </div>
@@ -859,7 +859,7 @@ function renderComposer() {
                         <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}">${icon('image-plus')}</button>
                         <input type="file" id="note-image" hidden accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple>
                     </div>
-                    <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : 'postShort'))}</button>
+                    <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : d.noteId ? 'save' : 'postShort'))}</button>
                 </div>
                 <div class="composer-secondary" ${d.signing ? 'hidden' : ''}>
                     <span class="draft-label" title="${esc(t('draftScope'))}">${esc(t('draftShort'))}</span>
@@ -871,7 +871,7 @@ function renderComposer() {
                 <div class="signature-step">
                     <label for="note-signature">${esc(t('signature'))}</label>
                     <input id="note-signature" autocomplete="off" maxlength="120" value="${esc(d.signature)}" aria-describedby="note-error" placeholder="${esc(t('yourName'))}">
-                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : 'publish'))}</button></div>
+                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : d.noteId ? 'save' : 'postShort'))}</button></div>
                 </div>` : ''}
             <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(t(d.error)) : ''}</div>
             ${draftWarning('notes')}
@@ -1141,6 +1141,7 @@ function renderEditInspector() {
 }
 
 function render() {
+    document.title = t('exhibits') + ' · ' + t('hub');
     document.body.classList.toggle('editing', Boolean(edit));
     $('#sidebar').inert = Boolean(editSave?.saving);
     renderHeader();

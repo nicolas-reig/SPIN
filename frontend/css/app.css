@@ -2117,7 +2117,8 @@ html[data-color-mode]:not([data-color-mode=default]) {
     left: 11px;
     pointer-events: none;
 }
-.app-menu .popover {
+.app-menu .popover,
+.app-menu-popover {
     width: 216px;
     max-width: calc(100vw - 32px);
     padding: 6px;
@@ -2397,6 +2398,8 @@ body.editing .sidebar-footer {
 
 .edit-session-heading {
     display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
     justify-content: space-between;
     align-items: center;
     gap: 8px;
@@ -2405,6 +2408,8 @@ body.editing .sidebar-footer {
 
 .edit-session-label {
     display: inline-flex;
+    max-width: 100%;
+    overflow-wrap: anywhere;
     align-items: center;
     gap: 7px;
     font-size: .8125rem;
@@ -2413,6 +2418,7 @@ body.editing .sidebar-footer {
 }
 
 .edit-session-label i {
+    flex-shrink: 0;
     width: 5px;
     height: 5px;
     border-radius: 50%;
@@ -2429,6 +2435,7 @@ button.edit-session-label {
 .edit-history {
     display: flex;
     gap: 2px;
+    margin-left: auto;
 }
 
 .edit-history .icon-button {
@@ -2737,12 +2744,14 @@ body.editing .exhibit-row {
         display: none;
     }
     .edit-session-heading {
+        grid-column: 1 / -1;
         margin: 0;
     }
     .edit-session-label {
         font-size: .75rem;
     }
     .edit-session-actions {
+        grid-column: 1 / -1;
         gap: 4px;
     }
     .edit-session-actions > button {

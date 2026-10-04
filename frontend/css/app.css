@@ -640,6 +640,10 @@ summary {
     touch-action: none;
 }
 
+#map-canvas canvas:focus-visible {
+    outline-offset: -3px;
+}
+
 #flat-map svg {
     width: 100%;
     height: 100%;

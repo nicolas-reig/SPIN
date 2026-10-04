@@ -383,7 +383,15 @@ function renderList() {
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
 }
 
+function updateMapHelp() {
+    const canvas = $('#map-canvas canvas');
+    if (!canvas) return;
+    canvas.setAttribute('aria-label', t('mapKeyboardHint'));
+    canvas.title = t('mapHelp');
+}
+
 function renderMapUI() {
+    updateMapHelp();
     $('#map-heading').innerHTML = `<nav class="floor-selector" aria-label="${esc(t('floor'))}">
         ${[...data().floors].sort((a, b) => b.order - a.order).map(f => `<button data-floor="${esc(f.id)}" aria-current="${floorId === f.id ? 'true' : 'false'}" title="${esc(f.names[lang()])}">${esc(floorLabel(f))}</button>`).join('')}
     </nav>`;
@@ -443,6 +451,7 @@ async function initializeMap() {
         });
         await instance.init();
         map = instance;
+        updateMapHelp();
         map.setView(mapMode);
         mapControls?.update();
         await updateMap(true);

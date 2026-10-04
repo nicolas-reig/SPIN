@@ -26,7 +26,7 @@ export function orbitOffset(distance, heading, elevation) {
 }
 
 export function cardinalDirection(heading) {
-    return ['north', 'northEast', 'east', 'southEast', 'south', 'southWest', 'west', 'northWest'][Math.round(normalizeHeading(heading) / 45) % 8];
+    return ['north', 'east', 'south', 'west'][Math.round(normalizeHeading(heading) / 90) % 4];
 }
 
 export function navigationGesture(button, shift, mode) {

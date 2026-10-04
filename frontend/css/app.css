@@ -624,7 +624,14 @@ summary {
 }
 
 #map-controls {
-    width: max-content;
+    --orbit-width: 128px;
+    width: var(--map-ui-width);
+    min-height: 88px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    container: camera-navigation / inline-size;
+    pointer-events: none;
     position: absolute;
     bottom: var(--map-controls-bottom);
     left: var(--map-ui-center);
@@ -2283,7 +2290,7 @@ body.editing {
         #inspector { transition: transform 280ms cubic-bezier(.22,.68,0,1); }
         #resizer { transition: transform 280ms cubic-bezier(.22,.68,0,1), opacity 180ms; }
         #map-heading { transition: right 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
-        #map-controls, #notice { transition: left 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
+        #map-controls, #notice { transition: left 280ms cubic-bezier(.22,.68,0,1), width 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
         #map-message { transition: right 280ms cubic-bezier(.22,.68,0,1); }
         body.resizing :is(#map-heading, #map-controls, #map-message, #notice),
         body:has(#resizer:focus) :is(#map-heading, #map-controls, #map-message, #notice) { transition: none; }
@@ -2795,15 +2802,25 @@ body.editing .exhibit-entry {
     }
 }
 
+#map-controls > .camera-toolbar {
+    max-width: calc(100% - var(--orbit-width) - var(--orbit-width) - 28px);
+    pointer-events: auto;
+}
+
+#map-controls > .camera-orbit {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    pointer-events: auto;
+}
+
 .camera-toolbar {
-    gap: 8px 12px;
-    padding: 8px 10px;
+    gap: 8px;
     flex-wrap: wrap;
     justify-content: center;
 }
 
-.camera-primary,
-.camera-orbit {
+.camera-primary {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2813,7 +2830,10 @@ body.editing .exhibit-entry {
 }
 
 .camera-orbit {
-    gap: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 .view-toggle .view-button {
@@ -2823,33 +2843,50 @@ body.editing .exhibit-entry {
 }
 
 .compass-control {
-    width: 60px;
-    display: grid;
-    justify-items: center;
-    gap: 2px;
+    position: relative;
+    width: 88px;
+    height: 88px;
 }
 
-.compass-steps {
-    display: flex;
-    gap: 4px;
+.compass-control:before {
+    content: '';
+    position: absolute;
+    inset: 16px;
+    border-radius: 50%;
+    background: #fafbfc;
+    box-shadow: 0 1px 2px #202b3310, 0 6px 16px #202b3318;
+    pointer-events: none;
 }
 
-.camera-toolbar .compass-steps .icon-button {
-    width: 28px;
-    min-height: 28px;
-    height: 28px;
+.compass-step {
+    position: absolute;
+    top: 0;
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
     padding: 0;
     background: transparent;
     color: #68727e;
 }
 
-.compass-steps .lucide {
-    width: 16px;
-    height: 16px;
+.compass-left { left: 0; }
+.compass-right { right: 0; }
+
+.compass-step svg {
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.compass-step:hover {
+    background: transparent;
+    color: var(--ink);
 }
 
 .compass-face {
-    position: relative;
+    position: absolute;
+    top: 16px;
+    left: 16px;
     width: 56px;
     height: 56px;
     min-height: 56px;
@@ -2858,6 +2895,16 @@ body.editing .exhibit-entry {
     background: transparent;
     cursor: grab;
     touch-action: none;
+    clip-path: circle(50%);
+}
+
+.compass-face:focus-visible {
+    outline: none;
+}
+
+.compass-face:focus-visible .compass-rose {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .compass-face.dragging {
@@ -2908,35 +2955,24 @@ body.editing .exhibit-entry {
 }
 
 .elevation-control {
-    width: 110px;
-}
-
-.elevation-scale {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    color: #78818c;
-    font-size: .625rem;
-    font-variant-numeric: tabular-nums;
-}
-
-.elevation-scale output {
-    color: var(--ink);
-    font-size: .75rem;
-    font-weight: 500;
+    width: 32px;
+    height: 88px;
 }
 
 .elevation-control input[type=range] {
     display: block;
     width: 100%;
-    height: 32px;
-    min-height: 32px;
-    padding: 0;
+    height: 100%;
+    min-height: 88px;
+    padding: 8px 0;
     margin: 0;
     border: 0;
-    border-radius: 4px;
-    background: transparent;
+    border-radius: 16px;
+    background: #fafbfc;
+    box-shadow: 0 1px 2px #202b3310, 0 6px 16px #202b3318;
     accent-color: #687785;
+    writing-mode: vertical-lr;
+    direction: rtl;
     cursor: pointer;
 }
 
@@ -2956,13 +2992,33 @@ body.editing .exhibit-entry {
     display: flex;
     justify-content: center;
     margin-top: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px 20px;
 }
 
 .preview-controls .camera-toolbar {
     max-width: 100%;
 }
 
+@container camera-navigation (max-width: 560px) {
+    #map-controls > .camera-toolbar {
+        max-width: 100%;
+        margin-top: 102px;
+    }
+    #map-controls > .camera-orbit {
+        top: 0;
+        bottom: auto;
+    }
+}
+
 @media (max-width: 860px) {
+    #map-controls {
+        --orbit-width: 140px;
+    }
+    .preview-stage {
+        height: min(240px, 35dvh);
+    }
     .camera-toolbar {
         gap: 8px 14px;
         padding: 8px;
@@ -2978,42 +3034,11 @@ body.editing .exhibit-entry {
     .camera-primary .toolbar-divider {
         margin-inline: 2px;
     }
-    .camera-orbit {
-        gap: 8px;
-    }
-    .compass-control {
-        width: 148px;
-        grid-template-columns: 44px 56px 44px;
-        align-items: center;
-    }
-    .compass-steps {
-        display: contents;
-    }
-    .compass-steps button {
-        grid-row: 1;
-        grid-column: 1;
-    }
-    .compass-steps button:last-child {
-        grid-column: 3;
-    }
-    .camera-toolbar .compass-steps .icon-button {
-        width: 44px;
-        height: 44px;
-        min-height: 44px;
-    }
-    .compass-face {
-        grid-row: 1;
-        grid-column: 2;
-    }
     .elevation-control {
-        width: 110px;
-    }
-    .preview-controls .elevation-control {
-        width: 80px;
+        width: 44px;
     }
     .elevation-control input[type=range] {
-        height: 44px;
-        min-height: 44px;
+        border-radius: 22px;
     }
     .camera-toolbar > .toolbar-divider {
         display: none;

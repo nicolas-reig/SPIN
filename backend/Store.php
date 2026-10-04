@@ -426,7 +426,6 @@ final class Store
                 'name' => $id,
                 'floorId' => $floorId,
                 'status' => in_array($meta['status'] ?? null, ['ok', 'problem', 'retired'], true) ? $meta['status'] : 'ok',
-                'statusBy' => is_string($meta['statusBy'] ?? null) ? $meta['statusBy'] : '',
                 'lastEditedBy' => is_string($meta['lastEditedBy'] ?? null) ? $meta['lastEditedBy'] : '',
                 'transform' => self::readTransform($meta['transform'] ?? null),
                 'models' => $models,
@@ -453,7 +452,7 @@ final class Store
         ];
     }
 
-    private function exhibitMeta(array $record, array $floorIds, array $modelIds, string $signature, ?array $old): array
+    private function exhibitMeta(array $record, array $floorIds, array $modelIds, string $signature): array
     {
         $floor = $record['floorId'] ?? null;
         if ($floor !== null && $floor !== '' && !in_array($floor, $floorIds, true)) {
@@ -485,10 +484,6 @@ final class Store
             'views' => (object)self::views($record['views'] ?? []),
             'lastEditedBy' => $signature
         ];
-        $statusBy = $status !== ($old['status'] ?? 'ok') ? $signature : ($old['statusBy'] ?? '');
-        if ($statusBy !== '') {
-            $meta['statusBy'] = $statusBy;
-        }
         return $meta;
     }
 
@@ -563,7 +558,7 @@ final class Store
                 if (($record['name'] ?? null) !== $id) {
                     throw new ApiError('invalidInput');
                 }
-                $operations[] = ['putExhibit', $id, $this->exhibitMeta($record, $floorIds, $modelIds, $signature, $old)];
+                $operations[] = ['putExhibit', $id, $this->exhibitMeta($record, $floorIds, $modelIds, $signature)];
             }
         }
         foreach ($operations as $operation) {
@@ -597,7 +592,7 @@ final class Store
     {
         self::requestId($payload['requestId'] ?? null);
         $action = $payload['action'] ?? '';
-        $signed = !in_array($action, ['putLink', 'deleteLink'], true);
+        $signed = !in_array($action, ['status', 'putLink', 'deleteLink'], true);
         $signature = $signed ? self::signature($payload['signature'] ?? null) : '';
         return $this->lock(function () use ($payload, $action, $signature, $uploads) {
             $snapshot = $this->snapshot();
@@ -631,7 +626,7 @@ final class Store
                     if (($payload['baseRevision'] ?? null) !== $record['revision']) {
                         throw new ApiError('conflict', 409);
                     }
-                    $this->status($id, $record, $payload['status'] ?? null, $signature);
+                    $this->status($id, $record, $payload['status'] ?? null);
                 } elseif (in_array($action, ['note', 'correctNote', 'deleteNote'], true)) {
                     if ($action === 'deleteNote' && $uploads) throw new ApiError('invalidImage');
                     if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
@@ -678,7 +673,7 @@ final class Store
                     }
                     $this->human->saveNote($id, $action, $note, $signature, $payload['requestId']);
                     if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
-                        $this->status($id, $record, $payload['status'], $signature);
+                        $this->status($id, $record, $payload['status']);
                     }
                 } else {
                     throw new ApiError('invalidInput');
@@ -688,7 +683,7 @@ final class Store
         });
     }
 
-    private function status(string $id, array $record, mixed $status, string $signature): void
+    private function status(string $id, array $record, mixed $status): void
     {
         if (!in_array($status, ['ok', 'problem', 'retired'], true)) {
             throw new ApiError('invalidStatus');
@@ -699,7 +694,7 @@ final class Store
         $path = $this->path($this->exhibits, $id . '/.exhibit.json');
         $meta = $this->readJson($path);
         $meta['status'] = $status;
-        $meta['statusBy'] = $signature;
+        unset($meta['statusBy']);
         $this->writeJson($path, $meta);
     }
 

@@ -624,7 +624,7 @@ summary {
 }
 
 #map-controls {
-    --orbit-width: 128px;
+    --orbit-width: 124px;
     width: var(--map-ui-width);
     min-height: 88px;
     display: flex;
@@ -2832,7 +2832,7 @@ body.editing .exhibit-entry {
 .camera-orbit {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
@@ -3055,7 +3055,7 @@ body.editing .exhibit-entry {
 
 @media (max-width: 860px) {
     #map-controls {
-        --orbit-width: 140px;
+        --orbit-width: 136px;
     }
     .preview-stage {
         height: min(240px, 35dvh);

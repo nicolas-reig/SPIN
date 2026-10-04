@@ -1933,7 +1933,7 @@ body.editing {
 }
 
 .status-symbol.retired, .exhibit-row.active .status-symbol.retired {
-    background: var(--status-retired, #798491);
+    background: var(--status-retired, #65717d);
 }
 
 .exhibit-row.active .status-symbol {

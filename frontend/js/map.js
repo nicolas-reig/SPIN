@@ -82,7 +82,7 @@ export class MapView {
             ...STATUS_COLORS,
             selection: SELECTION_COLORS.normal,
             editSelection: SELECTION_COLORS.edit,
-            floor: '#c4c9ce'
+            floor: '#afb7be'
         }).map(([name, color]) => {
             const material = new THREE.MeshStandardMaterial({
                 color,

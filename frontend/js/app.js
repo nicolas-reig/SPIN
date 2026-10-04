@@ -365,8 +365,11 @@ function renderList() {
         else if (!edit) details.push(t(e.status));
         return `
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
-            <span class="exhibit-name">${esc(displayName(e))}</span>
             ${edit ? '' : `<span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>`}
+            <span class="exhibit-label">
+                <span class="exhibit-name">${esc(displayName(e))}</span>
+                ${e.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
+            </span>
         </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}" title="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
 }

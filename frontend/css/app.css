@@ -462,8 +462,9 @@ summary {
     min-height: 48px;
     padding: 11px 12px;
     margin-bottom: 4px;
-    justify-content: space-between;
-    gap: 12px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 10px;
     border-radius: 5.5px;
     background: transparent;
     text-align: left;
@@ -479,10 +480,33 @@ summary {
     background: #e4e7eb;
 }
 
+.exhibit-label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    flex: 1;
+    min-width: 0;
+    gap: 3px;
+}
+
 .exhibit-name {
     font-size: .9375rem;
     font-weight: 500;
     overflow-wrap: anywhere;
+}
+
+.exhibit-row > .status-symbol {
+    margin-top: 2px;
+}
+
+.unplaced-flag {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #eee5e5;
+    color: #7b5c5f;
+    font-size: .6875rem;
+    font-weight: 500;
+    line-height: 1.4;
 }
 
 .status-symbol {
@@ -1919,8 +1943,8 @@ body.editing {
 
 /* Status colors are shared with the model palette. */
 .status-symbol {
-    width: 12px;
-    height: 12px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     padding: 0;
 }

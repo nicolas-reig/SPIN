@@ -151,8 +151,17 @@ export class MapView {
         this.observer = new ResizeObserver(() => this.resize());
         this.observer.observe(this.container);
         const canvas = this.renderer.domElement;
+        canvas.tabIndex = 0;
+        canvas.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown ArrowLeft ArrowRight');
+        canvas.addEventListener('keydown', event => {
+            if (this.controls.enabled && Object.values(this.controls.keys).includes(event.code)) {
+                cancelAnimationFrame(this.cameraFrame);
+            }
+        });
+        this.controls.listenToKeyEvents(canvas);
         canvas.addEventListener('pointerdown', e => {
             e.preventDefault();
+            canvas.focus({ preventScroll: true });
             getSelection()?.removeAllRanges();
             this.pointerId = e.pointerId;
             this.down = [e.clientX, e.clientY];

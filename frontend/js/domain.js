@@ -1,10 +1,4 @@
 export const STATUSES = ['ok', 'problem', 'retired'];
-export const STATUS_COLORS = {
-    ok: '#31975c',
-    problem: '#d99a22',
-    retired: '#65717d'
-};
-export const SELECTION_COLORS = { normal: '#1684ef', edit: '#8056cb' };
 export const normalizeStatus = status => status == null || status === '' || status === 'unset' ? 'ok' : status;
 
 export const identity = () => ({

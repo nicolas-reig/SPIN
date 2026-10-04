@@ -23,6 +23,10 @@ export class CameraControls {
             ${extras}
         </div>
         <div class="camera-orbit" role="group" aria-label="${esc(t('orbitControls'))}">
+            <div class="elevation-control">
+                <label class="sr-only" for="${id}-elevation">${esc(t('orbitElevation'))}</label>
+                <input id="${id}-elevation" type="range" min="0" max="90" step="1" value="90" aria-orientation="vertical" title="${esc(t('elevationHint'))}">
+            </div>
             <div class="compass-control">
                 <button type="button" class="compass-step compass-left" data-camera-command="turnLeft" aria-label="${esc(t('turnLeft'))}" title="${esc(t('turnLeft'))}">
                     <svg viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="44" cy="44" r="36" stroke-dasharray="30.159 226.195" transform="rotate(207 44 44)"/><path d="M10.8 22.6 L11.924 27.656 L17.1 25.4"/></svg>
@@ -37,10 +41,6 @@ export class CameraControls {
                     </span>
                     <span class="compass-letter" aria-hidden="true">N</span>
                 </button>
-            </div>
-            <div class="elevation-control">
-                <label class="sr-only" for="${id}-elevation">${esc(t('orbitElevation'))}</label>
-                <input id="${id}-elevation" type="range" min="0" max="90" step="1" value="90" aria-orientation="vertical" title="${esc(t('elevationHint'))}">
             </div>
         </div>`;
         this.face = host.querySelector('.compass-face');

@@ -30,6 +30,7 @@ import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
+import { rememberedSignature, rememberSignature } from './signature.js';
 let noteEditor = null;
 installSelects();
 const $ = s => document.querySelector(s),
@@ -276,7 +277,9 @@ function deleteNoteDialog(noteId) {
     if (!note || note.deleted) return;
     const requestId = uid();
     showDialog('deleteNote', `<p>${esc(t('noteBy'))} ${esc(note.author)} · ${esc(date(note.at))}</p><p class="muted small" style="margin:12px 0 20px">${esc(t('deleteNoteHint'))}</p>${signatureField()}${footer('deleteNote')}`, async (form, element) => {
-        const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, contentTag: record.contentTag, requestId, signature: requireSignature(form) });
+        const signature = requireSignature(form);
+        const result = await api.save({ action: 'deleteNote', exhibitId: record.id, noteId, baseRevision: record.revision, contentTag: record.contentTag, requestId, signature });
+        rememberSignature(signature);
         if (drafts[record.id]?.noteId === noteId) delete drafts[record.id];
         persistDrafts();
         closeDialog(element);
@@ -955,6 +958,7 @@ function renderComposer() {
             $('#note-body').focus();
             return;
         }
+        if (!d.signature) d.signature = rememberedSignature();
         d.signing = true;
         renderComposer();
         $('#note-signature').focus();
@@ -1034,6 +1038,7 @@ async function postNote(id) {
         if (d.noteId) payload.noteId = d.noteId;
         else if (d.status) payload.status = d.status;
         const result = await api.postNote(payload, d.images);
+        rememberSignature(signature);
         delete drafts[id];
         persistDrafts();
         acceptSnapshot(result.snapshot);
@@ -1202,7 +1207,7 @@ function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (sele
     dialog.showModal();
     return dialog;
 }
-const signatureField = () => `<div class="field"><label for="signature">${esc(t('signature'))}</label><input id="signature" name="signature" autocomplete="off" maxlength="120" required><p class="small muted">${esc(t('signatureHint'))}</p></div>`;
+const signatureField = () => `<div class="field"><label for="signature">${esc(t('signature'))}</label><input id="signature" name="signature" autocomplete="off" maxlength="120" value="${esc(rememberedSignature())}" required><p class="small muted">${esc(t('signatureHint'))}</p></div>`;
 const footer = (key = 'save') => `<div class="dialog-footer">${button('cancel','closeDialog')}<button type="submit" class="primary">${esc(t(key))}</button></div>`;
 
 function requireSignature(form) {
@@ -1550,7 +1555,7 @@ async function saveExit() {
     }
     if (!validEditorFields()) return;
     if (!edit.changes().length) { cancelEdit(); return; }
-    editSave = { signing: true, signature: editSave?.signature || '', saving: false, error: null, requestId: uid() };
+    editSave = { signing: true, signature: editSave?.signature || rememberedSignature(), saving: false, error: null, requestId: uid() };
     renderEditBar();
     $('#edit-signature').focus();
 }
@@ -1560,7 +1565,7 @@ async function confirmEditSave() {
     if (editConflict) { actions.structureConflict(); return; }
     if (creation || !validEditorFields()) return;
     map?.cancelTransform();
-    const session = edit, save = editSave, changes = session.changes();
+    const session = edit, save = editSave, changes = session.changes(), signature = save.signature.trim();
     save.controller = new AbortController();
     save.saving = true;
     save.error = null;
@@ -1570,8 +1575,9 @@ async function confirmEditSave() {
     renderEditBar();
     syncEditTools();
     try {
-        const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision, requestId: save.requestId, signature: save.signature.trim(), changes }, { signal: save.controller.signal });
+        const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision, requestId: save.requestId, signature, changes }, { signal: save.controller.signal });
         if (edit !== session) return;
+        rememberSignature(signature);
         edit = null;
         creation = null;
         creationOpen = false;

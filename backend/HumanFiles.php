@@ -6,7 +6,7 @@ final class HumanFiles
 {
     private RequestCache $requests;
 
-    public function __construct(private readonly string $root)
+    public function __construct(private readonly string $root, private readonly Files $files)
     {
         if (!is_dir($root) || is_link($root)) {
             throw new ApiError('storage', 503);
@@ -44,38 +44,14 @@ final class HumanFiles
     private function directory(string $relative): string
     {
         $path = $this->path($relative);
-        if (!is_dir($path) && !mkdir($path, 0775, true)) {
-            throw new ApiError('storage', 503);
-        }
+        $this->files->directory($path);
         return $path;
     }
 
     private function write(string $relative, string $body, bool $new = false): void
     {
         $path = $this->path($relative);
-        $temporary = $path . '.' . bin2hex(random_bytes(8)) . '.tmp';
-        $file = @fopen($temporary, 'xb');
-        if (!$file) {
-            throw new ApiError('storage', 503);
-        }
-        try {
-            if (fwrite($file, $body) !== strlen($body) || !fflush($file) || !fsync($file)) {
-                throw new ApiError('storage', 503);
-            }
-        } catch (Throwable $error) {
-            @unlink($temporary);
-            throw $error;
-        } finally {
-            fclose($file);
-        }
-        if ($new && file_exists($path)) {
-            unlink($temporary);
-            throw new ApiError('conflict', 409);
-        }
-        if (!rename($temporary, $path)) {
-            @unlink($temporary);
-            throw new ApiError('storage', 503);
-        }
+        $this->files->write($path, $body, $new);
     }
 
     private function files(string $folder, string $extension): array
@@ -236,7 +212,7 @@ final class HumanFiles
             } catch (ApiError) {
                 continue;
             }
-            preg_match('/^Comment=(.*)\r?$/m', $body, $comment);
+            preg_match('/^Comment=([^\r\n]*)\r?$/m', $body, $comment);
             $fingerprints[] = $name . ':' . hash('sha256', $body);
             $links[] = [
                 'id' => 'l' . substr(hash('sha256', $linkFolder . '/' . $name), 0, 40),
@@ -328,18 +304,23 @@ final class HumanFiles
         if ($description !== '') {
             $body .= 'Comment=' . str_replace(["\r", "\n"], ' ', $description) . "\r\n";
         }
+        $source = $old !== null ? stat($this->path($folder . '/' . $old)) : false;
+        $target = @stat($this->path($folder . '/' . $name));
+        $sameFile = $source && $target && $source['dev'] === $target['dev'] && $source['ino'] === $target['ino'];
+        if ($old !== $name && $sameFile) {
+            if (!is_writable($this->path($folder . '/' . $old))) throw new ApiError('storage', 503);
+            $this->files->remove($this->path($folder . '/' . $old));
+        }
         $this->write($folder . '/' . $name, $body, $old !== $name);
-        if ($old !== null && $old !== $name) {
-            unlink($this->path($folder . '/' . $old));
+        if ($old !== null && $old !== $name && !$sameFile) {
+            $this->files->remove($this->path($folder . '/' . $old));
         }
     }
 
     public function deleteLink(string $exhibit, string $id): void
     {
         $name = $this->findLink($exhibit, $id) ?? throw new ApiError('notFound', 404);
-        if (!unlink($this->path($exhibit . '/Links/' . $name))) {
-            throw new ApiError('storage', 503);
-        }
+        $this->files->remove($this->path($exhibit . '/Links/' . $name));
     }
 
     public function savePhoto(string $exhibit, string $signature, string $requestId, string $bytes, string $mime): array

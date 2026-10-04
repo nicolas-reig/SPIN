@@ -287,7 +287,8 @@ function renderHeader() {
 }
 
 function renderSidebar() {
-    const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameFloor');
+    const appliedStatusFilter = edit ? '' : statusFilter;
+    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'nameFloor');
     const frows = [
         ['', t('allFloors')], ...data().floors.map(f => [f.id, f.names[lang()]])
     ];
@@ -306,8 +307,8 @@ function renderSidebar() {
                     <select id="scope">${options(['nameFloor', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
                     <label for="floor-filter">${esc(t('floor'))}</label>
                     <select id="floor-filter">${options(frows, floorFilter)}</select>
-                    <label for="status-filter">${esc(t('status'))}</label>
-                    <select id="status-filter">${options([['', t('allStatuses')], ...STATUSES.map(x => [x, t(x)])], statusFilter)}</select>
+                    ${edit ? '' : `<label for="status-filter">${esc(t('status'))}</label>
+                    <select id="status-filter">${options([['', t('allStatuses')], ...STATUSES.map(x => [x, t(x)])], statusFilter)}</select>`}
                     ${button('clear', 'clear', 'quiet')}
                 </div>
             </details>
@@ -339,7 +340,7 @@ function renderSidebar() {
             ['#floor-filter', value => floorFilter = value],
             ['#status-filter', value => statusFilter = value]
         ]) {
-        $(selector).addEventListener('change', e => {
+        $(selector)?.addEventListener('change', e => {
             setter(e.target.value);
             renderList();
         });
@@ -349,19 +350,25 @@ function renderSidebar() {
 
 function renderList() {
     const q = query.trim().toLocaleLowerCase(lang());
+    const appliedStatusFilter = edit ? '' : statusFilter;
     const records = data().exhibits.filter(e => {
-        if (floorFilter && e.floorId !== floorFilter || statusFilter && e.status !== statusFilter) return false;
+        if (floorFilter && e.floorId !== floorFilter || appliedStatusFilter && e.status !== appliedStatusFilter) return false;
         const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name + ' ' + titleFloor(e.floorId);
         return text.toLocaleLowerCase(lang()).includes(q);
     });
-    const filtered = Boolean(query || floorFilter || statusFilter || scope !== 'nameFloor');
+    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'nameFloor');
     $('.active-filters').hidden = !filtered;
-    $('#filter-description').textContent = [scope !== 'nameFloor' ? t(scope) : '', floorFilter ? titleFloor(floorFilter) : '', statusFilter ? t(statusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
-    $('#exhibit-list').innerHTML = records.length ? records.map(e => `
-        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(titleFloor(e.floorId) + ' · ' + t(e.placed ? e.status : 'unplaced'))}">
+    $('#filter-description').textContent = [scope !== 'nameFloor' ? t(scope) : '', floorFilter ? titleFloor(floorFilter) : '', appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
+    $('#exhibit-list').innerHTML = records.length ? records.map(e => {
+        const details = [titleFloor(e.floorId)];
+        if (!e.placed) details.push(t('unplaced'));
+        else if (!edit) details.push(t(e.status));
+        return `
+        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
             <span class="exhibit-name">${esc(displayName(e))}</span>
-            <span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>
-        </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}" title="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
+            ${edit ? '' : `<span class="status-symbol ${e.status}" aria-label="${esc(t(e.status))}"></span>`}
+        </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}" title="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`;
+    }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
 }
 
 function renderMapUI() {
@@ -1735,7 +1742,7 @@ function conflictValue(value) {
 }
 
 function renderEditConflict() {
-    const labels = { floorId: 'floor', status: 'status', models: 'modelInstances', transform: 'placement', 'views.top': 'view2D', 'views.three': 'view3D', 'names.de': 'nameDe', 'names.en': 'nameEn', record: 'editExhibit' };
+    const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.top': 'view2D', 'views.three': 'view3D', 'names.de': 'nameDe', 'names.en': 'nameEn', record: 'editExhibit' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
     $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3><p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
@@ -1870,7 +1877,7 @@ const actions = {
     clear: () => {
         query = '';
         floorFilter = '';
-        statusFilter = '';
+        if (!edit) statusFilter = '';
         scope = 'nameFloor';
         renderSidebar();
     },

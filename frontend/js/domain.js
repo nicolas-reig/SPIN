@@ -180,18 +180,35 @@ export function structural(record, kind) {
 
 export class EditSession {
     constructor(snapshot) {
-        this.base = structuredClone(snapshot);
+        this.base = this.copy(snapshot);
         this.base.exhibits.forEach(record => { record.status = normalizeStatus(record.status); });
-        this.value = structuredClone(this.base);
+        this.value = this.copy(this.base);
         this.undoStack = [];
         this.redoStack = [];
     }
 
+    copy(value) {
+        const copy = structuredClone({ ...value, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) });
+        copy.exhibits.forEach((record, index) => {
+            record.notes = value.exhibits[index].notes;
+            record.links = value.exhibits[index].links;
+        });
+        return copy;
+    }
+
+    restore(value) {
+        this.value = { ...value, assets: this.value.assets, exhibits: value.exhibits.map(record => {
+            const current = this.value.exhibits.find(item => item.id === record.id);
+            return { ...record, notes: current?.notes || record.notes, links: current?.links || record.links };
+        }) };
+    }
+
     change(change) {
-        const next = structuredClone(this.value);
+        const next = this.copy(this.value);
         change(next);
-        if (JSON.stringify(next) === JSON.stringify(this.value)) return false;
-        this.undoStack.push(structuredClone(this.value));
+        const content = (key, value) => ['notes', 'links'].includes(key) ? undefined : value;
+        if (JSON.stringify(next, content) === JSON.stringify(this.value, content)) return false;
+        this.undoStack.push(this.value);
         this.redoStack = [];
         this.value = next;
         return true;
@@ -200,14 +217,14 @@ export class EditSession {
     undo() {
         if (this.undoStack.length) {
             this.redoStack.push(this.value);
-            this.value = this.undoStack.pop();
+            this.restore(this.undoStack.pop());
         }
     }
 
     redo() {
         if (this.redoStack.length) {
             this.undoStack.push(this.value);
-            this.value = this.redoStack.pop();
+            this.restore(this.redoStack.pop());
         }
     }
 

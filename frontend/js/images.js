@@ -1,3 +1,12 @@
+export function fileData(file, type = file.type) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(Error('invalidUpload'));
+        reader.readAsDataURL(new Blob([file], { type }));
+    });
+}
+
 export async function readNoteImage(file) {
     if (!file.size) throw Error('invalidImage');
     if (file.size > 8 * 1024 * 1024) throw Error('fileTooLarge');
@@ -8,12 +17,7 @@ export async function readNoteImage(file) {
         : matches([0x52, 0x49, 0x46, 0x46]) && matches([0x57, 0x45, 0x42, 0x50], 8) ? 'image/webp'
         : null;
     if (!mime) throw Error('invalidImage');
-    const data = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(Error('invalidImage'));
-        reader.readAsDataURL(new Blob([file], { type: mime }));
-    });
+    const data = await fileData(file, mime);
     const image = new Image();
     image.src = data;
     try {

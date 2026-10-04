@@ -40,7 +40,9 @@
     --compass-scale: 1.15;
     --compass-size: calc(88px * var(--compass-scale));
     --elevation-width: 32px;
-    --list: 230px;
+    --list-min: 230px;
+    --list-content: 0px;
+    --list: clamp(var(--list-min), var(--list-content), min(340px, 28vw));
     --radius: 11px;
     --shadow: 0 2px 4px #202b3304, 0 8px 24px #202b3309, 0 20px 50px #202b3308;
     font: 400 16px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -460,6 +462,7 @@ summary {
     flex: 1;
     margin: 0 -6px;
     padding: 0 6px;
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: #bbc0c5 transparent;
 }
@@ -468,8 +471,8 @@ summary {
     width: 100%;
     min-height: 48px;
     padding: 11px 12px;
-    margin-bottom: 4px;
-    align-items: flex-start;
+    margin-bottom: 0;
+    align-items: center;
     justify-content: flex-start;
     gap: 10px;
     border-radius: 5.5px;
@@ -514,7 +517,26 @@ summary {
 }
 
 .exhibit-row > .status-symbol {
+    margin-top: 0;
+}
+
+.exhibit-row:has(.unplaced-flag, .exhibit-status-name) > .status-symbol {
+    align-self: flex-start;
     margin-top: 2px;
+}
+
+.exhibit-measure {
+    position: fixed;
+    top: 0;
+    left: -10000px;
+    width: max-content;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.exhibit-measure > .exhibit-label {
+    width: max-content;
+    white-space: nowrap;
 }
 
 .unplaced-flag {
@@ -1379,7 +1401,7 @@ dialog::backdrop {
 
 @media (min-width: 1700px) {
     :root {
-        --list: 260px;
+        --list-min: 260px;
         --reader: 400px;
     }
 
@@ -1394,7 +1416,7 @@ dialog::backdrop {
 
 @media (max-width: 1120px) {
     :root {
-        --list: 205px;
+        --list-min: 205px;
         --reader: 330px;
     }
 
@@ -1810,9 +1832,10 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 }
 
 .exhibit-entry {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 2px;
+    margin-bottom: 4px;
 }
 
 .exhibit-entry .exhibit-row {
@@ -2519,17 +2542,22 @@ button.edit-session-label {
     width: 30px;
     height: 44px;
 }
-.exhibit-entry .exhibit-options {
-    margin-bottom: 4px;
-}
-body.editing .exhibit-entry {
-    position: relative;
-    padding-right: 32px;
+body.editing .exhibit-row {
+    padding-right: 44px;
 }
 .exhibit-entry .exhibit-options {
     position: absolute;
-    top: 0;
-    right: 0;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+}
+
+.exhibit-row.active + .exhibit-options > summary {
+    color: #fff;
+}
+
+.exhibit-row.active + .exhibit-options > summary:hover {
+    background: #ffffff24;
 }
 
 .instance-heading {
@@ -2791,8 +2819,8 @@ body.editing .exhibit-entry {
         height: 44px;
         min-height: 44px;
     }
-    body.editing .exhibit-entry {
-        padding-right: 44px;
+    body.editing .exhibit-row {
+        padding-right: 60px;
     }
     .conflict-card {
         padding: 16px;

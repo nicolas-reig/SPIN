@@ -354,6 +354,40 @@ function renderSidebar() {
     renderList();
 }
 
+function exhibitLabel(record) {
+    return `<span class="exhibit-label">
+        <span class="exhibit-name">${esc(displayName(record))}</span>
+        ${!edit && colorMode() !== 'default' ? `<span class="exhibit-status-name">${esc(t(record.status))}</span>` : ''}
+        ${record.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
+    </span>`;
+}
+
+let sidebarFrame = 0;
+function fitSidebar() {
+    cancelAnimationFrame(sidebarFrame);
+    sidebarFrame = requestAnimationFrame(() => {
+        sidebarFrame = 0;
+        if (!snapshot || innerWidth <= 860) return;
+        const sidebar = $('#sidebar');
+        const measure = document.createElement('div');
+        measure.className = 'exhibit-measure';
+        measure.setAttribute('aria-hidden', 'true');
+        measure.innerHTML = data().exhibits.map(exhibitLabel).join('');
+        sidebar.append(measure);
+        let contentWidth = 0;
+        for (const label of measure.children) contentWidth = Math.max(contentWidth, label.getBoundingClientRect().width);
+        const style = getComputedStyle(sidebar);
+        const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+        measure.remove();
+        // Reserve row padding, either status or menu space, and a scrollbar gutter in both modes.
+        const width = Math.ceil(contentWidth + padding + 24 + 32 + 16);
+        document.documentElement.style.setProperty('--list-content', width + 'px');
+    });
+}
+
+window.addEventListener('resize', fitSidebar, { passive: true });
+document.fonts.ready.then(fitSidebar);
+
 function renderList() {
     const q = query.trim().toLocaleLowerCase(lang());
     const appliedStatusFilter = edit ? '' : statusFilter;
@@ -374,13 +408,10 @@ function renderList() {
         return `
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
             ${edit ? '' : `<span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>`}
-            <span class="exhibit-label">
-                <span class="exhibit-name">${esc(displayName(e))}</span>
-                ${!edit && colorMode() !== 'default' ? `<span class="exhibit-status-name">${esc(t(e.status))}</span>` : ''}
-                ${e.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
-            </span>
+            ${exhibitLabel(e)}
         </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}" title="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
+    fitSidebar();
 }
 
 function updateMapHelp() {

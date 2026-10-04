@@ -228,6 +228,16 @@ export class MapView {
         replaceMaterials(result.scene, material);
         return result.scene;
     }
+    clearScene() {
+        this.transform?.detach();
+        this.scene.remove(this.root);
+        dispose(this.root, this.sharedMaterials);
+        this.root = new THREE.Group();
+        this.scene.add(this.root);
+        this.objects.clear();
+        this.floor = null;
+        this.requestRender();
+    }
     async setData(data, floorId, selected, editing = false, {
         reset = false
     } = {}) {
@@ -237,15 +247,8 @@ export class MapView {
         const floor = data.floors.find(f => f.id === floorId);
         if (!floor) {
             this.generation++;
-            this.transform?.detach();
-            this.scene.remove(this.root);
-            dispose(this.root, this.sharedMaterials);
-            this.root = new THREE.Group();
-            this.scene.add(this.root);
-            this.objects.clear();
-            this.floor = null;
+            this.clearScene();
             this.key = null;
-            this.requestRender();
             this.onState('mapReady');
             return;
         }
@@ -261,6 +264,7 @@ export class MapView {
         }
         this.key = key;
         const generation = ++this.generation;
+        if (this.floor && this.floor.id !== floorId) this.clearScene();
         this.onState('mapLoading');
         this.transform?.detach();
         const next = new THREE.Group();
@@ -308,6 +312,7 @@ export class MapView {
         } catch (e) {
             dispose(next, this.sharedMaterials);
             if (generation === this.generation) {
+                this.clearScene();
                 this.key = null;
                 this.onState('mapUnavailable');
             }

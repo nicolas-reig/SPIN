@@ -18,6 +18,8 @@ final class Store
     private string $assets;
     private string $exhibits;
     private HumanFiles $human;
+    private Files $files;
+    private bool $locked = false;
 
     public function __construct(string $assets, string $exhibits)
     {
@@ -37,7 +39,8 @@ final class Store
                 throw new ApiError('invalidPath');
             }
         }
-        $this->human = new HumanFiles($this->exhibits);
+        $this->files = new Files();
+        $this->human = new HumanFiles($this->exhibits, $this->files);
     }
 
     public static function text(mixed $value, int $max = 200, bool $required = true): string
@@ -130,7 +133,7 @@ final class Store
         return HumanFiles::filename($value);
     }
 
-    private static function requestId(mixed $value): string
+    public static function requestId(mixed $value): string
     {
         if (!is_string($value) || !preg_match('/^[a-zA-Z0-9_-]{8,80}$/D', $value)) {
             throw new ApiError('invalidId');
@@ -155,11 +158,17 @@ final class Store
 
     private function readJson(string $path): array
     {
-        if (!is_file($path) || is_link($path)) {
-            return [];
+        if (is_link($path)) throw new ApiError('invalidPath');
+        if (!is_file($path)) return [];
+        $body = file_get_contents($path);
+        if ($body === false) throw new ApiError('storage', 503);
+        try {
+            $data = json_decode($body, true, 128, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            throw new ApiError('invalidMetadata', 503);
         }
-        $data = json_decode(file_get_contents($path) ?: '', true);
-        return is_array($data) ? $data : [];
+        if (!is_array($data)) throw new ApiError('invalidMetadata', 503);
+        return $data;
     }
 
     private function writeJson(string $path, array $value): void
@@ -170,42 +179,20 @@ final class Store
 
     private function write(string $path, string $body): void
     {
-        $temporary = $path . '.' . bin2hex(random_bytes(8)) . '.tmp';
-        $file = @fopen($temporary, 'xb');
-        if (!$file) {
-            throw new ApiError('storage', 503);
-        }
-        try {
-            if (fwrite($file, $body) !== strlen($body) || !fflush($file) || !fsync($file)) {
-                throw new ApiError('storage', 503);
-            }
-        } catch (Throwable $error) {
-            @unlink($temporary);
-            throw $error;
-        } finally {
-            fclose($file);
-        }
-        if (!rename($temporary, $path)) {
-            @unlink($temporary);
-            throw new ApiError('storage', 503);
-        }
+        $this->files->write($path, $body);
     }
 
     private function lock(Closure $action): mixed
     {
-        if (!function_exists('sem_get')) {
-            throw new ApiError('storage', 503);
-        }
-        $key = (crc32($this->assets . "\n" . $this->exhibits) & 0x7fffffff) ?: 1;
-        $semaphore = sem_get($key, 1, 0660, true);
-        if (!$semaphore || !sem_acquire($semaphore)) {
-            throw new ApiError('busy', 409);
-        }
-        try {
-            return $action();
-        } finally {
-            sem_release($semaphore);
-        }
+        if ($this->locked) return $action();
+        return Files::lock($this->assets . "\n" . $this->exhibits, function () use ($action) {
+            $this->locked = true;
+            try {
+                return $this->files->transaction($action);
+            } finally {
+                $this->locked = false;
+            }
+        });
     }
 
     private static function identity(): array
@@ -367,6 +354,11 @@ final class Store
     }
 
     public function snapshot(): array
+    {
+        return $this->lock(fn() => $this->readSnapshot());
+    }
+
+    private function readSnapshot(): array
     {
         $modelFiles = $this->modelFiles();
         $assets = [];
@@ -579,39 +571,35 @@ final class Store
             $value = $operation[2] ?? null;
             if ($op === 'putFloor') {
                 $path = $this->path($this->assets, 'Floors/' . $id);
-                if (!is_dir($path) && !mkdir($path, 0775, true)) {
-                    throw new ApiError('storage', 503);
-                }
+                $this->files->directory($path);
                 $labels = $this->floorNames();
                 $labels[$id] = $value;
                 $floorRoot = $this->path($this->assets, 'Floors');
                 $this->write($floorRoot . '/.floors.json', json_encode((object)$labels, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
             } elseif ($op === 'putExhibit') {
                 $path = $this->path($this->exhibits, $id);
-                if (!is_dir($path) && !mkdir($path, 0775, true)) {
-                    throw new ApiError('storage', 503);
-                }
+                $this->files->directory($path);
                 $this->writeJson($path . '/.exhibit.json', $value);
             } else {
                 $path = $this->path($this->exhibits, $id);
-                @unlink($path . '/.exhibit.json');
+                $this->files->remove($path . '/.exhibit.json');
                 foreach (['Notizen', 'Fotos', 'Links'] as $folder) {
                     if (is_dir($path . '/' . $folder)) {
-                        rmdir($path . '/' . $folder);
+                        $this->files->remove($path . '/' . $folder);
                     }
                 }
-                rmdir($path);
+                $this->files->remove($path);
             }
         }
     }
 
-    public function mutate(array $payload): array
+    public function mutate(array $payload, array $uploads = []): array
     {
         self::requestId($payload['requestId'] ?? null);
         $action = $payload['action'] ?? '';
         $signed = !in_array($action, ['putLink', 'deleteLink'], true);
         $signature = $signed ? self::signature($payload['signature'] ?? null) : '';
-        return $this->lock(function () use ($payload, $action, $signature) {
+        return $this->lock(function () use ($payload, $action, $signature, $uploads) {
             $snapshot = $this->snapshot();
             if ($action === 'structure') {
                 $this->structure($payload, $snapshot, $signature);
@@ -645,8 +633,9 @@ final class Store
                     }
                     $this->status($id, $record, $payload['status'] ?? null, $signature);
                 } elseif (in_array($action, ['note', 'correctNote', 'deleteNote'], true)) {
+                    if ($action === 'deleteNote' && $uploads) throw new ApiError('invalidImage');
                     if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
-                        if (($payload['baseRevision'] ?? null) !== $record['revision']) {
+                        if (($payload['baseRevision'] ?? null) !== $record['revision'] && $payload['status'] !== $record['status']) {
                             throw new ApiError('conflict', 409);
                         }
                         if (!in_array($payload['status'], ['ok', 'problem', 'retired'], true)) {
@@ -664,7 +653,7 @@ final class Store
                             'body' => self::text($payload['body'] ?? '', 50000, false),
                             'images' => $images
                         ];
-                        if ($note['body'] === '' && !$images) {
+                        if ($note['body'] === '' && !$images && !$uploads) {
                             throw new ApiError('bodyRequired');
                         }
                     } else {
@@ -676,10 +665,16 @@ final class Store
                             $note['body'] = self::text($payload['body'] ?? '', 50000, false);
                             $note['images'] = $payload['images'] ?? [];
                             if (!is_array($note['images']) || count($note['images']) > 8 ||
-                                ($note['body'] === '' && !$note['images'])) {
+                                ($note['body'] === '' && !$note['images'] && !$uploads)) {
                                 throw new ApiError('bodyRequired');
                             }
                         }
+                    }
+                    if (count($note['images']) + count($uploads) > 8) throw new ApiError('invalidImage');
+                    foreach ($uploads as $upload) {
+                        $photo = $this->human->savePhoto($id, $signature,
+                            self::requestId($upload['requestId'] ?? null), $upload['bytes'], $upload['mime']);
+                        $note['images'][] = $photo['id'];
                     }
                     $this->human->saveNote($id, $action, $note, $signature, $payload['requestId']);
                     if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
@@ -760,9 +755,7 @@ final class Store
             self::validateGlb($bytes);
             $name = HumanFiles::filename(pathinfo(self::text($payload['name'] ?? null), PATHINFO_FILENAME));
             $folder = $this->path($this->assets, 'HardwareModels');
-            if (!is_dir($folder) && !mkdir($folder, 0775, true)) {
-                throw new ApiError('storage', 503);
-            }
+            $this->files->directory($folder);
             $file = 'HardwareModels/' . $name . '.glb';
             $path = $this->path($this->assets, $file);
             if (is_file($path)) {

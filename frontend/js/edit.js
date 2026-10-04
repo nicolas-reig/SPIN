@@ -75,10 +75,7 @@ export function duplicateExhibit(record, records) {
 }
 
 const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-const fields = {
-    floors: ['names.de', 'names.en', 'views.top', 'views.three'],
-    exhibits: ['floorId', 'transform', 'models', 'views.top', 'views.three']
-};
+const fields = ['floorId', 'transform', 'models', 'views.top', 'views.three'];
 const get = (record, field) => field.split('.').reduce((value, key) => value?.[key], record);
 function put(record, field, value) {
     const parts = field.split('.');
@@ -104,7 +101,7 @@ export function rebaseEdit(session, live, choices = {}) {
             const desired = session.value[change.kind].find(record => record.id === change.id);
             if (change.op === 'delete') {
                 if (!current) continue;
-                if (!equal(structural(base, change.kind), structural(current, change.kind)) &&
+                if (!equal(structural(base), structural(current)) &&
                     !choose(change, 'record', current, null)) continue;
                 state[change.kind] = state[change.kind].filter(record => record.id !== change.id);
             } else if (!base || !current) {
@@ -121,7 +118,7 @@ export function rebaseEdit(session, live, choices = {}) {
                 if (index < 0) state[change.kind].push(record);
                 else state[change.kind][index] = record;
             } else {
-                for (const field of fields[change.kind]) {
+                for (const field of fields) {
                     const original = get(base, field), yours = get(desired, field), theirs = get(current, field);
                     if (equal(original, yours) || equal(yours, theirs)) continue;
                     if (!equal(original, theirs) && !choose(change, field, theirs, yours)) continue;

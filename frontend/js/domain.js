@@ -172,9 +172,8 @@ export function validateSnapshot(snapshot) {
     return snapshot;
 }
 
-export function structural(record, kind) {
-    const keys = kind === 'floors' ? ['id', 'names', 'views'] :
-        ['id', 'name', 'floorId', 'status', 'transform', 'models', 'views'];
+export function structural(record) {
+    const keys = ['id', 'name', 'floorId', 'status', 'transform', 'models', 'views'];
     return Object.fromEntries(keys.map(key => [key, structuredClone(record[key] ?? null)]));
 }
 
@@ -197,7 +196,7 @@ export class EditSession {
     }
 
     restore(value) {
-        this.value = { ...value, assets: this.value.assets, exhibits: value.exhibits.map(record => {
+        this.value = { ...value, floors: this.value.floors, assets: this.value.assets, exhibits: value.exhibits.map(record => {
             const current = this.value.exhibits.find(item => item.id === record.id);
             return { ...record, notes: current?.notes || record.notes, links: current?.links || record.links };
         }) };
@@ -206,6 +205,8 @@ export class EditSession {
     change(change) {
         const next = this.copy(this.value);
         change(next);
+        next.floors = this.value.floors;
+        next.assets = this.value.assets;
         const content = (key, value) => ['notes', 'links'].includes(key) ? undefined : value;
         if (JSON.stringify(next, content) === JSON.stringify(this.value, content)) return false;
         this.undoStack.push(this.value);
@@ -230,23 +231,21 @@ export class EditSession {
 
     changes() {
         const changes = [];
-        for (const kind of ['floors', 'exhibits']) {
-            for (const record of this.value[kind]) {
-                const old = this.base[kind].find(item => item.id === record.id);
-                if (!old || JSON.stringify(structural(record, kind)) !== JSON.stringify(structural(old, kind))) {
-                    changes.push({
-                        kind,
-                        op: 'put',
-                        id: record.id,
-                        record: structural(record, kind),
-                        baseRevision: old?.revision
-                    });
-                }
+        for (const record of this.value.exhibits) {
+            const old = this.base.exhibits.find(item => item.id === record.id);
+            if (!old || JSON.stringify(structural(record)) !== JSON.stringify(structural(old))) {
+                changes.push({
+                    kind: 'exhibits',
+                    op: 'put',
+                    id: record.id,
+                    record: structural(record),
+                    baseRevision: old?.revision
+                });
             }
-            for (const old of this.base[kind]) {
-                if (!this.value[kind].some(item => item.id === old.id)) {
-                    changes.push({ kind, op: 'delete', id: old.id, baseRevision: old.revision });
-                }
+        }
+        for (const old of this.base.exhibits) {
+            if (!this.value.exhibits.some(item => item.id === old.id)) {
+                changes.push({ kind: 'exhibits', op: 'delete', id: old.id, baseRevision: old.revision });
             }
         }
         return changes;

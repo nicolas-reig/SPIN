@@ -326,7 +326,6 @@ function renderSidebar() {
                     <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
                     <div class="popover">
                         ${edit ? (creation ? menuButton('resumeCreation', 'resumeCreation', 'pencil-line') : '') + menuButton('editFloor', 'editFloor', 'layers') + menuButton('newFloor', 'newFloor', 'layers-plus') + menuButton('models', 'models', 'library') : menuButton('editStructure', 'enterEdit', 'pencil-line')}
-                        ${menuButton('refresh', 'refresh', 'refresh-cw')}
                     </div>
                 </details>
             </div>

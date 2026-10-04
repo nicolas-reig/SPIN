@@ -84,13 +84,31 @@ export function createNoteEditor(host, { value, label, placeholder, onChange, on
             button.setAttribute('aria-pressed', Boolean(active));
         }
     }
+    function selectedLink() {
+        const { from, to, $from, empty } = view.state.selection;
+        const mark = $from.marks().find(mark => mark.type === schema.marks.link) ||
+            (empty ? $from.nodeAfter?.marks.find(mark => mark.type === schema.marks.link) : null);
+        let range = { from, to };
+        if (empty && mark) {
+            const ranges = [];
+            $from.parent.forEach((node, offset) => {
+                if (!node.marks.some(item => item.type === schema.marks.link && item.attrs.href === mark.attrs.href)) return;
+                const start = $from.start() + offset;
+                const previous = ranges.at(-1);
+                if (previous?.to === start) previous.to += node.nodeSize;
+                else ranges.push({ from: start, to: start + node.nodeSize });
+            });
+            range = ranges.find(item => item.from <= from && item.to >= from) || range;
+        }
+        return { ...range, url: mark?.attrs.href || '', text: view.state.doc.textBetween(range.from, range.to) };
+    }
     update();
     return {
         destroy: () => view.destroy(),
         focus: () => view.focus(),
-        link: () => ({ url: view.state.selection.$from.marks().find(mark => mark.type === schema.marks.link)?.attrs.href || '', text: view.state.doc.textBetween(view.state.selection.from, view.state.selection.to) }),
-        setLink(url, text) {
-            const { from, to } = view.state.selection;
+        link: selectedLink,
+        setLink(url, text, range = view.state.selection) {
+            const { from, to } = range;
             let tr = view.state.tr;
             if (!url) tr = tr.removeMark(from, to, schema.marks.link);
             else if (from === to) tr = tr.replaceSelectionWith(schema.text(text || url, [schema.marks.link.create({ href: url })]), false);

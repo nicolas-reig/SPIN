@@ -30,6 +30,9 @@
     --map-ui-center: 50%;
     --map-ui-width: calc(100% - 28px);
     --map-controls-bottom: 25px;
+    --compass-scale: 1.15;
+    --compass-size: calc(88px * var(--compass-scale));
+    --elevation-width: 32px;
     --list: 230px;
     --radius: 11px;
     --shadow: 0 2px 4px #202b3304, 0 8px 24px #202b3309, 0 20px 50px #202b3308;
@@ -624,9 +627,9 @@ summary {
 }
 
 #map-controls {
-    --orbit-width: 124px;
+    --orbit-width: calc(var(--compass-size) + var(--elevation-width) + 4px);
     width: var(--map-ui-width);
-    min-height: 88px;
+    min-height: var(--compass-size);
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -2844,14 +2847,14 @@ body.editing .exhibit-entry {
 
 .compass-control {
     position: relative;
-    width: 88px;
-    height: 88px;
+    width: var(--compass-size);
+    height: var(--compass-size);
 }
 
 .compass-control:before {
     content: '';
     position: absolute;
-    inset: 16px;
+    inset: calc(16px * var(--compass-scale));
     border-radius: 50%;
     background: #fafbfc;
     box-shadow: 0 1px 2px #202b3310, 0 6px 16px #202b3318;
@@ -2861,9 +2864,9 @@ body.editing .exhibit-entry {
 .compass-step {
     position: absolute;
     top: 0;
-    width: 44px;
-    min-height: 44px;
-    height: 44px;
+    width: calc(44px * var(--compass-scale));
+    min-height: calc(44px * var(--compass-scale));
+    height: calc(44px * var(--compass-scale));
     padding: 0;
     background: transparent;
     color: #68727e;
@@ -2885,11 +2888,11 @@ body.editing .exhibit-entry {
 
 .compass-face {
     position: absolute;
-    top: 16px;
-    left: 16px;
-    width: 56px;
-    height: 56px;
-    min-height: 56px;
+    top: calc(16px * var(--compass-scale));
+    left: calc(16px * var(--compass-scale));
+    width: calc(56px * var(--compass-scale));
+    height: calc(56px * var(--compass-scale));
+    min-height: calc(56px * var(--compass-scale));
     padding: 0;
     border-radius: 50%;
     background: transparent;
@@ -2914,31 +2917,31 @@ body.editing .exhibit-entry {
 .compass-rose {
     position: absolute;
     inset: 0;
-    border: 1.5px solid #87909a;
+    border: calc(1.5px * var(--compass-scale)) solid #87909a;
     border-radius: 50%;
     pointer-events: none;
 }
 
 .compass-tick {
     position: absolute;
-    width: 2px;
-    height: 4px;
-    top: 4px;
-    left: calc(50% - 1px);
+    width: calc(2px * var(--compass-scale));
+    height: calc(4px * var(--compass-scale));
+    top: calc(4px * var(--compass-scale));
+    left: calc(50% - 1px * var(--compass-scale));
     background: #ced3d8;
-    border-radius: 1px;
-    transform-origin: 1px 23px;
+    border-radius: calc(1px * var(--compass-scale));
+    transform-origin: calc(1px * var(--compass-scale)) calc(23px * var(--compass-scale));
     transform: rotate(var(--tick));
 }
 
 .compass-point {
     position: absolute;
-    top: 3px;
-    left: calc(50% - 4px);
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-bottom: 7px solid #87909a;
-    transform-origin: 4px 24px;
+    top: calc(3px * var(--compass-scale));
+    left: calc(50% - 4px * var(--compass-scale));
+    border-left: calc(4px * var(--compass-scale)) solid transparent;
+    border-right: calc(4px * var(--compass-scale)) solid transparent;
+    border-bottom: calc(7px * var(--compass-scale)) solid #87909a;
+    transform-origin: calc(4px * var(--compass-scale)) calc(24px * var(--compass-scale));
 }
 
 .compass-north { border-bottom-color: #cb514f; }
@@ -2948,19 +2951,15 @@ body.editing .exhibit-entry {
 
 .compass-letter {
     position: relative;
-    font-size: 1rem;
+    font-size: calc(1rem * var(--compass-scale));
     font-weight: 600;
     line-height: 1;
     pointer-events: none;
 }
 
 .elevation-control {
-    width: 32px;
-    height: 88px;
-    padding-block: 8px;
-    border-radius: 16px;
-    background: #fafbfc;
-    box-shadow: 0 1px 2px #202b3310, 0 6px 16px #202b3318;
+    width: var(--elevation-width);
+    height: var(--compass-size);
 }
 
 .elevation-control input[type=range] {
@@ -2981,40 +2980,44 @@ body.editing .exhibit-entry {
 }
 
 .elevation-control input[type=range]::-webkit-slider-runnable-track {
-    width: 4px;
+    box-sizing: border-box;
+    width: 9px;
     height: 100%;
-    border: 0;
-    border-radius: 2px;
-    background: #b7c1ca;
+    border: 1px solid #fff;
+    border-radius: 5px;
+    background: linear-gradient(to top, #687785 0 var(--elevation, 100%), #e1e4e7 var(--elevation, 100%) 100%);
 }
 
 .elevation-control input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
+    box-sizing: border-box;
     width: 16px;
-    height: 16px;
-    margin-left: -6px;
-    border: 0;
-    border-radius: 50%;
-    background: #687785;
-    box-shadow: 0 1px 3px #202b3329;
+    height: 24px;
+    margin-left: -4.5px;
+    border: 1px solid #d4d9de;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px #202b3329;
 }
 
 .elevation-control input[type=range]::-moz-range-track {
-    width: 4px;
+    box-sizing: border-box;
+    width: 9px;
     height: 100%;
-    border: 0;
-    border-radius: 2px;
-    background: #b7c1ca;
+    border: 1px solid #fff;
+    border-radius: 5px;
+    background: linear-gradient(to top, #687785 0 var(--elevation, 100%), #e1e4e7 var(--elevation, 100%) 100%);
 }
 
 .elevation-control input[type=range]::-moz-range-thumb {
+    box-sizing: border-box;
     width: 16px;
-    height: 16px;
-    border: 0;
-    border-radius: 50%;
-    background: #687785;
-    box-shadow: 0 1px 3px #202b3329;
+    height: 24px;
+    border: 1px solid #d4d9de;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px #202b3329;
 }
 
 .camera-toolbar > .transform-controls {
@@ -3045,7 +3048,7 @@ body.editing .exhibit-entry {
 @container camera-navigation (max-width: 560px) {
     #map-controls > .camera-toolbar {
         max-width: 100%;
-        margin-top: 102px;
+        margin-top: calc(var(--compass-size) + 14px);
     }
     #map-controls > .camera-orbit {
         top: 0;
@@ -3054,8 +3057,8 @@ body.editing .exhibit-entry {
 }
 
 @media (max-width: 860px) {
-    #map-controls {
-        --orbit-width: 136px;
+    :root {
+        --elevation-width: 44px;
     }
     .preview-stage {
         height: min(240px, 35dvh);
@@ -3074,10 +3077,6 @@ body.editing .exhibit-entry {
     }
     .camera-primary .toolbar-divider {
         margin-inline: 2px;
-    }
-    .elevation-control {
-        width: 44px;
-        border-radius: 22px;
     }
     .camera-toolbar > .toolbar-divider {
         display: none;

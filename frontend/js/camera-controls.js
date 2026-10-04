@@ -113,6 +113,7 @@ export class CameraControls {
         this.face.setAttribute('aria-label', t('facing') + ' ' + direction + ' · ' + t('northUp'));
         this.slider.disabled = !view;
         this.slider.value = degrees;
+        this.slider.style.setProperty('--elevation', degrees / 90 * 100 + '%');
         this.slider.setAttribute('aria-valuetext', degrees + '° · ' + t(degrees === 90 ? 'topDownAngle' : degrees === 0 ? 'parallelFloor' : 'aboveFloor'));
     }
 

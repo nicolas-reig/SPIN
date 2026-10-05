@@ -1124,6 +1124,11 @@ summary {
     box-shadow: 0 1px 5px #17232f30;
 }
 
+.link-card {
+    padding: 10px 16px;
+    margin-bottom: 10px;
+}
+
 .document-open {
     color: var(--ink);
     font-weight: 500;
@@ -1150,7 +1155,7 @@ summary {
 
 .document-url {
     display: block;
-    margin-top: 4px;
+    margin-top: 2px;
     color: var(--muted);
     font-size: .75rem;
     font-weight: 400;
@@ -1163,8 +1168,8 @@ summary {
 .link-card p {
     color: var(--muted);
     font-size: .875rem;
-    line-height: 1.6;
-    margin-top: 12px;
+    line-height: 1.45;
+    margin-top: 4px;
     overflow-wrap: anywhere;
 }
 
@@ -1172,7 +1177,7 @@ summary {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin: 12px -7px -10px;
+    margin: 0 -6px -4px;
 }
 
 .link-actions>button {
@@ -1180,12 +1185,13 @@ summary {
     min-height: 32px;
 }
 
-.link-composer {
-    padding: 18px 22px;
+.composer.link-composer {
+    padding: 12px 16px;
+    margin-bottom: 10px;
 }
 
 .link-search {
-    margin-bottom: 18px;
+    margin-bottom: 12px;
 }
 
 .link-composer input,
@@ -1243,16 +1249,12 @@ summary {
 
 .link-card .document-open {
     justify-content: space-between;
-    gap: 16px;
+    gap: 10px;
 }
 
 .link-card .document-open .lucide {
     color: #89919a;
     flex-shrink: 0;
-}
-
-.link-card .link-actions {
-    margin-top: 14px;
 }
 
 .empty {
@@ -1439,8 +1441,7 @@ dialog::backdrop {
     }
 
     .note,
-    .composer,
-    .link-card {
+    .composer {
         padding: 20px;
     }
 }
@@ -1576,9 +1577,13 @@ dialog::backdrop {
     }
 
     .note,
+    .composer {
+        padding: 23px;
+    }
+
+    .note,
     .composer,
     .link-card {
-        padding: 23px;
         max-width: 680px;
         width: 100%;
         margin-left: auto;

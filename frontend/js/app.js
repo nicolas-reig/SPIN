@@ -708,6 +708,10 @@ function renderLinks(e, element) {
     const searchable = e.links.length > 6;
     if (!searchable) delete linkSearches[e.id];
     element.innerHTML = `
+        ${searchable ? `<div class="searchbox link-search">
+            ${icon('search', 'search-icon')}
+            <input id="link-search" type="search" value="${esc(linkSearches[e.id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
+        </div>` : ''}
         <form class="composer link-composer ${draft.open ? 'composing' : ''}" id="link-form" novalidate>
             <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t(draft.open ? 'title' : 'addLink'))}" maxlength="160" value="${esc(draft.title)}">
             <div class="link-fields" ${draft.open ? '' : 'hidden'}>
@@ -718,10 +722,6 @@ function renderLinks(e, element) {
             <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
             ${draftWarning('links')}
         </form>
-        ${searchable ? `<div class="searchbox link-search">
-            ${icon('search', 'search-icon')}
-            <input id="link-search" type="search" value="${esc(linkSearches[e.id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
-        </div>` : ''}
         <div id="link-results">${e.links.map(link => `
             <article class="link-card">
                 <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">

@@ -119,6 +119,7 @@ export class MapView {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
         this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE };
+        this.controls.keys = { LEFT: 'ArrowRight', UP: 'ArrowDown', RIGHT: 'ArrowLeft', BOTTOM: 'ArrowUp' };
         this.controls.minDistance = 2;
         this.controls.maxDistance = 450;
         this.controls.maxPolarAngle = Math.PI / 2;

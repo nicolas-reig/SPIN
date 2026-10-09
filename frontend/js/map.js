@@ -9,7 +9,7 @@ import {
     TransformControls
 } from 'three/addons/controls/TransformControls.js';
 
-import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset } from './camera.js';
+import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, viewKey } from './camera.js';
 import { validTransform } from './domain.js';
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 
@@ -417,9 +417,9 @@ export class MapView {
         step();
     }
     home() {
-        const preset = this.floor?.views?.[this.mode === 'top' ? 'top' : 'three'];
+        const preset = this.floor?.views?.[viewKey(this.mode)];
         if (preset) {
-            this.applyView({ ...preset, mode: this.mode });
+            this.applyView(preset);
             return;
         }
         this.fit();
@@ -438,7 +438,6 @@ export class MapView {
         const top = mode === 'top';
         const offset = orbitOffset(distance, this.navigationState().heading, top ? 90 : 35);
         return {
-            mode,
             position: (top && this.mode !== 'top') || (!top && this.mode === 'top') ? target.map((value, index) => value + offset[index]) : this.camera.position.toArray(),
             target,
             span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3, distance * .36)
@@ -457,11 +456,11 @@ export class MapView {
         const aspect = Math.max(.2, this.container.clientWidth / this.container.clientHeight);
         const span = Math.max(4, size.y, size.z, size.x / aspect) * .7;
         const distance = Math.max(9, span * 3.2);
-        return { mode, target: center.toArray(), position: center.clone().add(new THREE.Vector3(...cameraOffset(mode, distance))).toArray(), span };
+        return { target: center.toArray(), position: center.clone().add(new THREE.Vector3(...cameraOffset(mode, distance))).toArray(), span };
     }
-    applyView(preset) {
+    applyView(preset, mode = this.mode) {
         if (!preset) return;
-        const mode = cameraMode(preset.mode);
+        mode = cameraMode(mode);
         if (this.mode !== mode) {
             this.setView(mode, true);
         }
@@ -494,10 +493,9 @@ export class MapView {
         }
         return true;
     }
-    focusView(id, preset) {
-        preset = { ...preset, mode: cameraMode(preset.mode) };
+    focusView(id, preset, mode = this.mode) {
         const aspect = this.width / this.height;
-        const perspective = preset.mode === 'perspective';
+        const perspective = cameraMode(mode) === 'perspective';
         const camera = perspective ? new THREE.PerspectiveCamera(38, aspect, .05, 2000) :
             new THREE.OrthographicCamera(-preset.span * aspect, preset.span * aspect, preset.span, -preset.span, .05, 2000);
         const target = new THREE.Vector3(...preset.target);
@@ -535,13 +533,13 @@ export class MapView {
     focus(onlyWhenHidden = false) {
         const exhibit = this.data.exhibits.find(e => e.id === this.selected);
         if (!exhibit?.models.length || !this.objects.has(exhibit.id) || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
-        const key = this.mode === 'top' ? 'top' : 'three';
+        const key = viewKey(this.mode);
         const preset = exhibit.views?.[key] || this.fallbackView([exhibit.id]);
         this.applyView(this.focusView(exhibit.id, preset));
     }
     focusFloor() {
         const ids = this.data.exhibits.filter(exhibit => exhibit.floorId === this.floor.id).map(exhibit => exhibit.id);
-        const key = this.mode === 'top' ? 'top' : 'three';
+        const key = viewKey(this.mode);
         this.applyView(this.floor.views?.[key] || this.fallbackView(ids));
     }
     setView(mode, preserve = false) {

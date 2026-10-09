@@ -1,5 +1,20 @@
 export const STATUSES = ['ok', 'problem', 'retired'];
 export const normalizeStatus = status => status == null || status === '' || status === 'unset' ? 'ok' : status;
+export const VIEW_KEYS = ['2D', '3D'];
+
+export function normalizeViews(views = {}) {
+    const result = {};
+    for (const [key, legacy] of [['2D', 'top'], ['3D', 'three']]) {
+        const preset = Object.hasOwn(views ?? {}, key) ? views[key] : views?.[legacy];
+        if (!preset) continue;
+        result[key] = {
+            position: preset.position,
+            target: preset.target,
+            span: preset.span
+        };
+    }
+    return result;
+}
 
 export const identity = () => ({
     position: [0, 0, 0],
@@ -141,7 +156,7 @@ export class NasDocumentLink extends Record {
 }
 
 export function validateViews(views = {}) {
-    for (const key of ['top', 'three']) {
+    for (const key of VIEW_KEYS) {
         const view = views[key];
         if (!view) continue;
         if (![view.position, view.target].every(vector => Array.isArray(vector) && vector.length === 3 &&
@@ -153,10 +168,12 @@ export function validateViews(views = {}) {
 
 export function validateSnapshot(snapshot) {
     snapshot.floors.forEach(record => {
+        record.views = normalizeViews(record.views);
         new Floor(record);
         validateViews(record.views);
     });
     snapshot.exhibits.forEach(record => {
+        record.views = normalizeViews(record.views);
         record.status = new Exhibit(record).status;
         validateViews(record.views);
         record.notes.forEach(note => new Note(note));
@@ -182,7 +199,9 @@ export class EditSession {
 
     copy(value) {
         const copy = structuredClone({ ...value, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) });
+        copy.floors.forEach(record => { record.views = normalizeViews(record.views); });
         copy.exhibits.forEach((record, index) => {
+            record.views = normalizeViews(record.views);
             record.notes = value.exhibits[index].notes;
             record.links = value.exhibits[index].links;
         });
@@ -192,7 +211,7 @@ export class EditSession {
     restore(value) {
         this.value = { ...value, floors: this.value.floors, assets: this.value.assets, exhibits: value.exhibits.map(record => {
             const current = this.value.exhibits.find(item => item.id === record.id);
-            return { ...record, notes: current?.notes || record.notes, links: current?.links || record.links };
+            return { ...record, views: normalizeViews(record.views), notes: current?.notes || record.notes, links: current?.links || record.links };
         }) };
     }
 

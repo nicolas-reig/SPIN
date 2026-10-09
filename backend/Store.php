@@ -15,6 +15,8 @@ final class ApiError extends RuntimeException
 
 final class Store
 {
+    private const VIEW_KEYS = ['2D' => 'top', '3D' => 'three'];
+
     private string $assets;
     private string $exhibits;
     private HumanFiles $human;
@@ -228,11 +230,14 @@ final class Store
             throw new ApiError('invalidView');
         }
         $result = [];
-        foreach (['top', 'three'] as $key) {
-            if (!isset($value[$key])) {
+        foreach (self::VIEW_KEYS as $key => $legacy) {
+            $view = array_key_exists($key, $value) ? $value[$key] : ($value[$legacy] ?? null);
+            if ($view === null) {
                 continue;
             }
-            $view = $value[$key];
+            if (!is_array($view)) {
+                throw new ApiError('invalidView');
+            }
             foreach (['position', 'target'] as $part) {
                 if (!isset($view[$part]) || !is_array($view[$part]) || count($view[$part]) !== 3) {
                     throw new ApiError('invalidView');
@@ -249,7 +254,6 @@ final class Store
                 throw new ApiError('invalidView');
             }
             $result[$key]['span'] = (float)$view['span'];
-            $result[$key]['mode'] = $key === 'top' ? 'top' : 'perspective';
         }
         return $result;
     }
@@ -266,12 +270,13 @@ final class Store
     private static function readViews(mixed $value): array
     {
         $views = [];
-        foreach (['top', 'three'] as $key) {
-            if (!is_array($value) || !isset($value[$key])) {
+        foreach (self::VIEW_KEYS as $key => $legacy) {
+            $view = is_array($value) ? (array_key_exists($key, $value) ? $value[$key] : ($value[$legacy] ?? null)) : null;
+            if ($view === null) {
                 continue;
             }
             try {
-                $views += self::views([$key => $value[$key]]);
+                $views += self::views([$key => $view]);
             } catch (ApiError) {
                 continue;
             }
@@ -676,6 +681,9 @@ final class Store
         $path = $this->path($this->exhibits, $id . '/.exhibit.json');
         $meta = $this->readJson($path);
         $meta['status'] = $status;
+        if (array_key_exists('views', $meta)) {
+            $meta['views'] = (object)self::readViews($meta['views']);
+        }
         unset($meta['statusBy']);
         $this->writeJson($path, $meta);
     }

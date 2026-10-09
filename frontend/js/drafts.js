@@ -1,3 +1,5 @@
+import { normalizeViews } from './domain.js';
+
 const text = value => typeof value === 'string' && value.trim();
 export const hasNoteDraft = draft => Boolean(text(draft?.body) || draft?.images?.length ||
     draft?.existingImages?.length || draft?.noteId || text(draft?.signature));
@@ -42,6 +44,6 @@ export function editSnapshot(value) {
 export function restoreEditSnapshot(value, live) {
     return { ...value, floors: structuredClone(live.floors), assets: live.assets, exhibits: value.exhibits.map(record => {
         const current = live.exhibits.find(item => item.id === record.id);
-        return { ...record, notes: current?.notes || [], links: current?.links || [] };
+        return { ...record, views: normalizeViews(record.views), notes: current?.notes || [], links: current?.links || [] };
     }) };
 }

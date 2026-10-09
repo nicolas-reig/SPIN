@@ -1,4 +1,4 @@
-import { identity, structural, EditSession } from './domain.js';
+import { identity, structural, EditSession, VIEW_KEYS } from './domain.js';
 import { escape as esc } from './markdown.js';
 import { t } from './locale.js';
 import { icon } from './icons.js';
@@ -23,16 +23,16 @@ export function vectorFields(transform, attributes = '', scope = 'group') {
 
 export function viewPresets(record) {
     return `<details class="view-presets"><summary ${editHelp('defaultViewsHint')}>${esc(t('defaultViews'))}</summary>
-        ${['top', 'three'].map(key => {
+        ${VIEW_KEYS.map(key => {
             const saved = Boolean(record.views?.[key]);
-            const previewHelp = key === 'top'
+            const previewHelp = key === '2D'
                 ? saved ? 'previewTopHint' : 'automaticTopHint'
                 : saved ? 'previewThreeHint' : 'automaticThreeHint';
             return `<div class="preset-row">
-            <span class="preset-type" ${editHelp(key === 'top' ? 'topViewHint' : 'threeViewHint')}>${esc(t(key === 'top' ? 'view2D' : 'view3D'))}</span>
-            <button type="button" class="icon-button" data-preview-view="${key}" aria-label="${esc(t('showView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(previewHelp)}>${icon('eye')}</button>
-            <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(key === 'top' ? 'captureTopHint' : 'captureThreeHint')}>${icon('camera')}</button>
-            <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === 'top' ? 'view2D' : 'view3D'))}" ${editHelp(saved ? 'resetViewHint' : 'alreadyAutomaticHint')} ${saved ? '' : 'disabled'}>${icon('rotate-ccw')}</button>
+            <span class="preset-type" ${editHelp(key === '2D' ? 'topViewHint' : 'threeViewHint')}>${esc(t(key === '2D' ? 'view2D' : 'view3D'))}</span>
+            <button type="button" class="icon-button" data-preview-view="${key}" aria-label="${esc(t('showView') + ' · ' + t(key === '2D' ? 'view2D' : 'view3D'))}" ${editHelp(previewHelp)}>${icon('eye')}</button>
+            <button type="button" class="icon-button" data-set-view="${key}" aria-label="${esc(t('useCurrentView') + ' · ' + t(key === '2D' ? 'view2D' : 'view3D'))}" ${editHelp(key === '2D' ? 'captureTopHint' : 'captureThreeHint')}>${icon('camera')}</button>
+            <button type="button" class="icon-button" data-reset-view="${key}" aria-label="${esc(t('automatic') + ' · ' + t(key === '2D' ? 'view2D' : 'view3D'))}" ${editHelp(saved ? 'resetViewHint' : 'alreadyAutomaticHint')} ${saved ? '' : 'disabled'}>${icon('rotate-ccw')}</button>
         </div>`;
         }).join('')}
     </details>`;
@@ -75,7 +75,7 @@ export function duplicateExhibit(record, records) {
 }
 
 const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-const fields = ['floorId', 'transform', 'models', 'views.top', 'views.three'];
+const fields = ['floorId', 'transform', 'models', 'views.2D', 'views.3D'];
 const get = (record, field) => field.split('.').reduce((value, key) => value?.[key], record);
 function put(record, field, value) {
     const parts = field.split('.');

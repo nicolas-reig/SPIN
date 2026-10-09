@@ -1,4 +1,6 @@
 export const cameraMode = mode => mode === 'top' ? 'top' : 'perspective';
+export const viewKey = mode => cameraMode(mode) === 'top' ? '2D' : '3D';
+export const viewMode = key => key === '2D' ? 'top' : 'perspective';
 
 export function cameraOffset(mode, distance) {
     if (mode === 'top') return [0, distance, .00001];

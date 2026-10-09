@@ -22,7 +22,7 @@ import {
 import { readNoteImage } from './images.js';
 import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
-import { cameraMode } from './camera.js';
+import { cameraMode, viewMode } from './camera.js';
 import { CameraControls } from './camera-controls.js';
 import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
 import { icon } from './icons.js';
@@ -1700,7 +1700,7 @@ function conflictValue(value) {
 }
 
 function renderEditConflict() {
-    const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.top': 'view2D', 'views.three': 'view3D', record: 'editExhibit' };
+    const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
     $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3><p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
@@ -1909,12 +1909,12 @@ document.addEventListener('click', async event => {
             await ensureMap();
             if (!map || !record) throw Error('mapUnavailable');
             if (element.dataset.previewView) {
-                const mode = key === 'top' ? 'top' : 'perspective';
-                map.applyView(record.views?.[key] || map.fallbackView([record.id], mode));
+                const mode = viewMode(key);
+                map.applyView(record.views?.[key] || map.fallbackView([record.id], mode), mode);
                 setView('map');
                 return;
             }
-            const preset = element.dataset.setView ? map.captureView(key === 'top' ? 'top' : 'perspective') : null;
+            const preset = element.dataset.setView ? map.captureView(viewMode(key)) : null;
             applyEdit(state => {
                 const target = state.exhibits.find(item => item.id === record.id);
                 target.views ||= {};

@@ -87,7 +87,7 @@ Each floor entry accepts these fields:
 | --- | --- | --- |
 | `de` | German display name. | The floor number. |
 | `en` | English display name. | The floor number. |
-| `views` | Optional `top` and `three` camera presets; see [saved views](#saved-views-2d-and-3d). | Automatic framing. |
+| `views` | Optional `2D` and `3D` camera presets; see [saved views](#saved-views-2d-and-3d). | Automatic framing. |
 | `lastEditedBy` | A name retained for compatibility with older floor metadata. Current app saves do not edit floors or update this field. | Empty. |
 
 The reader also accepts a single string as an entry, such as `"0": "EG"`, and uses it for both languages. Use the object form above when maintaining bilingual names or saved views.
@@ -100,17 +100,15 @@ A floor entry with both default views looks like this:
         "de": "EG",
         "en": "Ground floor",
         "views": {
-            "top": {
+            "2D": {
                 "position": [0, 40, 0.00001],
                 "target": [0, 0, 0],
-                "span": 18,
-                "mode": "top"
+                "span": 18
             },
-            "three": {
+            "3D": {
                 "position": [24, 22, 32],
                 "target": [0, 0, 0],
-                "span": 18,
-                "mode": "perspective"
+                "span": 18
             }
         }
     }
@@ -191,17 +189,15 @@ The full supported structure is:
         }
     ],
     "views": {
-        "top": {
+        "2D": {
             "position": [4, 20, -5.99999],
             "target": [4, 0, -6],
-            "span": 5,
-            "mode": "top"
+            "span": 5
         },
-        "three": {
+        "3D": {
             "position": [12, 8, 6],
             "target": [4, 1, -6],
-            "span": 5,
-            "mode": "perspective"
+            "span": 5
         }
     },
     "lastEditedBy": "Lea"
@@ -214,7 +210,7 @@ The full supported structure is:
 | `status` | `ok`, `problem` or `retired`; see the table below. | Ok. Unrecognized values also fall back to Ok. |
 | `transform` | Shared placement applied to the whole exhibit. | Identity: no movement or rotation, scale 1. |
 | `models` | Hardware instances, each with a `model` path and optional `transform`. | No hardware. |
-| `views` | Optional `top` and `three` camera presets. | Automatic framing of the exhibit's hardware. |
+| `views` | Optional `2D` and `3D` camera presets. | Automatic framing of the exhibit's hardware. |
 | `lastEditedBy` | The name from the last signed structural Save in edit mode. It is a single attribution, not a history. Status changes do not update it. | Empty. |
 
 | Stored status | German label | English label |
@@ -241,14 +237,15 @@ When supplying a transform, include all three arrays, each with exactly three fi
 
 #### Saved views: 2D and 3D
 
-Floors and exhibits use the same `views` format. The JSON keys are **`top` for 2D** and **`three` for 3D**, even though the interface uses the labels 2D and 3D. Either preset can be supplied independently. Omit a preset, or use `"views": {}`, to leave it automatic.
+Floors and exhibits use the same `views` format, with the keys **`2D`** and **`3D`**. Either preset can be supplied independently. Omit a preset, or use `"views": {}`, to leave it automatic. Each preset contains only `position`, `target` and `span`; the key already identifies the camera type, so no `mode` field is needed.
+
+Older files using `top` and `three` are still read as `2D` and `3D`. If both naming styles are present, the new key takes precedence. The old `mode` field is ignored. New app saves write only the new keys and omit `mode`; floor metadata is never rewritten automatically.
 
 | Preset field | Meaning |
 | --- | --- |
 | `position` | Camera location in world coordinates, as `[x, y, z]` in metres. |
 | `target` | World point the camera looks at and orbits around. |
 | `span` | Positive framing value. In 2D it is half the visible vertical extent in metres: `span: 5` shows 10 metres vertically before further zooming. 3D requires this field too, but its apparent size depends on camera distance and perspective. |
-| `mode` | `top` for the `top` preset; `perspective` for the `three` preset. Optional on manual input: the reader derives it from the preset key. |
 
 `position` and `target` must be different, and each must contain three finite numbers with absolute values at most `100000`. `span` must be greater than zero and at most `100000`. For a 2D preset, put the camera above its target. The small Z offset in the examples keeps the viewing direction just clear of the vertical pole. Camera positions and targets are world coordinates; they are **not** transformed with an exhibit when its hardware moves.
 

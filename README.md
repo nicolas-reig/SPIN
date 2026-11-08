@@ -123,6 +123,8 @@ Use self-contained **binary glTF 2.0 (`.glb`)** files containing meshes. Externa
 
 Export at the intended size, with one world unit representing one metre and Y as the vertical axis. The model's origin is its placement and rotation pivot. The app replaces imported mesh materials with its own floor, status and selection materials, so original model colors and textures do not control their appearance.
 
+All floor and hardware GLBs have their surface normals recalculated on load with a **30° smoothing threshold**. Faces meeting below that angle shade smoothly together; sharper edges retain a visible crease. This overrides exported normals in the viewer and leaves the GLB files unchanged.
+
 Exhibits instance these shared files. Several exhibits can use the same file, and one exhibit can contain several instances of it. Renaming or removing a hardware file also affects every exhibit that references that path.
 
 ### Exhibit folders

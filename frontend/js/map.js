@@ -9,6 +9,8 @@ import {
     TransformControls
 } from 'three/addons/controls/TransformControls.js';
 
+import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+
 import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, viewKey } from './camera.js';
 import { validTransform } from './domain.js';
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
@@ -30,6 +32,21 @@ function disposeMaterials(materials) {
         material.dispose();
     }
     for (const texture of textures) texture.dispose();
+}
+
+function smoothNormals(object) {
+    const geometries = new Map();
+    object.traverse(mesh => {
+        if (!mesh.isMesh) return;
+        const original = mesh.geometry;
+        if (!geometries.has(original)) {
+            geometries.set(original, toCreasedNormals(original, Math.PI / 6));
+        }
+        mesh.geometry = geometries.get(original);
+    });
+    for (const [original, smoothed] of geometries) {
+        if (original !== smoothed) original.dispose();
+    }
 }
 
 function replaceMaterials(object, material) {
@@ -243,6 +260,7 @@ export class MapView {
     async model(asset, material = this.materials.floor) {
         if (!asset) return new THREE.Group();
         const result = await this.loader.loadAsync(asset.url);
+        smoothNormals(result.scene);
         replaceMaterials(result.scene, material);
         return result.scene;
     }

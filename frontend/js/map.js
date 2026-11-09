@@ -14,6 +14,7 @@ import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, viewKey } from './camera.js';
 import { validTransform } from './domain.js';
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
+import { TopView } from './top-view.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -122,10 +123,13 @@ export class MapView {
         this.camera.position.set(28, 27, 33);
     }
     async init() {
-        if (new URLSearchParams(location.search).has('no3d')) throw Error('mapUnavailable');
+        const params = new URLSearchParams(location.search);
+        if (params.has('no3d')) throw Error('mapUnavailable');
+        const style = params.get('map2d');
+        this.topStyle = ['shaded', 'height', 'thickness'].includes(style) ? style : 'thickness';
         this.renderer = new THREE.WebGPURenderer({
             antialias: true,
-            forceWebGL: new URLSearchParams(location.search).has('webgl')
+            forceWebGL: params.has('webgl')
         });
         this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
         this.renderer.toneMapping = THREE.NeutralToneMapping;
@@ -251,6 +255,22 @@ export class MapView {
                 const offset = this.camera.position.clone().sub(this.controls.target);
                 this.renderer.domElement.dataset.cameraOffset = offset.toArray().join(',');
                 this.onCamera(this.navigationState());
+                const building = this.root.children.find(object => object.userData.floor);
+                if (this.mode === 'top' && building && this.topStyle !== 'shaded' && !this.topViewFailed && TopView.supported(this.renderer)) {
+                    try {
+                        this.topView ??= new TopView();
+                        if (this.topView.render(this.renderer, this.scene, this.camera, building, this.topStyle)) {
+                            this.renderer.domElement.dataset.map2d = this.topStyle;
+                            return;
+                        }
+                    } catch (error) {
+                        this.topViewFailed = true;
+                        this.topView?.dispose();
+                        this.topView = null;
+                        console.warn('Could not render the 2D style; using the shaded map.', error);
+                    }
+                }
+                this.renderer.domElement.dataset.map2d = 'shaded';
                 await this.renderer.renderAsync(this.scene, this.camera);
             } catch (e) {
                 this.onState('mapUnavailable');
@@ -266,6 +286,7 @@ export class MapView {
     }
     clearScene() {
         this.transform?.detach();
+        this.topView?.clear();
         this.scene.remove(this.root);
         dispose(this.root, this.sharedMaterials);
         this.root = new THREE.Group();
@@ -331,6 +352,7 @@ export class MapView {
                 dispose(next, this.sharedMaterials);
                 return;
             }
+            this.topView?.clear();
             this.scene.remove(this.root);
             dispose(this.root, this.sharedMaterials);
             this.root = next;
@@ -649,6 +671,7 @@ export class MapView {
         this.transform?.dispose();
         dispose(this.scene, this.sharedMaterials);
         disposeMaterials(this.sharedMaterials);
+        this.topView?.dispose();
         this.renderer?.dispose();
         this.renderer?.domElement.remove();
     }

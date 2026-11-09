@@ -1,6 +1,6 @@
 import {
     AddEquation, BufferAttribute, BufferGeometry, Color, CustomBlending, DoubleSide,
-    HalfFloatType, Mesh, MeshBasicNodeMaterial, NearestFilter, OneFactor, OrthographicCamera, RenderTarget, Scene, Vector2, Vector3
+    HalfFloatType, Mesh, MeshBasicNodeMaterial, NearestFilter, OneFactor, OrthographicCamera, QuadMesh, RenderTarget, Scene, Vector2, Vector3
 } from 'three';
 import { attribute, float, frontFacing, mix, positionWorld, screenUV, smoothstep, texture, uniform, vec2, vec4 } from 'three/tsl';
 
@@ -26,6 +26,31 @@ function closedGeometry(geometry) {
     return edges.size > 0 && [...edges.values()].every(balance => balance === 0);
 }
 
+function projectionBatches(meshes, closed) {
+    const solids = [];
+    const open = [];
+    for (const mesh of meshes) {
+        const { geometry, matrixWorld } = mesh;
+        if (!closed.has(geometry)) closed.set(geometry, closedGeometry(geometry));
+        if (closed.get(geometry)) {
+            solids.push(mesh);
+            continue;
+        }
+        if (!geometry.boundingBox) geometry.computeBoundingBox();
+        if (geometry.boundingBox.isEmpty()) continue;
+        const bounds = geometry.boundingBox.clone().applyMatrix4(matrixWorld);
+        // Allow for the orbit controls' small tilt away from a perfectly vertical view.
+        bounds.expandByScalar(1e-5 + 2e-6 * Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)));
+        // Open meshes can share a pass only where their vertical columns do not overlap.
+        const batch = open.find(parts => parts.every(part =>
+            bounds.max.x < part.bounds.min.x || bounds.min.x > part.bounds.max.x ||
+            bounds.max.z < part.bounds.min.z || bounds.min.z > part.bounds.max.z));
+        if (batch) batch.push({ mesh, bounds });
+        else open.push([{ mesh, bounds }]);
+    }
+    return [solids, ...open.map(parts => parts.map(({ mesh }) => mesh))];
+}
+
 function projectionGeometry(building, meshes, closed) {
     const count = meshes.reduce((sum, { geometry }) => sum + (geometry.index?.count ?? geometry.attributes.position.count), 0);
     if (!count || meshes.some(mesh => mesh.isSkinnedMesh || mesh.isInstancedMesh || mesh.morphTargetInfluences?.some(Boolean))) return null;
@@ -33,19 +58,23 @@ function projectionGeometry(building, meshes, closed) {
     const positions = new Float32Array(count * 3);
     const solids = new Float32Array(count);
     const point = new Vector3();
+    const ranges = [];
     let cursor = 0;
-    for (const mesh of meshes) {
-        const { geometry, matrixWorld } = mesh;
-        const { index, attributes: { position } } = geometry;
-        if (!closed.has(geometry)) closed.set(geometry, closedGeometry(geometry));
-        const end = index?.count ?? position.count;
-        if (closed.get(geometry)) solids.fill(1, cursor, cursor + end);
-        const mirrored = matrixWorld.determinant() < 0;
-        for (let i = 0; i < end; i++) {
-            const corner = i % 3;
-            const vertex = mirrored && corner ? i + 3 - 2 * corner : i;
-            point.fromBufferAttribute(position, index ? index.getX(vertex) : vertex).applyMatrix4(matrixWorld).toArray(positions, cursor++ * 3);
+    for (const batch of projectionBatches(meshes, closed)) {
+        const start = cursor;
+        for (const mesh of batch) {
+            const { geometry, matrixWorld } = mesh;
+            const { index, attributes: { position } } = geometry;
+            const end = index?.count ?? position.count;
+            if (closed.get(geometry)) solids.fill(1, cursor, cursor + end);
+            const mirrored = matrixWorld.determinant() < 0;
+            for (let i = 0; i < end; i++) {
+                const corner = i % 3;
+                const vertex = mirrored && corner ? i + 3 - 2 * corner : i;
+                point.fromBufferAttribute(position, index ? index.getX(vertex) : vertex).applyMatrix4(matrixWorld).toArray(positions, cursor++ * 3);
+            }
         }
+        ranges.push([start, cursor - start]);
     }
 
     // The largest horizontal surface gives each floor its own height reference.
@@ -67,12 +96,17 @@ function projectionGeometry(building, meshes, closed) {
     geometry.setAttribute('position', new BufferAttribute(positions, 3));
     geometry.setAttribute('closed', new BufferAttribute(solids, 1));
     geometry.computeBoundingSphere();
-    return { geometry, height };
+    return { geometry, height, ranges };
 }
 
 function target(depthBuffer) {
     return new RenderTarget(1, 1, { type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter, depthBuffer });
 }
+
+const additivePass = {
+    toneMapped: false, transparent: true, depthTest: false, depthWrite: false, blending: CustomBlending,
+    blendEquation: AddEquation, blendSrc: OneFactor, blendDst: OneFactor
+};
 
 export class TopView {
     static supported(renderer) {
@@ -83,6 +117,7 @@ export class TopView {
     constructor() {
         this.surface = target(true);
         this.thickness = target(false);
+        this.openColumn = target(false);
         this.reference = uniform(0);
         this.useThickness = uniform(0);
         this.step = uniform(new Vector2());
@@ -97,21 +132,27 @@ export class TopView {
         const height = positionWorld.y.sub(this.reference);
         this.surfaceMaterial.fragmentNode = vec4(height, 0, 0, 1);
         this.thicknessMaterial = new MeshBasicNodeMaterial({
-            side: DoubleSide, toneMapped: false, transparent: true, forceSinglePass: true,
-            depthTest: false, depthWrite: false, blending: CustomBlending,
-            blendEquation: AddEquation, blendSrc: OneFactor, blendDst: OneFactor
+            ...additivePass, side: DoubleSide, forceSinglePass: true
         });
         // Adding top faces and subtracting bottom faces leaves the solid length along each ray.
         const direction = frontFacing.select(1, -1);
         const signedHeight = height.mul(direction);
         const solid = attribute('closed', 'float');
         const open = float(1).sub(solid);
-        this.thicknessMaterial.fragmentNode = vec4(signedHeight.mul(solid), signedHeight.mul(open), direction.mul(open), 1);
+        this.thicknessMaterial.fragmentNode = vec4(signedHeight.mul(solid), signedHeight.mul(open), direction.mul(open), 0);
+
+        const isolated = texture(this.openColumn.texture, screenUV);
+        const balanced = isolated.b.abs().lessThan(.5);
+        const resolve = new MeshBasicNodeMaterial(additivePass);
+        // Keep paired crossings before other open surfaces can invalidate them. Unpaired
+        // crossings can still match across mesh parts, as with a solid split by material.
+        resolve.fragmentNode = vec4(0, balanced.select(0, isolated.g), isolated.b, balanced.select(isolated.g.max(0), 0));
+        this.resolve = new QuadMesh(resolve);
 
         const surface = texture(this.surface.texture, screenUV);
         const column = texture(this.thickness.texture, screenUV);
         // Keep known solid contributions even where an open surface has no matching exit.
-        const depth = column.r.max(0).add(column.b.abs().lessThan(.5).select(column.g.max(0), 0));
+        const depth = column.r.max(0).add(column.a, column.b.abs().lessThan(.5).select(column.g.max(0), 0));
         const amount = float(1).sub(depth.mul(-1.1).exp());
         const lift = smoothstep(.025, 1.35, surface.r);
         const fill = mix(lift.mul(.53), amount.mul(.93).max(lift.mul(.44)), this.useThickness);
@@ -140,6 +181,27 @@ export class TopView {
         if (!projected) return;
         this.mesh.geometry = projected.geometry;
         this.reference.value = projected.height;
+        this.ranges = projected.ranges;
+    }
+
+    renderThickness(renderer, camera, width, height) {
+        const [solid, ...open] = this.ranges;
+        this.mesh.material = this.thicknessMaterial;
+        this.mesh.geometry.setDrawRange(...solid);
+        renderer.setRenderTarget(this.thickness);
+        renderer.render(this.projection, camera);
+        if (!open.length) return;
+
+        this.openColumn.setSize(width, height);
+        for (const range of open) {
+            this.mesh.geometry.setDrawRange(...range);
+            renderer.autoClear = true;
+            renderer.setRenderTarget(this.openColumn);
+            renderer.render(this.projection, camera);
+            renderer.autoClear = false;
+            renderer.setRenderTarget(this.thickness);
+            this.resolve.render(renderer);
+        }
     }
 
     render(renderer, scene, camera, building, style) {
@@ -168,22 +230,24 @@ export class TopView {
             projectionCamera.updateProjectionMatrix();
             const previousTarget = renderer.getRenderTarget();
             const clearAlpha = renderer.getClearAlpha();
+            const autoClear = renderer.autoClear;
             renderer.getClearColor(this.clearColor);
             try {
                 renderer.setClearColor(0, 0);
-                renderer.setRenderTarget(this.surface);
+                renderer.autoClear = true;
                 this.mesh.material = this.surfaceMaterial;
+                renderer.setRenderTarget(this.surface);
                 renderer.render(this.projection, projectionCamera);
                 if (this.useThickness.value) {
-                    renderer.setRenderTarget(this.thickness);
-                    this.mesh.material = this.thicknessMaterial;
-                    renderer.render(this.projection, projectionCamera);
+                    this.renderThickness(renderer, projectionCamera, width, height);
                 } else {
                     renderer.setRenderTarget(this.thickness);
                     renderer.clear();
                 }
                 this.key = key;
             } finally {
+                this.mesh.geometry.setDrawRange(0, Infinity);
+                renderer.autoClear = autoClear;
                 renderer.setRenderTarget(previousTarget);
                 renderer.setClearColor(this.clearColor, clearAlpha);
             }
@@ -212,6 +276,8 @@ export class TopView {
         this.mesh.geometry.dispose();
         this.surface.dispose();
         this.thickness.dispose();
+        this.openColumn.dispose();
+        this.resolve.material.dispose();
         this.surfaceMaterial.dispose();
         this.thicknessMaterial.dispose();
         this.material.dispose();

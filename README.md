@@ -52,9 +52,7 @@ Each direct child folder of `Assets/Floors/` represents a floor. Its name must b
 
 Put the floor's 3D building model at **`Floors/<number>/model.glb`**. That filename is fixed. An integer folder is discovered even without a model; add `model.glb` to give it building geometry. Adding an entry to `.floors.json` alone does not create a floor.
 
-The 2D view cuts the floor model 1.1 metres above its main floor surface. Walls at that height are filled dark, overhead geometry is hidden, and furniture below the cut remains visible. Doorways appear as gaps where the model has an opening at the cut height. Add `cutHeight=1.4` to the app URL to try a different height in metres (0.2 to 4).
-
-To compare styles, use `map2d=thickness` for material thickness, `map2d=height` for surface height and outlines, or `map2d=shaded` for the original lighting. Use `map2d=section` to return to the cut. All styles use the same model and saved views.
+The 2D view shows the floor model from above, with outlines and shading based on estimated material thickness and surface height. To compare styles, add `map2d=height` to the app URL for outlines and surface height, or `map2d=shaded` for the original lighting. Use `map2d=thickness` to return to the thickness view. These styles use the same model and saved views.
 
 Floor placement is baked into the exported model. There is no supported floor `transform` field in `.floors.json`. The floor model and hardware library are maintained through files, rather than edited or uploaded in the app.
 

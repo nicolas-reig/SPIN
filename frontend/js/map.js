@@ -126,9 +126,7 @@ export class MapView {
         const params = new URLSearchParams(location.search);
         if (params.has('no3d')) throw Error('mapUnavailable');
         const style = params.get('map2d');
-        this.topStyle = ['shaded', 'height', 'thickness', 'section'].includes(style) ? style : 'section';
-        const cutHeight = Number(params.get('cutHeight'));
-        this.cutHeight = cutHeight >= .2 && cutHeight <= 4 ? cutHeight : 1.1;
+        this.topStyle = ['shaded', 'height', 'thickness'].includes(style) ? style : 'thickness';
         this.renderer = new THREE.WebGPURenderer({
             antialias: true,
             forceWebGL: params.has('webgl')
@@ -261,7 +259,7 @@ export class MapView {
                 if (this.mode === 'top' && building && this.topStyle !== 'shaded' && !this.topViewFailed && TopView.supported(this.renderer)) {
                     try {
                         this.topView ??= new TopView();
-                        if (this.topView.render(this.renderer, this.scene, this.camera, building, this.topStyle, this.cutHeight)) {
+                        if (this.topView.render(this.renderer, this.scene, this.camera, building, this.topStyle)) {
                             this.renderer.domElement.dataset.map2d = this.topStyle;
                             return;
                         }

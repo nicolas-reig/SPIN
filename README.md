@@ -17,8 +17,7 @@ digitaltwin/
 │   │   ├── -1/
 │   │   │   └── model.glb
 │   │   └── 0/
-│   │       ├── model.glb
-│   │       └── plan.svg
+│   │       └── model.glb
 │   └── HardwareModels/
 │       ├── Display.glb
 │       └── LED Wall.glb
@@ -53,7 +52,7 @@ Each direct child folder of `Assets/Floors/` represents a floor. Its name must b
 
 Put the floor's 3D building model at **`Floors/<number>/model.glb`**. That filename is fixed. An integer folder is discovered even without a model; add `model.glb` to give it building geometry. Adding an entry to `.floors.json` alone does not create a floor.
 
-An optional **`plan.svg`** supplies a drawing for the 2D view. Its coordinates must match the model: SVG `x` corresponds to world X, SVG `y` to world Z, and one drawing unit corresponds to one metre. A `viewBox` defines the drawing's bounds for automatic framing. Use inline drawing primitives such as paths, rectangles, lines and text; scripts, external images, stylesheets and other external resources are not imported. Without a usable plan, 2D uses the top view of the 3D geometry.
+The 2D view shows the same floor model from above.
 
 Floor placement is baked into the exported model. There is no supported floor `transform` field in `.floors.json`. The floor model and hardware library are maintained through files, rather than edited or uploaded in the app.
 
@@ -251,7 +250,7 @@ Older files using `top` and `three` are still read as `2D` and `3D`. If both nam
 
 `position` and `target` must be different, and each must contain three finite numbers with absolute values at most `100000`. `span` must be greater than zero and at most `100000`. For a 2D preset, put the camera above its target. The small Z offset in the examples keeps the viewing direction just clear of the vertical pole. Camera positions and targets are world coordinates; they are **not** transformed with an exhibit when its hardware moves.
 
-The app ignores invalid individual presets and uses automatic framing instead. Selecting an exhibit that is outside the visible map uses its preset for the current mode, or calculates a view from its hardware if none is saved. The Focus control uses the same presets. Floor framing uses its saved view when available, otherwise the building bounds; a usable SVG `viewBox` takes priority for initial 2D floor framing.
+The app ignores invalid individual presets and uses automatic framing instead. Selecting an exhibit that is outside the visible map uses its preset for the current mode, or calculates a view from its hardware if none is saved. The Focus control uses the same presets. Floor framing uses its saved view when available, otherwise the building bounds.
 
 The app calculates identifiers, revision hashes and content tags while reading files. Do not add `id`, `name`, `floorId`, `placed`, `revision`, `structureRevision`, `contentTag` or journal records to these JSON files. Structural saves rewrite `.exhibit.json` with the supported fields listed above; extra custom fields will not be preserved by that save.
 
@@ -320,6 +319,6 @@ The shortcut stores only a destination, not a copy of its document. The target c
 
 Save JSON as UTF-8 using double quotes, without comments or trailing commas. Invalid JSON in either metadata file prevents the dataset from loading; a missing file is safe and uses the defaults described above. Only the documented metadata files are read—adding another JSON file does not register new content. Symbolic links are not supported for content roots or recognized content files and folders.
 
-Changes to posts, links and metadata are normally picked up within about 15 seconds while the app is visible and idle. Refreshing pauses during active editing, so finish or cancel the current edit before expecting external changes to appear. Reload the page after replacing a GLB or SVG to ensure the newly exported asset is loaded.
+Changes to posts, links and metadata are normally picked up within about 15 seconds while the app is visible and idle. Refreshing pauses during active editing, so finish or cancel the current edit before expecting external changes to appear. Reload the page after replacing a GLB to ensure the newly exported model is loaded.
 
 When editing files outside the app, avoid saving over the same exhibit at the same time as someone saving in the app. App saves are serialized and check for conflicting changes, but a text editor does not participate in that locking. For metadata updates, saving to a temporary file and then renaming it over the original avoids exposing half-written JSON. Keep backups of both content roots; there is no separate journal or version history to recover removed content.

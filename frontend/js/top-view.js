@@ -127,7 +127,7 @@ function ambientOcclusion(surface, reach, radius) {
             }
             totalWeight += weight * 2;
         }
-        return obscured.mul(.94 / totalWeight);
+        return obscured.mul(.72 / totalWeight);
     })();
 }
 
@@ -280,7 +280,7 @@ export class TopView {
             const viewWidth = (camera.right - camera.left) / camera.zoom;
             const viewHeight = (camera.top - camera.bottom) / camera.zoom;
             // Keep the falloff consistent across display densities.
-            const occlusionRadius = Math.min(.9, 34 * pixelRatio * viewHeight / height);
+            const occlusionRadius = Math.min(.76, 29 * pixelRatio * viewHeight / height);
             this.occlusionRadius.value = occlusionRadius;
             this.occlusionReach.value.set(occlusionRadius / viewWidth, occlusionRadius / viewHeight);
             // Move the sampling camera back along its axis so zoom and saved views cannot clip the column.

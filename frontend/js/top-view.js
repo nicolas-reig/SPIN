@@ -1,6 +1,7 @@
 import {
     AddEquation, BufferAttribute, BufferGeometry, Color, CustomBlending, DoubleSide,
-    HalfFloatType, Mesh, MeshBasicNodeMaterial, NearestFilter, OneFactor, OrthographicCamera, QuadMesh, RenderTarget, Scene, Vector2, Vector3
+    HalfFloatType, LinearFilter, Mesh, MeshBasicNodeMaterial,
+    NearestFilter, OneFactor, OrthographicCamera, QuadMesh, RenderTarget, Scene, Vector2, Vector3
 } from 'three';
 import { attribute, float, Fn, frontFacing, If, mix, positionWorld, screenUV, smoothstep, texture, uniform, vec2, vec4 } from 'three/tsl';
 
@@ -99,33 +100,56 @@ function projectionGeometry(building, meshes, closed) {
     return { geometry, height, ranges };
 }
 
-function target(depthBuffer) {
-    return new RenderTarget(1, 1, { type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter, depthBuffer });
+function target(depthBuffer, filter = NearestFilter) {
+    return new RenderTarget(1, 1, { type: HalfFloatType, minFilter: filter, magFilter: filter, depthBuffer });
 }
 
-function ambientOcclusion(surface, reach, radius, enabled) {
+function ambientOcclusion(surface, reach, radius) {
     return Fn(() => {
         const obscured = float(0).toVar();
-        If(enabled.greaterThan(.5), () => {
-            const directions = 8;
-            for (let i = 0; i < directions; i++) {
-                const angle = (i + .5) * 2 * Math.PI / directions;
-                const axis = reach.mul(vec2(Math.cos(angle), Math.sin(angle)));
-                let horizon = float(0);
-                for (const fraction of [.09, .23, .41, .62, .86]) {
-                    const neighbor = surface.sample(screenUV.add(axis.mul(fraction)));
-                    const distance = radius.mul(fraction);
-                    // Ignore small height changes and shallow slopes.
-                    const rise = neighbor.r.sub(surface.r).sub(distance.mul(.28)).sub(.025).max(0);
-                    const riseSquared = rise.pow2();
-                    const blocked = riseSquared.div(riseSquared.add(distance.pow2()));
-                    horizon = horizon.max(blocked.mul(neighbor.a).mul((1 - fraction) ** 1.2));
-                }
-                obscured.addAssign(horizon);
+        const pairs = 24;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+        let totalWeight = 0;
+        // Spread the taps across the disk to avoid repeated bands around edges.
+        for (let i = 0; i < pairs; i++) {
+            const fraction = .05 + .9 * (i + .5) / pairs;
+            const angle = i * goldenAngle / 2;
+            const offset = reach.mul(vec2(Math.cos(angle) * fraction, Math.sin(angle) * fraction));
+            const distance = radius.mul(fraction);
+            const weight = (1 - fraction) ** 1.2;
+            for (const uv of [screenUV.add(offset), screenUV.sub(offset)]) {
+                const neighbor = surface.sample(uv);
+                // Ignore small height changes and shallow slopes.
+                const rise = neighbor.r.sub(surface.r).sub(distance.mul(.28)).sub(.025).max(0);
+                const riseSquared = rise.pow2();
+                const blocked = riseSquared.div(riseSquared.add(distance.pow2()));
+                obscured.addAssign(blocked.mul(neighbor.a).mul(weight));
             }
-            obscured.mulAssign(.5 / directions);
+            totalWeight += weight * 2;
+        }
+        return obscured.mul(.94 / totalWeight);
+    })();
+}
+
+function softenOcclusion(field, height, reach, enabled) {
+    return Fn(() => {
+        const shadow = float(0).toVar();
+        If(enabled.greaterThan(.5), () => {
+            const weightSum = float(0).toVar();
+            for (const y of [-1, 0, 1]) {
+                for (const x of [-1, 0, 1]) {
+                    const neighbor = field.sample(screenUV.add(reach.mul(vec2(x * .17, y * .17))));
+                    // Blur along the surface so shadows stay off the tops of nearby objects.
+                    const difference = neighbor.g.sub(height).abs();
+                    const match = smoothstep(.04, .20, difference).oneMinus();
+                    const weight = match.mul(neighbor.a).mul((2 - Math.abs(x)) * (2 - Math.abs(y)));
+                    shadow.addAssign(neighbor.r.mul(weight));
+                    weightSum.addAssign(weight);
+                }
+            }
+            shadow.divAssign(weightSum.max(.001));
         });
-        return obscured;
+        return shadow;
     })();
 }
 
@@ -144,6 +168,7 @@ export class TopView {
         this.surface = target(true);
         this.thickness = target(false);
         this.openColumn = target(false);
+        this.occlusion = target(false, LinearFilter);
         this.reference = uniform(0);
         this.useThickness = uniform(0);
         this.step = uniform(new Vector2());
@@ -178,6 +203,10 @@ export class TopView {
         this.resolve = new QuadMesh(resolve);
 
         const surface = texture(this.surface.texture, screenUV);
+        const occlusionMaterial = new MeshBasicNodeMaterial({ toneMapped: false, depthTest: false, depthWrite: false });
+        const occlusion = ambientOcclusion(surface, this.occlusionReach, this.occlusionRadius);
+        occlusionMaterial.fragmentNode = vec4(occlusion, surface.r, 0, surface.a);
+        this.occlusionPass = new QuadMesh(occlusionMaterial);
         const column = texture(this.thickness.texture, screenUV);
         // Keep known solid contributions even where an open surface has no matching exit.
         const depth = column.r.max(0).add(column.a, column.b.abs().lessThan(.5).select(column.g.max(0), 0));
@@ -194,7 +223,7 @@ export class TopView {
         const paper = uniform(new Color('#f6f7f8'));
         const ink = uniform(new Color('#5e6871'));
         const outline = uniform(new Color('#6c7680'));
-        const shadow = ambientOcclusion(surface, this.occlusionReach, this.occlusionRadius, this.useThickness);
+        const shadow = softenOcclusion(texture(this.occlusion.texture, screenUV), surface.r, this.occlusionReach, this.useThickness);
         const shaded = mix(mix(paper, ink, fill), ink, shadow);
         this.material.colorNode = mix(shaded, outline, edge.mul(.62));
         this.mesh = new Mesh(new BufferGeometry(), this.surfaceMaterial);
@@ -237,22 +266,21 @@ export class TopView {
     render(renderer, scene, camera, building, style) {
         this.prepare(building);
         if (!this.ready) return false;
-        const { x, y } = renderer.getSize(this.size);
-        if (!x || !y) return false;
-        const scale = Math.min(1, 2048 / Math.max(x, y));
-        const width = Math.max(1, Math.round(x * scale));
-        const height = Math.max(1, Math.round(y * scale));
+        // Measure each ray at the pixel density used to draw the model.
+        const { x: width, y: height } = renderer.getDrawingBufferSize(this.size);
+        if (!width || !height) return false;
+        const pixelRatio = renderer.getPixelRatio();
         this.useThickness.value = style === 'thickness' ? 1 : 0;
         camera.updateMatrixWorld();
-        const key = [width, height, style, ...camera.matrixWorld.elements, ...camera.projectionMatrix.elements].join(',');
+        const key = [width, height, pixelRatio, style, ...camera.matrixWorld.elements, ...camera.projectionMatrix.elements].join(',');
         if (key !== this.key) {
             this.surface.setSize(width, height);
             this.thickness.setSize(width, height);
-            this.step.value.set(1 / width, 1 / height);
+            this.step.value.set(pixelRatio / width, pixelRatio / height);
             const viewWidth = (camera.right - camera.left) / camera.zoom;
             const viewHeight = (camera.top - camera.bottom) / camera.zoom;
-            // Limit the reach in model units and in texels at close zoom.
-            const occlusionRadius = Math.min(.62, 24 * viewHeight / height);
+            // Keep the falloff consistent across display densities.
+            const occlusionRadius = Math.min(.9, 34 * pixelRatio * viewHeight / height);
             this.occlusionRadius.value = occlusionRadius;
             this.occlusionReach.value.set(occlusionRadius / viewWidth, occlusionRadius / viewHeight);
             // Move the sampling camera back along its axis so zoom and saved views cannot clip the column.
@@ -276,6 +304,11 @@ export class TopView {
                 renderer.render(this.projection, projectionCamera);
                 if (this.useThickness.value) {
                     this.renderThickness(renderer, projectionCamera, width, height);
+                    // Shadows are diffuse; use one sample per logical pixel for the mask.
+                    this.occlusion.setSize(Math.ceil(width / pixelRatio), Math.ceil(height / pixelRatio));
+                    renderer.autoClear = true;
+                    renderer.setRenderTarget(this.occlusion);
+                    this.occlusionPass.render(renderer);
                 } else {
                     renderer.setRenderTarget(this.thickness);
                     renderer.clear();
@@ -313,6 +346,8 @@ export class TopView {
         this.surface.dispose();
         this.thickness.dispose();
         this.openColumn.dispose();
+        this.occlusion.dispose();
+        this.occlusionPass.material.dispose();
         this.resolve.material.dispose();
         this.surfaceMaterial.dispose();
         this.thicknessMaterial.dispose();

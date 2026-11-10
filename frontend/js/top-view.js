@@ -2,7 +2,7 @@ import {
     AddEquation, BufferAttribute, BufferGeometry, Color, CustomBlending, DoubleSide,
     HalfFloatType, Mesh, MeshBasicNodeMaterial, NearestFilter, OneFactor, OrthographicCamera, QuadMesh, RenderTarget, Scene, Vector2, Vector3
 } from 'three';
-import { attribute, float, frontFacing, mix, positionWorld, screenUV, smoothstep, texture, uniform, vec2, vec4 } from 'three/tsl';
+import { attribute, float, Fn, frontFacing, If, mix, positionWorld, screenUV, smoothstep, texture, uniform, vec2, vec4 } from 'three/tsl';
 
 function closedGeometry(geometry) {
     const position = geometry.attributes.position;
@@ -103,6 +103,32 @@ function target(depthBuffer) {
     return new RenderTarget(1, 1, { type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter, depthBuffer });
 }
 
+function ambientOcclusion(surface, reach, radius, enabled) {
+    return Fn(() => {
+        const obscured = float(0).toVar();
+        If(enabled.greaterThan(.5), () => {
+            const directions = 8;
+            for (let i = 0; i < directions; i++) {
+                const angle = (i + .5) * 2 * Math.PI / directions;
+                const axis = reach.mul(vec2(Math.cos(angle), Math.sin(angle)));
+                let horizon = float(0);
+                for (const fraction of [.09, .23, .41, .62, .86]) {
+                    const neighbor = surface.sample(screenUV.add(axis.mul(fraction)));
+                    const distance = radius.mul(fraction);
+                    // Ignore small height changes and shallow slopes.
+                    const rise = neighbor.r.sub(surface.r).sub(distance.mul(.28)).sub(.025).max(0);
+                    const riseSquared = rise.pow2();
+                    const blocked = riseSquared.div(riseSquared.add(distance.pow2()));
+                    horizon = horizon.max(blocked.mul(neighbor.a).mul((1 - fraction) ** 1.2));
+                }
+                obscured.addAssign(horizon);
+            }
+            obscured.mulAssign(.5 / directions);
+        });
+        return obscured;
+    })();
+}
+
 const additivePass = {
     toneMapped: false, transparent: true, depthTest: false, depthWrite: false, blending: CustomBlending,
     blendEquation: AddEquation, blendSrc: OneFactor, blendDst: OneFactor
@@ -121,6 +147,8 @@ export class TopView {
         this.reference = uniform(0);
         this.useThickness = uniform(0);
         this.step = uniform(new Vector2());
+        this.occlusionReach = uniform(new Vector2());
+        this.occlusionRadius = uniform(0);
         this.closed = new WeakMap();
         this.size = new Vector2();
         this.direction = new Vector3();
@@ -166,7 +194,9 @@ export class TopView {
         const paper = uniform(new Color('#f6f7f8'));
         const ink = uniform(new Color('#5e6871'));
         const outline = uniform(new Color('#6c7680'));
-        this.material.colorNode = mix(mix(paper, ink, fill), outline, edge.mul(.62));
+        const shadow = ambientOcclusion(surface, this.occlusionReach, this.occlusionRadius, this.useThickness);
+        const shaded = mix(mix(paper, ink, fill), ink, shadow);
+        this.material.colorNode = mix(shaded, outline, edge.mul(.62));
         this.mesh = new Mesh(new BufferGeometry(), this.surfaceMaterial);
         this.projection.add(this.mesh);
     }
@@ -219,6 +249,12 @@ export class TopView {
             this.surface.setSize(width, height);
             this.thickness.setSize(width, height);
             this.step.value.set(1 / width, 1 / height);
+            const viewWidth = (camera.right - camera.left) / camera.zoom;
+            const viewHeight = (camera.top - camera.bottom) / camera.zoom;
+            // Limit the reach in model units and in texels at close zoom.
+            const occlusionRadius = Math.min(.62, 24 * viewHeight / height);
+            this.occlusionRadius.value = occlusionRadius;
+            this.occlusionReach.value.set(occlusionRadius / viewWidth, occlusionRadius / viewHeight);
             // Move the sampling camera back along its axis so zoom and saved views cannot clip the column.
             const projectionCamera = this.projectionCamera.copy(camera);
             const { center, radius } = this.mesh.geometry.boundingSphere;

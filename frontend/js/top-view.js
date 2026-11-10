@@ -1,9 +1,10 @@
 import {
     AddEquation, BufferAttribute, BufferGeometry, Color, CustomBlending, DoubleSide,
     HalfFloatType, LinearFilter, Mesh, MeshBasicNodeMaterial,
-    NearestFilter, OneFactor, OrthographicCamera, QuadMesh, RenderTarget, Scene, Vector2, Vector3
+    NearestFilter, OneFactor, OrthographicCamera, PostProcessing, QuadMesh, RenderTarget, Scene, Vector2, Vector3
 } from 'three';
 import { attribute, float, Fn, frontFacing, If, mix, positionWorld, screenUV, smoothstep, texture, uniform, vec2, vec4 } from 'three/tsl';
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
 
 function closedGeometry(geometry) {
     const position = geometry.attributes.position;
@@ -164,11 +165,14 @@ export class TopView {
         return renderer.backend.extensions.has('EXT_color_buffer_float') || renderer.backend.extensions.has('EXT_color_buffer_half_float');
     }
 
-    constructor() {
+    constructor(renderer) {
         this.surface = target(true);
         this.thickness = target(false);
         this.openColumn = target(false);
         this.occlusion = target(false, LinearFilter);
+        this.colorFrame = new RenderTarget(1, 1, { depthBuffer: false });
+        this.antialias = new PostProcessing(renderer, fxaa(texture(this.colorFrame.texture).level(0)));
+        this.antialias.outputColorTransform = false;
         this.reference = uniform(0);
         this.useThickness = uniform(0);
         this.step = uniform(new Vector2());
@@ -323,11 +327,28 @@ export class TopView {
         }
 
         const original = this.meshes.map(mesh => mesh.material);
+        const previousTarget = renderer.getRenderTarget();
+        const previousOutput = renderer.getOutputRenderTarget();
         try {
             for (const mesh of this.meshes) mesh.material = this.material;
+            // Capture the normal display colors so FXAA runs after tone mapping.
+            this.colorFrame.setSize(width, height);
+            renderer.setOutputRenderTarget(this.colorFrame);
+            renderer.setRenderTarget(this.colorFrame);
             renderer.render(scene, camera);
         } finally {
+            renderer.setOutputRenderTarget(previousOutput);
+            renderer.setRenderTarget(previousTarget);
             this.meshes.forEach((mesh, index) => { mesh.material = original[index]; });
+        }
+        const { toneMapping, outputColorSpace } = renderer;
+        const xrEnabled = renderer.xr.enabled;
+        try {
+            this.antialias.render();
+        } finally {
+            renderer.toneMapping = toneMapping;
+            renderer.outputColorSpace = outputColorSpace;
+            renderer.xr.enabled = xrEnabled;
         }
         return true;
     }
@@ -347,6 +368,8 @@ export class TopView {
         this.thickness.dispose();
         this.openColumn.dispose();
         this.occlusion.dispose();
+        this.colorFrame.dispose();
+        this.antialias.dispose();
         this.occlusionPass.material.dispose();
         this.resolve.material.dispose();
         this.surfaceMaterial.dispose();

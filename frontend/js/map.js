@@ -258,7 +258,7 @@ export class MapView {
                 const building = this.root.children.find(object => object.userData.floor);
                 if (this.mode === 'top' && building && this.topStyle !== 'shaded' && !this.topViewFailed && TopView.supported(this.renderer)) {
                     try {
-                        this.topView ??= new TopView();
+                        this.topView ??= new TopView(this.renderer);
                         if (this.topView.render(this.renderer, this.scene, this.camera, building, this.topStyle)) {
                             this.renderer.domElement.dataset.map2d = this.topStyle;
                             return;

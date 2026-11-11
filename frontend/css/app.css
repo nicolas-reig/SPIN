@@ -274,6 +274,20 @@ small,
     background: #18263409;
 }
 
+.item-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+}
+
+.item-actions > .icon-button,
+.item-actions > details > summary {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+}
+
 .lucide {
     display: block;
     width: 18px;
@@ -1801,7 +1815,8 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 .edit-attribution {
     font-size: .8125rem;
     color: var(--muted);
-    max-width: 80%;
+    min-width: 0;
+    max-width: calc(100% - 84px);
 }
 
 .edit-attribution summary {
@@ -2510,14 +2525,9 @@ button.edit-session-label {
     overflow-wrap: anywhere;
 }
 
-.editor-menu, .instance-menu, .hardware-picker, .exhibit-options, .transform-options {
+.hardware-picker, .transform-options {
     position: relative;
     flex-shrink: 0;
-}
-
-.editor-menu .popover, .instance-menu .popover, .exhibit-options .popover {
-    width: 200px;
-    padding: 6px;
 }
 
 .hardware-picker .popover {
@@ -2550,25 +2560,21 @@ button.edit-session-label {
     font-size: .8125rem;
 }
 
-.exhibit-options > summary {
-    width: 30px;
-    height: 44px;
-}
 body.editing .exhibit-row {
-    padding-right: 44px;
+    padding-right: 90px;
 }
-.exhibit-entry .exhibit-options {
+.exhibit-entry .exhibit-actions {
     position: absolute;
     top: 50%;
     right: 6px;
     transform: translateY(-50%);
 }
 
-.exhibit-row.active + .exhibit-options > summary {
+.exhibit-row.active + .exhibit-actions > button {
     color: #fff;
 }
 
-.exhibit-row.active + .exhibit-options > summary:hover {
+.exhibit-row.active + .exhibit-actions > button:hover:not(:disabled) {
     background: #ffffff24;
 }
 
@@ -2612,10 +2618,6 @@ body.editing .exhibit-row {
 .instance-name[aria-pressed=true] {
     color: var(--accent);
 }
-.instance-menu > summary {
-    margin: 0 -6px 0 0;
-}
-
 .instance-placement {
     margin-top: 2px;
 }
@@ -2823,8 +2825,9 @@ body.editing .exhibit-row {
     .instance-placement > summary, .exhibit-transform > summary, .view-presets > summary {
         min-height: 44px;
     }
-    .instance-menu > summary, .exhibit-options > summary, .hardware-picker > summary {
+    .item-actions > .icon-button, .item-actions > details > summary, .hardware-picker > summary {
         width: 44px;
+        height: 44px;
         min-height: 44px;
     }
 
@@ -2834,7 +2837,7 @@ body.editing .exhibit-row {
         min-height: 44px;
     }
     body.editing .exhibit-row {
-        padding-right: 60px;
+        padding-right: 110px;
     }
     .conflict-card {
         padding: 16px;

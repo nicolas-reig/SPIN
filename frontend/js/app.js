@@ -1496,6 +1496,8 @@ function commitCreation() {
         if (record.floorId) floorId = record.floorId;
         activeInstance = 0;
         changed();
+        const picker = $('.hardware-picker');
+        if (record.floorId && picker?.querySelector('[data-add-hardware]')) picker.open = true;
         return true;
     } catch (error) {
         creationOpen = true;

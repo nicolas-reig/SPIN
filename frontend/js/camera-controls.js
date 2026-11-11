@@ -4,7 +4,7 @@ import { t } from './locale.js';
 import { cardinalDirection, normalizeHeading } from './camera.js';
 
 export class CameraControls {
-    constructor(host, { getView, id, mode = 'top', focus = null, canFocus = () => true, extras = '' }) {
+    constructor(host, { getView, id, mode = 'top', focus = null, canFocus = () => true }) {
         this.host = host;
         this.getView = getView;
         this.canFocus = canFocus;
@@ -20,7 +20,6 @@ export class CameraControls {
                 <span class="toolbar-divider" aria-hidden="true"></span>
                 ${button(focus ? 'focus' : 'fit', focus ? 'focus' : 'fitModel', focus ? 'crosshair' : 'maximize')}
             </div>
-            ${extras}
         </div>
         <div class="camera-orbit" role="group" aria-label="${esc(t('orbitControls'))}">
             <div class="elevation-control">

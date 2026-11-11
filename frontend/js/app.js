@@ -382,8 +382,8 @@ function fitSidebar() {
         const style = getComputedStyle(sidebar);
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
-        // Reserve row padding, either status or menu space, and a scrollbar gutter in both modes.
-        const width = Math.ceil(contentWidth + padding + 24 + 32 + 16);
+        // Reserve row padding, action or status space, and a scrollbar gutter.
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 80 : 32) + 16);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }
@@ -412,7 +412,7 @@ function renderList() {
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
             ${edit ? '' : `<span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>`}
             ${exhibitLabel(e)}
-        </button>${edit && e.id === selected ? `<details class="exhibit-options"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + displayName(e))}" title="${esc(t('more') + ': ' + displayName(e))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-exhibit="${esc(e.id)}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-trash-exhibit="${esc(e.id)}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>` : ''}</div>`;
+        </button>${edit && e.id === selected ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}</button></div>` : ''}</div>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
     fitSidebar();
 }
@@ -572,7 +572,10 @@ function noteHTML(n) {
             ${n.images.map(id => `<a href="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" target="_blank" rel="noopener"><img class="note-image" src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}" loading="lazy"></a>`).join('')}
             <div class="note-footer">
                 ${n.corrections?.length ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(n.corrections.at(-1).signature)} · ${esc(date(n.corrections.at(-1).at))}</p></details>` : '<span></span>'}
-                <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${icon('pencil-line')}<span>${esc(t('correct'))}</span></button><button type="button" class="danger" data-delete-note="${esc(n.id)}">${icon('trash')}<span>${esc(t('deleteNote'))}</span></button></div></details>
+                <div class="item-actions">
+                    <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${icon('pencil-line')}<span>${esc(t('correct'))}</span></button></div></details>
+                    <button type="button" class="icon-button danger" data-delete-note="${esc(n.id)}" aria-label="${esc(t('deleteNote'))}" title="${esc(t('deleteNote'))}">${icon('trash')}</button>
+                </div>
             </div>
         </article>`;
 }
@@ -734,7 +737,10 @@ function renderLinks(e, element) {
                 ${link.description ? `<p>${esc(link.description)}</p>` : ''}
                 <div class="link-actions">
                     <button type="button" class="icon-button" data-copy="${esc(link.id)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>
-                    <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button><button type="button" class="danger" data-delete-link="${esc(link.id)}">${icon('trash')}<span>${esc(t('remove'))}</span></button></div></details>
+                    <div class="item-actions">
+                        <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button></div></details>
+                        <button type="button" class="icon-button danger" data-delete-link="${esc(link.id)}" aria-label="${esc(t('remove') + ': ' + link.title)}" title="${esc(t('remove'))}">${icon('trash')}</button>
+                    </div>
                 </div>
             </article>`).join('')}
             <p id="link-no-results" class="empty" role="status" hidden>${esc(t('noLinkResults'))}</p>
@@ -1105,16 +1111,16 @@ function renderEditBar() {
     });
 }
 
-function editorMenu(record) {
+function editorActions(record) {
     if (!record) return '';
-    return `<details class="editor-menu"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${menuButton('duplicate', 'duplicateExhibit', 'copy-plus', editHelp('duplicateExhibitHint'))}<button type="button" class="quiet danger" data-trash-exhibit="${esc(record.id)}" ${editHelp(record.notes.length || record.links.length ? 'notEmpty' : 'removeExhibitHint')} ${record.notes.length || record.links.length ? 'disabled' : ''}>${icon('trash')}<span>${esc(t('deleteExhibit'))}</span></button></div></details>`;
+    return `<div class="item-actions">${iconButton('duplicate', 'duplicateExhibit', 'copy-plus', '', 'duplicateExhibitHint')}<button type="button" class="icon-button danger" data-trash-exhibit="${esc(record.id)}" aria-label="${esc(t('deleteExhibit'))}" ${editHelp(record.notes.length || record.links.length ? 'notEmpty' : 'removeExhibitHint')} ${record.notes.length || record.links.length ? 'disabled' : ''}>${icon('trash')}</button></div>`;
 }
 
 function renderEditInspector() {
     if (editConflict?.open) { renderEditConflict(); return; }
     const record = exhibit();
     const title = creationOpen ? t('newExhibit') : displayName(record);
-    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${creationOpen ? '' : editorMenu(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
+    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
@@ -1125,7 +1131,7 @@ function renderEditInspector() {
             const asset = hardware.find(item => item.id === instance.model);
             return `<article class="model-instance ${index === activeInstance ? 'active' : ''}">
                 <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${index}" aria-pressed="${index === activeInstance}" ${editHelp('selectHardwareHint')}>${esc(asset?.name || instance.model)}${record.models.filter(item => item.model === instance.model).length > 1 ? `<small>${index + 1}</small>` : ''}</button>
-                    <details class="instance-menu"><summary class="icon-button" aria-label="${esc(t('more') + ': ' + (asset?.name || instance.model))}" title="${esc(t('more') + ': ' + (asset?.name || instance.model))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-duplicate-instance="${index}" ${editHelp('duplicateHardwareHint')}>${icon('copy-plus')}<span>${esc(t('duplicate'))}</span></button><button type="button" class="danger" data-remove-instance="${index}" ${editHelp('removeHardwareHint')}>${icon('trash')}<span>${esc(t('remove'))}</span></button></div></details></div>
+                    <div class="item-actions"><button type="button" class="icon-button" data-duplicate-instance="${index}" aria-label="${esc(t('duplicate') + ': ' + (asset?.name || instance.model))}" ${editHelp('duplicateHardwareHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-remove-instance="${index}" aria-label="${esc(t('remove') + ': ' + (asset?.name || instance.model))}" ${editHelp('removeHardwareHint')}>${icon('trash')}</button></div></div>
                 <details class="instance-placement"><summary ${editHelp('instancePlacementHint')}>${esc(t('placement'))}</summary><label class="sr-only" for="instance-model-${index}">${esc(t('model'))}</label><select id="instance-model-${index}" data-instance-model="${index}" ${editHelp('replaceHardwareHint')}>${options(hardware.map(item => [item.id, item.name]), instance.model)}</select>${vectorFields(instance.transform, `data-instance="${index}"`, index)}</details>
             </article>`;
         }).join('')}</div>

@@ -262,12 +262,16 @@ function removeExhibit(id) {
     if (!edit || editSave?.saving) return;
     const record = data().exhibits.find(item => item.id === id);
     if (!record) return;
-    if (record.notes.length || record.links.length) { announce(t('notEmpty')); return; }
-    showDialog('deleteExhibit', `<p>${esc(record.name)}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('deleteExhibit')}`, async () => {
+    const remove = () => {
         closeDialog();
         map?.cancelTransform();
         applyEdit(state => { state.exhibits = state.exhibits.filter(item => item.id !== id); }, { rebuild: true });
-    });
+        announce(t('exhibitRemoved'), 'undo');
+    };
+    const createdAt = Date.parse(record.createdAt);
+    const needsWarning = record.notes.length || record.links.length || !Number.isFinite(createdAt) || Date.now() - createdAt > 10 * 60 * 1000;
+    if (!needsWarning) { remove(); return; }
+    showDialog('deleteExhibit', `<p>${esc(record.name)}</p><p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('deleteExhibit')}`, remove);
     $('#dialog button[type=submit]').className = 'danger';
 }
 
@@ -383,7 +387,7 @@ function fitSidebar() {
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
         // Reserve row padding, action or status space, and a scrollbar gutter.
-        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 80 : 32) + 16);
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 72 : 32) + 16);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }
@@ -412,7 +416,7 @@ function renderList() {
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
             ${edit ? '' : `<span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>`}
             ${exhibitLabel(e)}
-        </button>${edit && e.id === selected ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp(e.notes.length || e.links.length ? 'notEmpty' : 'removeExhibitHint')} ${e.notes.length || e.links.length ? 'disabled' : ''}>${icon('trash')}</button></div>` : ''}</div>`;
+        </button>${edit && e.id === selected ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}</div>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
     fitSidebar();
 }
@@ -1113,7 +1117,7 @@ function renderEditBar() {
 
 function editorActions(record) {
     if (!record) return '';
-    return `<div class="item-actions">${iconButton('duplicate', 'duplicateExhibit', 'copy-plus', '', 'duplicateExhibitHint')}<button type="button" class="icon-button danger" data-trash-exhibit="${esc(record.id)}" aria-label="${esc(t('deleteExhibit'))}" ${editHelp(record.notes.length || record.links.length ? 'notEmpty' : 'removeExhibitHint')} ${record.notes.length || record.links.length ? 'disabled' : ''}>${icon('trash')}</button></div>`;
+    return `<div class="item-actions">${iconButton('duplicate', 'duplicateExhibit', 'copy-plus', '', 'duplicateExhibitHint')}<button type="button" class="icon-button danger" data-trash-exhibit="${esc(record.id)}" aria-label="${esc(t('deleteExhibit'))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>`;
 }
 
 function renderEditInspector() {
@@ -1708,7 +1712,7 @@ function conflictValue(value) {
 function renderEditConflict() {
     const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3><p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
         if (!event.target.dataset.conflictKey) return;
         editConflict.choices[event.target.dataset.conflictKey] = event.target.value;

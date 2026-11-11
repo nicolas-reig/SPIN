@@ -258,7 +258,7 @@ export class EditSession {
         }
         for (const old of this.base.exhibits) {
             if (!this.value.exhibits.some(item => item.id === old.id)) {
-                changes.push({ kind: 'exhibits', op: 'delete', id: old.id, baseRevision: old.revision });
+                changes.push({ kind: 'exhibits', op: 'delete', id: old.id, baseRevision: old.revision, contentTag: old.contentTag });
             }
         }
         return changes;

@@ -87,7 +87,7 @@ final class HumanFiles
         return 'p' . substr(hash('sha256', $folder . '/' . $name), 0, 40);
     }
 
-    private static function datedFilename(string $name): ?array
+    public static function datedFilename(string $name): ?array
     {
         if (!preg_match('/^(.+) (\d{2}_\d{2}_\d{4}|\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})(?: (\d{2}\.\d{2}(?:\.\d{2})?|\d{2}-\d{2}-\d{2}))?(?: \[[a-f0-9]{12}\]| \(\d+\))?\.(md|jpe?g|png|webp)$/iu', $name, $parts)) {
             return null;

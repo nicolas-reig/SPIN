@@ -56,6 +56,8 @@ let snapshot = null,
     snap = false,
     noticeTimer, noticeClearTimer;
 let creation = null, creationOpen = false, editConflict = null;
+let editSelection = new Set();
+let joinGeneration = 0;
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
 let drafts = Object.create(null), draftStore = null, cancelledDraft = null;
@@ -97,6 +99,8 @@ function loadDrafts() {
 }
 const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
+const selectedExhibits = () => data()?.exhibits.filter(record => editSelection.has(record.id)) || [];
+const isSelected = id => edit ? editSelection.has(id) : id === selected;
 const floor = () => data()?.floors.find(f => f.id === floorId);
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
 onColorModeChange(() => { if (snapshot) renderList(); });
@@ -190,12 +194,14 @@ function persistEdit() {
         creation,
         creationOpen,
         selected,
+        selection: [...editSelection],
         floorId,
         activeInstance,
         gizmo,
         undoStack: edit.undoStack.map(editSnapshot),
         redoStack: edit.redoStack.map(editSnapshot),
-        signature: editSave?.signature || ''
+        signature: editSave?.signature || '',
+        requestId: editSave?.requestId || ''
     } : null);
 }
 
@@ -365,7 +371,7 @@ function exhibitLabel(record, editable = false) {
     const name = value => `<span class="exhibit-name" ${editable ? 'aria-hidden="true"' : ''}>${esc(value)}</span>`;
     let title = name(text);
     if (editable) {
-        if (record.id === selected) {
+        if (record.id === selected && editSelection.size === 1) {
             const end = text.search(/\S+$/u);
             title = `${name(text.slice(0, end))}<span class="exhibit-name-end">${name(text.slice(end))}<button type="button" class="icon-button exhibit-rename" data-rename-exhibit="${esc(record.id)}" aria-label="${esc(t('renameExhibit') + ': ' + text)}" ${editHelp('renameExhibitHint')}>${icon('pencil-line')}</button></span>`;
         }
@@ -422,10 +428,10 @@ function renderList() {
         if (!e.placed) details.push(t('unplaced'));
         else if (!edit) details.push(t(e.status));
         if (edit) return `
-        <div class="exhibit-entry ${e.id === selected ? 'active' : ''}">
-            <button type="button" class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-label="${esc(displayName(e))}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}"></button>
+        <div class="exhibit-entry ${isSelected(e.id) ? 'active' : ''}">
+            <button type="button" class="exhibit-row ${isSelected(e.id) ? 'active' : ''}" data-select="${esc(e.id)}" aria-label="${esc(displayName(e))}" aria-pressed="${isSelected(e.id)}" title="${esc([...details, t('multiSelectHint')].join(' · '))}"></button>
             ${exhibitLabel(e, true)}
-            ${e.id === selected ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}
+            ${e.id === selected && editSelection.size === 1 ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}
         </div>`;
         return `
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
@@ -462,7 +468,7 @@ function renderMapUI() {
         id: 'map', mode: mapMode, getView: () => map,
         focus: () => actions.focus(),
         canFocus: () => Boolean(selected && map?.objects.has(selected)),
-        extras: edit && exhibit()?.models.length && !creationOpen && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''
+        extras: edit && editSelection.size === 1 && exhibit()?.models.length && !creationOpen && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''
     });
     $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); });
     $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); });
@@ -517,17 +523,30 @@ async function initializeMap() {
 }
 async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
-        reset
+        reset, selection: edit ? [...editSelection] : selected ? [selected] : []
     });
 }
 
-async function select(id, instanceIndex = 0) {
+async function select(id, instanceIndex = 0, extend = false) {
     if (editSave?.saving) return;
+    joinGeneration++;
     map?.cancelTransform();
     creationOpen = false;
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
-    const e = data().exhibits.find(x => x.id === id);
+    const previous = selected;
+    const focused = document.activeElement?.closest('#exhibit-list [data-select]');
+    const clicked = data().exhibits.find(x => x.id === id);
+    if (edit && extend) {
+        if (!clicked) return;
+        if (editSelection.has(id)) editSelection.delete(id);
+        else editSelection.add(id);
+        selected = editSelection.has(selected) ? selected : [...editSelection][0] || null;
+    } else {
+        selected = clicked?.id || null;
+        editSelection = new Set(selected ? [selected] : []);
+    }
+    const e = data().exhibits.find(x => x.id === selected);
     if (!e) {
         selected = null;
         renderList(); renderInspector(); renderMapUI(); updateMap(); syncUrl();
@@ -535,8 +554,7 @@ async function select(id, instanceIndex = 0) {
         return;
     }
     const changed = Boolean(e.floorId && floorId !== e.floorId);
-    selected = id;
-    activeInstance = instanceIndex;
+    activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
     if (e.floorId) floorId = e.floorId;
     map?.setActiveInstance(activeInstance);
     renderList();
@@ -546,8 +564,12 @@ async function select(id, instanceIndex = 0) {
     syncEditTools();
     if (!edit) map?.focus(true);
     syncUrl();
+    if (edit) persistEdit();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
-    if (matchMedia('(max-width:860px)').matches) setView('detail');
+    if (!extend && matchMedia('(max-width:860px)').matches) setView('detail');
+    if (focused && !focused.isConnected && document.activeElement === document.body) {
+        [...document.querySelectorAll('#exhibit-list [data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
+    }
 }
 
 function changeFloor(id) {
@@ -558,7 +580,7 @@ function changeFloor(id) {
     collapseEmptyDraft();
     floorId = id;
     const e = exhibit();
-    if (e?.floorId !== id) selected = null;
+    if (e?.floorId !== id) { selected = null; editSelection.clear(); }
     renderMapUI();
     renderList();
     renderInspector();
@@ -1087,10 +1109,15 @@ function acceptSnapshot(value) {
     }
     if (edit) {
         edit.value.floors = structuredClone(value.floors);
+        for (const record of edit.base.exhibits) {
+            const live = value.exhibits.find(item => item.id === record.id);
+            if (live) { record.notes = live.notes; record.links = live.links; }
+        }
         for (const record of edit.value.exhibits) {
             const live = value.exhibits.find(item => item.id === record.id);
             if (live) {
-                for (const key of ['notes', 'links']) record[key] = structuredClone(live[key]);
+                const members = [live, ...(record.joinedFrom || []).map(id => value.exhibits.find(item => item.id === id))].filter(Boolean);
+                for (const key of ['notes', 'links']) record[key] = members.flatMap(item => item[key]);
                 const base = edit.base.exhibits.find(item => item.id === record.id);
                 if (record.status === base?.status) {
                     record.status = live.status;
@@ -1122,6 +1149,7 @@ function renderEditBar() {
     el.insertAdjacentHTML('beforeend', draftWarning('edit'));
     $('#edit-signature')?.addEventListener('input', event => {
         editSave.signature = event.target.value;
+        editSave.requestId = uid();
         persistEdit();
         $('[data-action=confirmEditSave]').disabled = editSave.saving || Boolean(creation || editConflict) || !edit.changes().length || !editSave.signature.trim();
     });
@@ -1135,8 +1163,107 @@ function editorActions(record) {
     return `<div class="item-actions">${iconButton('duplicate', 'duplicateExhibit', 'copy-plus', '', 'duplicateExhibitHint')}<button type="button" class="icon-button danger" data-trash-exhibit="${esc(record.id)}" aria-label="${esc(t('deleteExhibit'))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>`;
 }
 
+function hasJoinDraft(id) {
+    return hasNoteDraft(drafts[id]) || hasLinkDraft(linkDrafts[id]) ||
+        Object.entries(dialogDrafts).some(([key, values]) => key.split(':')[1] === id &&
+            Object.values(values).some(value => typeof value === 'string' && value.trim()));
+}
+
+function pendingJoinDrafts() {
+    return edit?.value.exhibits.some(record => record.joinedFrom?.length &&
+        [record.id, ...record.joinedFrom].some(hasJoinDraft));
+}
+
+function joinProblem(records) {
+    if (creation) return 'finishCreation';
+    if (records.some(record => [record.id, ...(record.joinedFrom || [])].some(hasJoinDraft))) return 'joinHasDrafts';
+    const floors = new Set(records.filter(record => record.models.length && record.floorId).map(record => record.floorId));
+    if (floors.size > 1) return 'joinDifferentFloors';
+    if (records.reduce((count, record) => count + record.models.length, 0) > 100) return 'joinTooManyModels';
+    return '';
+}
+
+function renderJoinInspector() {
+    const records = selectedExhibits(), problem = joinProblem(records);
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${records.length} ${esc(t('exhibits'))}</h1></div>
+        <div class="panel-content"><form id="join-form" novalidate>
+            <div class="field"><label for="join-target">${esc(t('joinInto'))}</label>
+                <select id="join-target" ${editHelp('joinTargetHint')}>${options(records.map(record => [record.id, record.name]), selected)}</select>
+            </div>
+            <p class="small muted">${esc(t('joinHint'))}</p>
+            <div class="error" id="join-error" role="alert" ${problem ? '' : 'hidden'}>${esc(problem ? t(problem) : '')}</div>
+            <div class="creation-actions">${button('cancel', 'cancelJoin', 'quiet')}<button type="submit" class="primary" ${problem ? 'disabled' : ''}>${esc(t('join'))}</button></div>
+        </form></div>`;
+    $('#join-target').addEventListener('change', event => {
+        if (!editSelection.has(event.target.value)) return;
+        joinGeneration++;
+        selected = event.target.value;
+        activeInstance = 0;
+        const problem = joinProblem(selectedExhibits());
+        $('#join-error').hidden = !problem;
+        $('#join-error').textContent = problem ? t(problem) : '';
+        $('#join-form button[type=submit]').disabled = Boolean(problem);
+        persistEdit();
+        renderList();
+        updateMap();
+        syncEditTools();
+        syncUrl();
+    });
+    $('#join-form').addEventListener('submit', event => { event.preventDefault(); joinSelection(); });
+}
+
+async function joinSelection() {
+    if (!edit || editSave?.saving || editSelection.size < 2) return;
+    const session = edit, value = edit.value, records = selectedExhibits(), target = selected, generation = ++joinGeneration;
+    try {
+        const problem = joinProblem(records);
+        if (problem) throw Error(problem);
+        const { joinExhibits } = await import('./join.js');
+        if (edit !== session || edit.value !== value || generation !== joinGeneration || editSave?.saving || target !== selected ||
+            records.length !== editSelection.size || records.some(record => !editSelection.has(record.id))) return;
+        const joined = joinExhibits(records, target);
+        joined.joinedFrom = joined.joinedFrom.filter(id => session.base.exhibits.some(record => record.id === id));
+        if (!joined.joinedFrom.length) delete joined.joinedFrom;
+        map?.cancelTransform();
+        editSelection = new Set([target]);
+        activeInstance = 0;
+        gizmo = '';
+        if (joined.floorId) floorId = joined.floorId;
+        applyEdit(state => {
+            state.exhibits = state.exhibits.flatMap(record => record.id === target ? [joined] : records.some(source => source.id === record.id) ? [] : [record]);
+        }, { rebuild: true });
+        announce(t('exhibitsJoined'), 'undo');
+    } catch (error) {
+        if (edit !== session || generation !== joinGeneration) return;
+        const element = $('#join-error');
+        if (element) { element.textContent = errorText(error); element.hidden = false; }
+        else announce(errorText(error));
+    }
+}
+
+function editHistory(direction) {
+    if (!edit || editSave?.saving) return;
+    map?.cancelTransform();
+    const joined = exhibit()?.joinedFrom || [];
+    const before = edit.value;
+    edit[direction]();
+    if (edit.value === before) return;
+    if (direction === 'undo') {
+        const restored = joined.filter(id => edit.value.exhibits.some(record => record.id === id));
+        if (restored.length) editSelection = new Set([selected, ...restored]);
+    }
+    editConflict = null;
+    if (editSave) {
+        editSave.requestId = uid();
+        editSave.error = null;
+        if (!edit.changes().length) editSave.signing = false;
+    }
+    changed();
+}
+
 function renderEditInspector() {
     if (editConflict?.open) { renderEditConflict(); return; }
+    if (!creationOpen && editSelection.size > 1) { renderJoinInspector(); return; }
     const record = exhibit();
     const title = creationOpen ? t('newExhibit') : displayName(record);
     $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
@@ -1173,6 +1300,9 @@ function render() {
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
     if (!data().exhibits.some(e => e.id === selected)) selected = null;
+    editSelection = new Set(edit ? [...editSelection].filter(id => data().exhibits.some(record => record.id === id)) : []);
+    if (edit && selected && !editSelection.size) editSelection.add(selected);
+    if (edit && editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
     renderInspector();
@@ -1320,6 +1450,7 @@ function enterEdit() {
     if (edit) return;
     if (recoverableEdit) { recoverEdit(); return; }
     edit = new EditSession(snapshot);
+    editSelection = new Set(selected ? [selected] : []);
     creation = null;
     creationOpen = false;
     editSave = null;
@@ -1330,7 +1461,7 @@ function enterEdit() {
 }
 
 function syncEditTools() {
-    const available = edit && !editSave?.saving && !creationOpen && !editConflict?.open && exhibit()?.models.length;
+    const available = edit && editSelection.size === 1 && !editSave?.saving && !creationOpen && !editConflict?.open && exhibit()?.models.length;
     map?.setTool(available ? gizmo : '', snap);
     map?.setAxis(axisConstraint);
 }
@@ -1426,14 +1557,17 @@ function updateTransformFields() {
 
 function openExhibitEditor(isNew = false) {
     if (!edit || editSave?.saving) return;
+    joinGeneration++;
     map?.cancelTransform();
     if (isNew) {
         if (!creation) creation = {
             previousSelected: selected, previousFloor: floorId,
+            previousSelection: [...editSelection],
             record: { name: '', floorId: floorId || '' }
         };
         creationOpen = true;
         selected = null;
+        editSelection.clear();
     } else {
         creationOpen = false;
     }
@@ -1488,11 +1622,12 @@ function commitCreation() {
     try {
         const raw = creation.record;
         const record = newExhibit(raw.name, raw.floorId);
-        if (data().exhibits.some(item => [item.id, item.name].some(value => value.toLocaleLowerCase() === record.id.toLocaleLowerCase()))) throw Error('duplicateName');
+        if (data().exhibits.some(item => [item.id, item.name, ...(item.joinedFrom || [])].some(value => value.toLocaleLowerCase() === record.id.toLocaleLowerCase()))) throw Error('duplicateName');
         edit.change(state => state.exhibits.push(record));
         creation = null;
         creationOpen = false;
         selected = record.id;
+        editSelection = new Set([record.id]);
         if (record.floorId) floorId = record.floorId;
         activeInstance = 0;
         changed();
@@ -1513,6 +1648,7 @@ function cancelCreation() {
     creation = null;
     creationOpen = false;
     selected = data().exhibits.some(record => record.id === previous.previousSelected) ? previous.previousSelected : null;
+    editSelection = new Set(previous.previousSelection || (selected ? [selected] : []));
     floorId = data().floors.some(record => record.id === previous.previousFloor) ? previous.previousFloor : floorId;
     changed();
 }
@@ -1558,8 +1694,9 @@ function duplicateHardware(index) {
 
 function cancelEdit() {
     if (!edit) return;
+    joinGeneration++;
     map?.cancelTransform();
-    cancelledEdit = { edit, creation, creationOpen, selected, floorId, activeInstance, gizmo, signature: editSave?.signature || '' };
+    cancelledEdit = { edit, creation, creationOpen, selected, selection: [...editSelection], floorId, activeInstance, gizmo, signature: editSave?.signature || '', requestId: editSave?.requestId || '' };
     const dirty = edit.changes().length || creation;
     edit = null;
     creation = null;
@@ -1578,9 +1715,11 @@ function cancelEdit() {
 function restoreEdit() {
     if (edit || !cancelledEdit) return;
     const signature = cancelledEdit.signature;
+    const requestId = cancelledEdit.requestId;
+    editSelection = new Set(cancelledEdit.selection || (cancelledEdit.selected ? [cancelledEdit.selected] : []));
     ({ edit, creation, creationOpen, selected, floorId, activeInstance, gizmo } = cancelledEdit);
     cancelledEdit = null;
-    editSave = signature ? { signature, signing: false, saving: false } : null;
+    editSave = signature ? { signature, requestId, signing: false, saving: false } : null;
     editConflict = null;
     changed();
     announce(t('editsRestored'));
@@ -1588,6 +1727,7 @@ function restoreEdit() {
 
 async function saveExit() {
     if (!edit || editSave?.saving) return;
+    if (pendingJoinDrafts()) { announce(t('joinHasDrafts')); return; }
     if (editConflict) { actions.structureConflict(); return; }
     map?.cancelTransform();
     if (creation) {
@@ -1598,7 +1738,8 @@ async function saveExit() {
     }
     if (!validEditorFields()) return;
     if (!edit.changes().length) { cancelEdit(); return; }
-    editSave = { signing: true, signature: editSave?.signature || rememberedSignature(), saving: false, error: null, requestId: uid() };
+    editSave = { signing: true, signature: editSave?.signature || rememberedSignature(), saving: false, error: null, requestId: editSave?.requestId || uid() };
+    persistEdit();
     renderEditBar();
     $('#edit-signature').focus();
 }
@@ -1664,6 +1805,7 @@ async function confirmEditSave() {
     if (!edit || !editSave?.signing || editSave.saving || !editSave.signature.trim()) return;
     if (editConflict) { actions.structureConflict(); return; }
     if (creation || !validEditorFields()) return;
+    if (pendingJoinDrafts()) { announce(t('joinHasDrafts')); return; }
     map?.cancelTransform();
     const session = edit, save = editSave, changes = session.changes(), signature = save.signature.trim();
     save.controller = new AbortController();
@@ -1701,20 +1843,25 @@ function cancelEditSignature() {
     if (!editSave) return;
     const save = editSave;
     save.controller?.abort();
-    editSave = { signature: save.signature, signing: false, saving: false };
+    editSave = { signature: save.signature, requestId: save.requestId, signing: false, saving: false };
     persistEdit();
     $('#sidebar').inert = false;
     $('#inspector').inert = false;
     renderEditBar();
     syncEditTools();
-    if (save.saving) reconcileCancelledSave(edit);
+    if (save.saving) reconcileCancelledSave(edit, save.requestId);
 }
 
-async function reconcileCancelledSave(session) {
+async function editSaveApplied(session, live, requestId) {
+    if (!editWasSaved(session, live)) return false;
+    return !session.changes().some(change => change.joins?.length) || Boolean(requestId && await api.receipt(requestId));
+}
+
+async function reconcileCancelledSave(session, requestId) {
     try {
         const live = await api.load();
         if (edit !== session) return;
-        if (editWasSaved(session, live)) finishEditSave(session, live);
+        if (await editSaveApplied(session, live, requestId)) finishEditSave(session, live);
     } catch { announce(t('offline')); }
 }
 
@@ -1745,13 +1892,13 @@ async function structureConflict(expectedSave = null) {
     const session = edit;
     const live = await api.load();
     if (edit !== session || expectedSave && editSave !== expectedSave) return;
-    if (editWasSaved(session, live)) { finishEditSave(session, live); return; }
+    if (await editSaveApplied(session, live, expectedSave?.requestId || editSave?.requestId)) { finishEditSave(session, live); return; }
     const result = rebaseEdit(session, live);
     if (!result.conflicts.length) {
         snapshot = live;
         edit = result.session;
         editConflict = null;
-        if (editSave) { editSave.error = null; editSave.saving = false; editSave.requestId = uid(); }
+        if (editSave) { editSave.error = null; editSave.saving = false; editSave.requestId = uid(); if (!edit.changes().length) editSave.signing = false; }
         changed();
         announce(t('newerMerged'));
         return;
@@ -1767,6 +1914,8 @@ async function structureConflict(expectedSave = null) {
 function conflictValue(value) {
     if (value == null) return t('deletedRecord');
     if (typeof value !== 'object') return String(value);
+    if (value.joinMembers) return value.joinMembers.map(record => record.name + '\n' +
+        t('modelInstances') + ': ' + record.models.length + ' · ' + t('notes') + ': ' + record.notes.length + ' · ' + t('documentation') + ': ' + record.links.length).join('\n\n');
     if (Array.isArray(value)) return value.map(instance =>
         (data().assets.find(asset => asset.id === instance.model)?.name || instance.model) + '\n' +
         ['position', 'rotation', 'scale'].map(key => t(key) + ': ' + instance.transform[key].join(', ')).join('\n')
@@ -1777,9 +1926,9 @@ function conflictValue(value) {
 }
 
 function renderEditConflict() {
-    const labels = { name: 'name', floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit' };
+    const labels = { name: 'name', floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit', join: 'join' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p>${item.field === 'join' ? `<p class="small muted">${esc(t(item.unavailable ? 'joinMissing' : 'joinConflictHint'))}</p>` : ''}<div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ...(item.unavailable ? [] : [['mine', t('useMine')]])], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
         if (!event.target.dataset.conflictKey) return;
         editConflict.choices[event.target.dataset.conflictKey] = event.target.value;
@@ -1792,7 +1941,7 @@ function renderEditConflict() {
         snapshot = editConflict.live;
         edit = result.session;
         editConflict = null;
-        if (editSave) { editSave.error = null; editSave.saving = false; editSave.requestId = uid(); }
+        if (editSave) { editSave.error = null; editSave.saving = false; editSave.requestId = uid(); if (!edit.changes().length) editSave.signing = false; }
         changed();
     });
 }
@@ -1845,10 +1994,11 @@ function recoverEdit() {
     creation = saved.creation || null;
     creationOpen = Boolean(saved.creationOpen && creation);
     selected = creationOpen ? null : saved.selected || selected;
+    editSelection = new Set(saved.selection || (selected ? [selected] : []));
     floorId = saved.floorId || floorId;
     activeInstance = saved.activeInstance || 0;
     gizmo = saved.gizmo || '';
-    editSave = saved.signature ? { signature: saved.signature, signing: false, saving: false } : null;
+    editSave = saved.signature ? { signature: saved.signature, requestId: saved.requestId || '', signing: false, saving: false } : null;
     recoverableEdit = null;
     changed();
     announce(t('editsRestored'));
@@ -1861,13 +2011,14 @@ function duplicateSelected(id = selected) {
     map?.cancelTransform();
     const copy = duplicateExhibit(record, data().exhibits);
     selected = copy.id;
+    editSelection = new Set([copy.id]);
     creationOpen = false;
     applyEdit(state => state.exhibits.push(copy), { rebuild: true });
     if (matchMedia('(max-width:860px)').matches) setView('detail');
 }
 
 function setEditTool(tool) {
-    if (!edit || !exhibit()?.models.length || editSave?.saving) return;
+    if (!edit || editSelection.size !== 1 || !exhibit()?.models.length || editSave?.saving) return;
     map?.cancelTransform();
     gizmo = gizmo === tool ? '' : tool;
     syncEditTools();
@@ -1896,6 +2047,7 @@ const actions = {
     resumeCreation: () => openExhibitEditor(true),
     duplicateExhibit: () => duplicateSelected(),
     renameExhibit,
+    cancelJoin: () => select(selected),
     cancelConflict: () => { editConflict.open = false; renderInspector(); renderMapUI(); syncEditTools(); },
     cancelSignature: () => {
         drafts[selected].signing = false;
@@ -1928,8 +2080,8 @@ const actions = {
         },
     editExhibit: () => openExhibitEditor(),
     newExhibit: () => openExhibitEditor(true),
-    undo: () => { if (editSave?.saving) return; map?.cancelTransform(); edit?.undo(); editConflict = null; changed(); },
-    redo: () => { if (editSave?.saving) return; map?.cancelTransform(); edit?.redo(); editConflict = null; changed(); },
+    undo: () => editHistory('undo'),
+    redo: () => editHistory('redo'),
     saveExit,
     structureConflict: () => {
         if (!editConflict) return structureConflict();
@@ -1947,7 +2099,7 @@ document.addEventListener('click', async event => {
         if (element.dataset.trashExhibit) { removeExhibit(element.dataset.trashExhibit); return; }
         if (element.dataset.deleteNote) { deleteNoteDialog(element.dataset.deleteNote); return; }
         if (element.dataset.language) { setLanguage(element.dataset.language); render(); return; }
-        if (element.dataset.select) { select(element.dataset.select); return; }
+        if (element.dataset.select) { select(element.dataset.select, 0, event.shiftKey); return; }
         if (element.dataset.tab) { collapseEmptyDraft(); tab = element.dataset.tab; renderInspector(); return; }
         if (element.dataset.correct) {
             const record = exhibit();
@@ -2056,7 +2208,7 @@ document.addEventListener('keydown', event => {
     }
     if (event.target.matches('[data-select]') && ['Enter', ' '].includes(event.key)) {
         event.preventDefault();
-        select(event.target.dataset.select);
+        select(event.target.dataset.select, 0, event.shiftKey);
     }
 });
 

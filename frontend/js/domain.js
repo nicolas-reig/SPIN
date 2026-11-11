@@ -209,9 +209,10 @@ export class EditSession {
     }
 
     restore(value) {
+        const originals = new Map(this.base.exhibits.map(record => [record.id, record]));
         this.value = { ...value, floors: this.value.floors, assets: this.value.assets, exhibits: value.exhibits.map(record => {
-            const current = this.value.exhibits.find(item => item.id === record.id);
-            return { ...record, views: normalizeViews(record.views), notes: current?.notes || record.notes, links: current?.links || record.links };
+            const members = [record.id, ...(record.joinedFrom || [])].map(id => originals.get(id)).filter(Boolean);
+            return { ...record, views: normalizeViews(record.views), notes: members.flatMap(item => item.notes), links: members.flatMap(item => item.links) };
         }) };
     }
 
@@ -244,20 +245,27 @@ export class EditSession {
 
     changes() {
         const changes = [];
+        const joined = new Set(this.value.exhibits.flatMap(record => record.joinedFrom || []));
         for (const record of this.value.exhibits) {
             const old = this.base.exhibits.find(item => item.id === record.id);
-            if (!old || JSON.stringify(structural(record)) !== JSON.stringify(structural(old))) {
-                changes.push({
+            if (!old || record.joinedFrom?.length || JSON.stringify(structural(record)) !== JSON.stringify(structural(old))) {
+                const change = {
                     kind: 'exhibits',
                     op: 'put',
                     id: record.id,
                     record: structural(record),
                     baseRevision: old?.revision
-                });
+                };
+                const sources = (record.joinedFrom || []).map(id => this.base.exhibits.find(item => item.id === id)).filter(Boolean);
+                if (sources.length) {
+                    change.joins = sources.map(source => ({ id: source.id, baseRevision: source.revision, contentTag: source.contentTag }));
+                    change.contentTag = old?.contentTag;
+                }
+                changes.push(change);
             }
         }
         for (const old of this.base.exhibits) {
-            if (!this.value.exhibits.some(item => item.id === old.id)) {
+            if (!joined.has(old.id) && !this.value.exhibits.some(item => item.id === old.id)) {
                 changes.push({ kind: 'exhibits', op: 'delete', id: old.id, baseRevision: old.revision, contentTag: old.contentTag });
             }
         }

@@ -506,6 +506,7 @@ final class Store
         $modelIds = array_column($snapshot['assets'], 'id');
         $operations = [];
         $seen = [];
+        $joined = [];
         $names = array_column($snapshot['exhibits'], 'name', 'id');
         foreach ($changes as $change) {
             $kind = $change['kind'] ?? '';
@@ -541,11 +542,30 @@ final class Store
                 throw new ApiError('invalidId');
             }
             $name = self::exhibitId($record['name'] ?? null);
+            $sources = $change['joins'] ?? [];
+            if (!is_array($sources) || !array_is_list($sources) || count($sources) > 299) throw new ApiError('invalidInput');
+            if ($sources && $old && ($change['contentTag'] ?? null) !== $old['contentTag']) throw new ApiError('conflict', 409);
+            $sourcePaths = [];
+            foreach ($sources as $source) {
+                if (!is_array($source)) throw new ApiError('invalidInput');
+                $sourceId = self::exhibitId($source['id'] ?? null);
+                if ($sourceId !== $source['id']) throw new ApiError('invalidInput');
+                if ($sourceId === $id || isset($joined[$sourceId])) throw new ApiError('invalidInput');
+                $current = current(array_filter($snapshot['exhibits'], fn($item) => $item['id'] === $sourceId)) ?: null;
+                if (!$current || ($source['baseRevision'] ?? null) !== $current['revision'] ||
+                    ($source['contentTag'] ?? null) !== $current['contentTag']) throw new ApiError('conflict', 409);
+                $joined[$sourceId] = $id;
+                $sourcePaths[] = $this->path($this->exhibits, $sourceId);
+            }
             $meta = $this->exhibitMeta($record, $floorIds, $modelIds, $signature);
             if (!$old) $meta['createdAt'] = gmdate('Y-m-d\TH:i:s\Z');
             elseif ($old['createdAt'] !== null) $meta['createdAt'] = $old['createdAt'];
-            $operations[] = ['putExhibit', $id, $meta, $name, (bool)$old];
+            $operations[] = ['putExhibit', $id, $meta, $name, (bool)$old, $sourcePaths];
             $names[$id] = $name;
+        }
+        foreach ($joined as $id => $target) {
+            if (isset($seen['exhibits:' . $id])) throw new ApiError('invalidInput');
+            unset($names[$id]);
         }
         $foldedNames = array_map(fn($name) => mb_strtolower($name, 'UTF-8'), array_values($names));
         if (count(array_unique($foldedNames)) !== count($foldedNames)) {
@@ -557,28 +577,25 @@ final class Store
                 $this->files->removeTree($this->path($this->exhibits, $id));
             }
         }
-        $renames = [];
+        $staged = [];
         foreach ($operations as $operation) {
-            if ($operation[0] !== 'putExhibit' || !$operation[4]) continue;
-            [, $id, $meta, $name] = $operation;
+            if ($operation[0] !== 'putExhibit') continue;
+            [, $id, $meta, $name, $exists, $sources] = $operation;
             $path = $this->path($this->exhibits, $id);
-            $this->writeJson($path . '/.exhibit.json', $meta);
-            if ($name !== $id) {
-                $temporary = $this->exhibits . '/.rename-' . bin2hex(random_bytes(16));
-                $this->files->move($path, $temporary);
-                $renames[] = [$temporary, $this->path($this->exhibits, $name)];
-            }
-        }
-        foreach ($operations as $operation) {
-            if ($operation[0] === 'putExhibit' && !$operation[4]) {
-                [, , $meta, $name] = $operation;
-                $path = $this->exhibits . '/.rename-' . bin2hex(random_bytes(16));
-                $this->files->directory($path);
+            $temporary = $this->exhibits . '/.rename-' . bin2hex(random_bytes(16));
+            if ($exists) {
                 $this->writeJson($path . '/.exhibit.json', $meta);
-                $renames[] = [$path, $this->path($this->exhibits, $name)];
+                $this->files->move($path, $temporary);
+            } else {
+                $this->files->directory($temporary);
+                $this->writeJson($temporary . '/.exhibit.json', $meta);
             }
+            $staged[] = [$temporary, $path, $this->path($this->exhibits, $name), $sources];
         }
-        foreach ($renames as [$source, $destination]) $this->files->move($source, $destination);
+        foreach ($staged as [$path, $original, $final, $sources]) {
+            if ($sources) (new JoinFiles($this->files))->merge($path, $original, $final, $sources);
+        }
+        foreach ($staged as [$path, , $final]) $this->files->move($path, $final);
     }
 
     public function mutate(array $payload, array $uploads = []): array
@@ -587,7 +604,12 @@ final class Store
         $action = $payload['action'] ?? '';
         $signed = !in_array($action, ['status', 'putLink', 'deleteLink'], true);
         $signature = $signed ? self::signature($payload['signature'] ?? null) : '';
-        return $this->lock(function () use ($payload, $action, $signature, $uploads) {
+        $requests = new RequestCache($this->assets . "\n" . $this->exhibits . "\nstructure");
+        $fingerprint = hash('sha256', json_encode([$payload['baseRevision'] ?? null, $payload['changes'] ?? null, $signature], JSON_THROW_ON_ERROR));
+        if ($action === 'structure' && $requests->wasApplied($payload['requestId'], $fingerprint)) {
+            return ['saved' => true, 'requestId' => $payload['requestId'], 'snapshot' => $this->snapshot()];
+        }
+        $result = $this->lock(function () use ($payload, $action, $signature, $uploads) {
             $snapshot = $this->snapshot();
             if ($action === 'structure') {
                 $this->structure($payload, $snapshot, $signature);
@@ -674,6 +696,16 @@ final class Store
             }
             return ['saved' => true, 'requestId' => $payload['requestId'], 'snapshot' => $this->snapshot()];
         });
+        if ($action === 'structure' && array_filter($payload['changes'] ?? [], fn($change) => !empty($change['joins']))) {
+            try { $requests->remember($payload['requestId'], $fingerprint); }
+            catch (Throwable $error) { error_log('Save receipt unavailable: ' . $error->getMessage()); }
+        }
+        return $result;
+    }
+
+    public function receipt(string $request): bool
+    {
+        return (new RequestCache($this->assets . "\n" . $this->exhibits . "\nstructure"))->wasApplied(self::requestId($request));
     }
 
     private function status(string $id, array $record, mixed $status): void

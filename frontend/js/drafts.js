@@ -44,6 +44,7 @@ export function editSnapshot(value) {
 export function restoreEditSnapshot(value, live) {
     return { ...value, floors: structuredClone(live.floors), assets: live.assets, exhibits: value.exhibits.map(record => {
         const current = live.exhibits.find(item => item.id === record.id);
-        return { ...record, views: normalizeViews(record.views), notes: current?.notes || [], links: current?.links || [] };
+        const members = [current, ...(record.joinedFrom || []).map(id => live.exhibits.find(item => item.id === id))].filter(Boolean);
+        return { ...record, views: normalizeViews(record.views), notes: members.flatMap(item => item.notes), links: members.flatMap(item => item.links) };
     }) };
 }

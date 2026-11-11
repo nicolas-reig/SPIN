@@ -64,7 +64,7 @@ export function duplicateExhibit(record, records) {
         let stem = record.name;
         while (new TextEncoder().encode(stem + suffix).length > 160) stem = stem.slice(0, -1);
         name = stem + suffix;
-    } while (records.some(item => [item.id, item.name].some(value => value.toLocaleLowerCase() === name.toLocaleLowerCase())));
+    } while (records.some(item => [item.id, item.name, ...(item.joinedFrom || [])].some(value => value.toLocaleLowerCase() === name.toLocaleLowerCase())));
     copy.id = copy.name = name;
     copy.transform.position[0] += 2;
     copy.notes = [];
@@ -72,11 +72,12 @@ export function duplicateExhibit(record, records) {
     copy.revision = null;
     copy.createdAt = new Date().toISOString();
     delete copy.contentTag;
+    delete copy.joinedFrom;
     return copy;
 }
 
 const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-const fields = ['name', 'floorId', 'transform', 'models', 'views.2D', 'views.3D'];
+const fields = ['name', 'floorId', 'transform', 'models', 'views.2D', 'views.3D', 'joinedFrom'];
 const get = (record, field) => field.split('.').reduce((value, key) => value?.[key], record);
 function put(record, field, value) {
     const parts = field.split('.');
@@ -95,6 +96,7 @@ export function editWasSaved(session, live) {
         if (change.op === 'delete') return targets.has(change.id) || !records.some(record => record.id === change.id);
         const target = change.record.name;
         const record = records.find(item => item.id === target);
+        if (change.joins?.some(source => !targets.has(source.id) && records.some(item => item.id === source.id))) return false;
         if (target !== change.id && !targets.has(change.id) && records.some(item => item.id === change.id)) return false;
         return record && equal(structural(record), { ...change.record, id: target });
     });
@@ -103,16 +105,40 @@ export function editWasSaved(session, live) {
 export function rebaseEdit(session, live, choices = {}) {
     const next = new EditSession(live);
     const conflicts = [];
-    const choose = (change, field, current, yours) => {
+    const choose = (change, field, current, yours, extra = {}) => {
         const key = JSON.stringify([change.kind, change.id, field]);
-        if (!choices[key]) conflicts.push({ key, kind: change.kind, id: change.id, field, current, yours });
-        return choices[key] === 'mine';
+        if (!choices[key]) conflicts.push({ key, kind: change.kind, id: change.id, field, current, yours, ...extra });
+        return choices[key] === 'mine' && !extra.unavailable;
     };
     next.change(state => {
         for (const change of session.changes()) {
             const base = session.base[change.kind].find(record => record.id === change.id);
             const current = state[change.kind].find(record => record.id === change.id);
             const desired = session.value[change.kind].find(record => record.id === change.id);
+            if (change.joins?.length) {
+                const sources = change.joins.map(source => ({
+                    base: session.base.exhibits.find(item => item.id === source.id),
+                    current: state.exhibits.find(item => item.id === source.id)
+                }));
+                const missing = Boolean(base && !current || sources.some(source => !source.current));
+                const shape = record => structural({ ...record, status: 'ok' });
+                const members = [...(base ? [{ base, current }] : []), ...sources];
+                const altered = missing || !base && current || members.some(member => !equal(shape(member.base), shape(member.current)) || member.base.contentTag !== member.current.contentTag);
+                if (altered && !choose(change, 'join', { joinMembers: members.map(member => member.current).filter(Boolean) },
+                    { joinMembers: [desired] }, { unavailable: missing })) continue;
+                const record = structuredClone(desired);
+                const content = [current, ...sources.map(source => source.current)].filter(Boolean);
+                record.notes = content.flatMap(item => item.notes);
+                record.links = content.flatMap(item => item.links);
+                record.status = current?.status || record.status;
+                record.revision = current?.revision || null;
+                if (current?.contentTag) record.contentTag = current.contentTag;
+                else delete record.contentTag;
+                const exists = state.exhibits.some(item => item.id === change.id);
+                state.exhibits = state.exhibits.flatMap(item => item.id === change.id ? [record] : change.joins.some(source => source.id === item.id) ? [] : [item]);
+                if (!exists) state.exhibits.push(record);
+                continue;
+            }
             if (change.op === 'delete') {
                 if (!current) continue;
                 if ((!equal(structural(base), structural(current)) || base.contentTag !== current.contentTag) &&

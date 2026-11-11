@@ -132,6 +132,10 @@ Every valid direct child folder of `Exponate/` becomes an exhibit, and **its fol
 
 In edit mode, the pencil beside the exhibit title changes its name. The folder is renamed only after the signed Save; posts, photos and documentation links move with it. Until then, the change can be undone or canceled. Names must be unique, including capitalization differences.
 
+Shift-click exhibits in edit mode to select several, then choose **Join** in the inspector. Choose which exhibit to keep; its name, status and default views are retained. Hardware keeps its placement, and the other exhibits' posts, photos, links and additional files move into the retained folder only after the signed Save. The other exhibit folders are then removed. Undo and Cancel remain available before saving.
+
+Colliding dated filenames advance to the next available minute, keeping the usual naming format. Duplicate documentation titles receive ` (2)`, ` (3)` and so on before `.url`. Relative file references in Markdown are updated when files move or change name. The join adds no permanent metadata fields. Finish or discard the selected exhibits' unfinished browser drafts before joining. Hardware on different floors cannot be joined; transformations that would deform hardware through uneven shared scales are also rejected.
+
 An exhibit can contain:
 
 | Item | Contents |

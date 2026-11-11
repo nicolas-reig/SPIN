@@ -59,7 +59,11 @@ export class CameraControls {
             this.update();
         }, options);
         this.slider.addEventListener('input', () => {
-            this.getView()?.setElevation(Number(this.slider.value));
+            const view = this.getView();
+            const elevation = Number(this.slider.value);
+            if (elevation === Number(this.slider.max)) {
+                if (view?.mode !== 'top') view?.command('top');
+            } else view?.setElevation(elevation);
             this.update();
         }, options);
         this.face.addEventListener('keydown', event => {

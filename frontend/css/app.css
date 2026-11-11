@@ -352,6 +352,7 @@ summary {
     grid-template-columns: var(--list) minmax(0, 1fr);
     height: 100%;
     min-height: 0;
+    overflow: clip;
 }
 
 #sidebar {
@@ -363,7 +364,7 @@ summary {
     background: var(--panel);
     border-radius: 0 14px 14px 0;
     padding: 32px var(--sidebar-inset) 20px;
-    box-shadow: 3px 0 5px #1e2b3503, 12px 0 40px #1e2b3513;
+    box-shadow: 3px 0 5px #1e2b3503, 12px 0 40px #1e2b3513, -12px 0 0 var(--panel);
 }
 
 .sidebar-title {
@@ -818,7 +819,7 @@ summary {
     min-height: 0;
     background: var(--panel);
     border-radius: 14px 0 0 14px;
-    box-shadow: -3px 0 5px #1e2b3503, -12px 0 40px #1e2b3514;
+    box-shadow: -3px 0 5px #1e2b3503, -12px 0 40px #1e2b3514, calc(3vw + 16px) 0 0 var(--panel);
     overflow: hidden;
 }
 
@@ -1482,7 +1483,7 @@ dialog::backdrop {
     #workspace {
         display: block;
         height: calc(100dvh - 65px - env(safe-area-inset-bottom));
-        overflow: hidden;
+        overflow: clip;
     }
 
     #sidebar,
@@ -2035,41 +2036,6 @@ html[data-color-mode]:not([data-color-mode=default]) {
     z-index: 8;
 }
 
-.inspector-updated::before {
-    content: '';
-    position: absolute;
-    inset: 14px 12px 6px;
-    border-radius: 8px;
-    pointer-events: none;
-    background: linear-gradient(110deg, color-mix(in srgb, var(--accent) 13%, transparent), color-mix(in srgb, var(--accent) 3%, transparent));
-    box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 45%, transparent);
-    opacity: 0;
-    animation: inspector-highlight 1100ms ease-out;
-}
-
-@keyframes inspector-highlight {
-    0%, 100% { opacity: 0; }
-    12%, 28% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-    .inspector-updated h1 {
-        animation: inspector-title-in 240ms cubic-bezier(.22, .68, 0, 1);
-    }
-
-    @keyframes inspector-title-in {
-        from { transform: translateX(-6px); opacity: .65; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .inspector-updated::before {
-        animation: none;
-        opacity: 1;
-    }
-}
-
 .status-picker {
     position: relative;
     flex: 0 0 auto;
@@ -2413,8 +2379,6 @@ html[data-color-mode]:not([data-color-mode=default]) {
         pointer-events: none;
     }
     @media (prefers-reduced-motion: no-preference) {
-        #inspector { transition: transform 280ms cubic-bezier(.22,.68,0,1); }
-        #resizer { transition: transform 280ms cubic-bezier(.22,.68,0,1), opacity 180ms; }
         #map-heading { transition: right 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
         #map-controls, #notice { transition: left 280ms cubic-bezier(.22,.68,0,1), width 280ms cubic-bezier(.22,.68,0,1), max-width 280ms cubic-bezier(.22,.68,0,1); }
         #map-message { transition: right 280ms cubic-bezier(.22,.68,0,1); }
@@ -2442,21 +2406,10 @@ html[data-color-mode]:not([data-color-mode=default]) {
     body.inspector-hidden #inspector { display: none; }
     .composer-tools .toolbar { width: 100%; justify-content: space-between; }
     .composer-tools .icon-button { width: 40px; min-width: 0; height: 44px; min-height: 44px; }
-    @media (prefers-reduced-motion: no-preference) {
-        body[data-view=detail] #inspector { animation: inspector-enter 240ms ease-out; }
-        @keyframes inspector-enter {
-            from { transform: translateX(100%); }
-            to { transform: translateX(0); }
-        }
-    }
 }
 @media (min-width: 861px) {
     #inspector { visibility: visible; }
-    body.inspector-hidden #inspector { visibility: hidden; }
-    @media (prefers-reduced-motion: no-preference) {
-        #inspector { transition: transform 280ms cubic-bezier(.22,.68,0,1), visibility 0s; }
-        body.inspector-hidden #inspector { transition-delay: 0s, 280ms; }
-    }
+    body.inspector-hidden #inspector:not(.inspector-moving) { visibility: hidden; }
 }
 
 /* Editing uses the same panels and reading edges as the service view. */

@@ -23,6 +23,7 @@ import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
 import { cameraMode, viewMode } from './camera.js';
 import { CameraControls } from './camera-controls.js';
+import { PanelMotion } from './panel-motion.js';
 import { editHelp, vectorFields, viewPresets, exhibitName, newExhibit, duplicateExhibit, rebaseEdit, editWasSaved } from './edit.js';
 import { icon } from './icons.js';
 import { colorMode, onColorModeChange } from './colors.js';
@@ -34,6 +35,7 @@ let noteEditor = null;
 installSelects();
 const $ = s => document.querySelector(s),
     api = new Api();
+const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#sidebar'), $('#editbar'));
 let snapshot = null,
     selected = null,
     floorId = '0',
@@ -237,6 +239,7 @@ function setView(value) {
     collapseEmptyDraft();
     view = value;
     document.body.dataset.view = value;
+    panelMotion.viewChanged();
     renderMobile();
     map?.resize();
 }
@@ -629,18 +632,6 @@ function noteHTML(n) {
         </article>`;
 }
 
-function guideInspector(previousHeader) {
-    requestAnimationFrame(() => {
-        const panel = $('#inspector');
-        const header = panel.querySelector('.inspector-header');
-        if (!header || header === previousHeader || panel.inert || !panel.getClientRects().length || document.hidden) return;
-        $('#inspector-update').textContent = `${t('detail')}: ${header.querySelector('h1').textContent}`;
-        if (!matchMedia('(min-width: 861px)').matches) return;
-        header.classList.add('inspector-updated');
-        setTimeout(() => header.classList.remove('inspector-updated'), 1200);
-    });
-}
-
 function renderInspector() {
     const visible = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     document.body.classList.toggle('inspector-hidden', !visible);
@@ -649,10 +640,25 @@ function renderInspector() {
     $('#resizer').inert = !visible;
     $('#resizer').setAttribute('aria-hidden', String(!visible));
     if (!visible) {
+        panelMotion.update(null);
         if (view === 'detail') setView('map');
         renderMobile();
         return;
     }
+    renderInspectorContent();
+    const context = JSON.stringify([
+        Boolean(edit),
+        creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit',
+        creationOpen ? null : exhibit()?.name,
+        creationOpen ? [] : edit && editSelection.size > 1 ? [...editSelection].sort() : [selected]
+    ]);
+    if (panelMotion.update(context)) {
+        const title = $('#inspector h1')?.textContent;
+        if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
+    }
+}
+
+function renderInspectorContent() {
     noteEditor?.destroy();
     noteEditor = null;
     if (edit) {
@@ -1340,7 +1346,6 @@ function closeDialog(form = null) {
     $('#dialog').fieldController = null;
     $('#dialog').close();
     $('#dialog').innerHTML = '';
-    delete $('#dialog').dataset.inspectorSource;
 }
 
 function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (selected || '')) {
@@ -1363,8 +1368,6 @@ function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (sele
         const submit = e.submitter;
         if (submit?.disabled) return;
         const fields = [...e.target.querySelectorAll('input, textarea, select')];
-        const fromSidebar = dialog.dataset.inspectorSource === 'sidebar';
-        const previousHeader = $('#inspector').firstElementChild;
         try {
             const values = new FormData(e.target);
             if (submit) submit.disabled = true;
@@ -1381,7 +1384,6 @@ function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (sele
         } finally {
             fields.forEach(field => { field.disabled = false; });
             if (submit?.isConnected) submit.disabled = false;
-            if (fromSidebar) guideInspector(previousHeader);
         }
     });
     dialog.showModal();
@@ -1605,7 +1607,7 @@ function openExhibitEditor(isNew = false) {
     syncEditTools();
     syncUrl();
     setView('detail');
-    if (creationOpen) $('#creation-form input')?.focus();
+    if (creationOpen) $('#creation-form input')?.focus({ preventScroll: true });
 }
 
 function renameExhibit(id = selected) {
@@ -1655,8 +1657,11 @@ function commitCreation() {
         if (record.floorId) floorId = record.floorId;
         activeInstance = 0;
         changed();
-        const picker = $('.hardware-picker');
-        if (record.floorId && picker?.querySelector('[data-add-hardware]')) picker.open = true;
+        panelMotion.afterEnter(() => {
+            const picker = $('.hardware-picker');
+            if (selected === record.id && record.floorId && !$('#dialog').open &&
+                !$('#inspector').contains(document.activeElement) && picker?.querySelector('[data-add-hardware]')) picker.open = true;
+        });
         return true;
     } catch (error) {
         creationOpen = true;
@@ -2117,8 +2122,6 @@ const actions = {
 document.addEventListener('click', async event => {
     const element = event.target.closest('button,[data-select]');
     if (!element) return;
-    const fromSidebar = Boolean(element.closest('#sidebar, #editbar'));
-    const previousHeader = $('#inspector').firstElementChild;
     try {
         if (element.dataset.floor) { changeFloor(element.dataset.floor); return; }
         if (element.dataset.renameExhibit) { renameExhibit(element.dataset.renameExhibit); return; }
@@ -2203,17 +2206,11 @@ document.addEventListener('click', async event => {
         if (actions[action]) await actions[action]();
     } catch (error) {
         announce(errorText(error));
-    } finally {
-        if (fromSidebar) {
-            if ($('#dialog').open) $('#dialog').dataset.inspectorSource = 'sidebar';
-            guideInspector(previousHeader);
-        }
     }
 });
 
 document.addEventListener('keydown', event => {
     if ($('#dialog').open || event.defaultPrevented) return;
-    if (event.target.closest('#sidebar, #editbar')) guideInspector($('#inspector').firstElementChild);
     const typing = event.target.closest('input, textarea, [contenteditable]');
     if (edit && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
@@ -2268,6 +2265,7 @@ function resizeInspector(value) {
     document.documentElement.style.setProperty('--reader', width + 'px');
 }
 resizer.addEventListener('pointerdown', event => {
+    panelMotion.settle();
     event.preventDefault();
     getSelection()?.removeAllRanges();
     resizeStart = { x: event.clientX, width: $('#inspector').clientWidth };
@@ -2295,6 +2293,7 @@ resizer.addEventListener('lostpointercapture', () => {
 resizer.addEventListener('dragstart', event => event.preventDefault());
 resizer.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    panelMotion.settle();
     event.preventDefault();
     const width = $('#inspector').clientWidth + (event.key === 'ArrowLeft' ? 24 : -24);
     resizeInspector(width);

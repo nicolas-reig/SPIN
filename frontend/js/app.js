@@ -621,6 +621,18 @@ function noteHTML(n) {
         </article>`;
 }
 
+function guideInspector(previousHeader) {
+    requestAnimationFrame(() => {
+        const panel = $('#inspector');
+        const header = panel.querySelector('.inspector-header');
+        if (!header || header === previousHeader || panel.inert || !panel.getClientRects().length || document.hidden) return;
+        $('#inspector-update').textContent = `${t('detail')}: ${header.querySelector('h1').textContent}`;
+        if (!matchMedia('(min-width: 861px)').matches) return;
+        header.classList.add('inspector-updated');
+        setTimeout(() => header.classList.remove('inspector-updated'), 1200);
+    });
+}
+
 function renderInspector() {
     const visible = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     document.body.classList.toggle('inspector-hidden', !visible);
@@ -1320,6 +1332,7 @@ function closeDialog(form = null) {
     $('#dialog').fieldController = null;
     $('#dialog').close();
     $('#dialog').innerHTML = '';
+    delete $('#dialog').dataset.inspectorSource;
 }
 
 function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (selected || '')) {
@@ -1342,6 +1355,8 @@ function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (sele
         const submit = e.submitter;
         if (submit?.disabled) return;
         const fields = [...e.target.querySelectorAll('input, textarea, select')];
+        const fromSidebar = dialog.dataset.inspectorSource === 'sidebar';
+        const previousHeader = $('#inspector').firstElementChild;
         try {
             const values = new FormData(e.target);
             if (submit) submit.disabled = true;
@@ -1358,6 +1373,7 @@ function showDialog(title, html, onSubmit = null, draftKey = title + ':' + (sele
         } finally {
             fields.forEach(field => { field.disabled = false; });
             if (submit?.isConnected) submit.disabled = false;
+            if (fromSidebar) guideInspector(previousHeader);
         }
     });
     dialog.showModal();
@@ -2093,6 +2109,8 @@ const actions = {
 document.addEventListener('click', async event => {
     const element = event.target.closest('button,[data-select]');
     if (!element) return;
+    const fromSidebar = Boolean(element.closest('#sidebar, #editbar'));
+    const previousHeader = $('#inspector').firstElementChild;
     try {
         if (element.dataset.floor) { changeFloor(element.dataset.floor); return; }
         if (element.dataset.renameExhibit) { renameExhibit(element.dataset.renameExhibit); return; }
@@ -2175,11 +2193,19 @@ document.addEventListener('click', async event => {
         const action = element.dataset.action;
         if (action?.startsWith('view:')) { setView(action.split(':')[1]); return; }
         if (actions[action]) await actions[action]();
-    } catch (error) { announce(errorText(error)); }
+    } catch (error) {
+        announce(errorText(error));
+    } finally {
+        if (fromSidebar) {
+            if ($('#dialog').open) $('#dialog').dataset.inspectorSource = 'sidebar';
+            guideInspector(previousHeader);
+        }
+    }
 });
 
 document.addEventListener('keydown', event => {
     if ($('#dialog').open || event.defaultPrevented) return;
+    if (event.target.closest('#sidebar, #editbar')) guideInspector($('#inspector').firstElementChild);
     const typing = event.target.closest('input, textarea, [contenteditable]');
     if (edit && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();

@@ -2035,6 +2035,41 @@ html[data-color-mode]:not([data-color-mode=default]) {
     z-index: 8;
 }
 
+.inspector-updated::before {
+    content: '';
+    position: absolute;
+    inset: 14px 12px 6px;
+    border-radius: 8px;
+    pointer-events: none;
+    background: linear-gradient(110deg, color-mix(in srgb, var(--accent) 13%, transparent), color-mix(in srgb, var(--accent) 3%, transparent));
+    box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 45%, transparent);
+    opacity: 0;
+    animation: inspector-highlight 1100ms ease-out;
+}
+
+@keyframes inspector-highlight {
+    0%, 100% { opacity: 0; }
+    12%, 28% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .inspector-updated h1 {
+        animation: inspector-title-in 240ms cubic-bezier(.22, .68, 0, 1);
+    }
+
+    @keyframes inspector-title-in {
+        from { transform: translateX(-6px); opacity: .65; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .inspector-updated::before {
+        animation: none;
+        opacity: 1;
+    }
+}
+
 .status-picker {
     position: relative;
     flex: 0 0 auto;

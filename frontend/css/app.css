@@ -40,6 +40,10 @@
     --compass-scale: 1.15;
     --compass-size: calc(88px * var(--compass-scale));
     --elevation-width: 32px;
+    --sidebar-inset: 16px;
+    --sidebar-label-inset: 12px;
+    --sidebar-content-inset: calc(var(--sidebar-inset) + var(--sidebar-label-inset));
+    --sidebar-control-size: 32px;
     --list-min: 230px;
     --list-content: 0px;
     --list: clamp(var(--list-min), var(--list-content), min(340px, 28vw));
@@ -351,7 +355,6 @@ summary {
 }
 
 #sidebar {
-    --sidebar-inset: 16px;
     position: relative;
     z-index: 4;
     display: flex;
@@ -364,14 +367,27 @@ summary {
 }
 
 .sidebar-title {
-    padding: 0 10px 24px;
+    padding: 0 var(--sidebar-label-inset) 24px;
 }
 
 .search-row {
     display: flex;
     align-items: center;
     gap: 3px;
-    padding: 0 2px 22px;
+    padding: 0 var(--sidebar-label-inset) 22px 0;
+}
+
+.sidebar-title .icon-button,
+.filter-menu > summary,
+.app-menu > summary,
+.active-filters .icon-button {
+    width: var(--sidebar-control-size);
+    height: var(--sidebar-control-size);
+    min-height: var(--sidebar-control-size);
+}
+
+.search-row .search-icon {
+    left: var(--sidebar-label-inset);
 }
 
 .searchbox {
@@ -461,7 +477,7 @@ summary {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 7px 10px;
+    padding: 0 var(--sidebar-label-inset) 10px;
     font-size: .75rem;
     color: #687078;
 }
@@ -469,10 +485,6 @@ summary {
 .active-filters span {
     flex: 1;
     overflow-wrap: anywhere;
-}
-
-.active-filters button {
-    width: 28px;
 }
 
 .exhibit-list {
@@ -609,7 +621,7 @@ summary {
 
 .sidebar-footer {
     margin-top: 20px;
-    padding: 0 7px;
+    padding: 0 var(--sidebar-label-inset) 0 2px;
 }
 
 .language {
@@ -1438,9 +1450,6 @@ dialog::backdrop {
     :root {
         --list-min: 205px;
         --reader: 330px;
-    }
-
-    #sidebar {
         --sidebar-inset: 12px;
     }
 
@@ -1466,6 +1475,8 @@ dialog::backdrop {
 @media (max-width: 860px) {
     :root {
         --reader: 100%;
+        --sidebar-inset: 22px;
+        --sidebar-control-size: 44px;
     }
 
     #workspace {
@@ -1497,18 +1508,13 @@ dialog::backdrop {
     }
 
     #sidebar {
-        --sidebar-inset: 22px;
         padding: 30px var(--sidebar-inset) 14px;
-    }
-
-    .sidebar-title {
-        padding-left: 8px;
     }
 
     .exhibit-row {
         min-height: 58px;
-        padding-left: 15px;
-        padding-right: 15px;
+        padding-left: var(--sidebar-label-inset);
+        padding-right: var(--sidebar-label-inset);
     }
 
     .exhibit-name {
@@ -1531,16 +1537,16 @@ dialog::backdrop {
 
     .sidebar-footer {
         margin-top: 10px;
+        padding-left: 0;
     }
 
     .sidebar-footer .row {
-        justify-content: flex-start;
         gap: 12px;
     }
 
     .app-menu .popover {
-        right: auto;
-        left: -80px;
+        right: 0;
+        left: auto;
     }
 
     #mobile-nav {
@@ -1877,7 +1883,8 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 
 
 body.editing {
-    --exhibit-action-size: 32px;
+    --exhibit-action-size: var(--sidebar-control-size);
+    --exhibit-action-inset: calc((var(--exhibit-action-size) - 18px) / 2 + 2px);
     --accent: var(--edit-accent);
     --accent-soft: color-mix(in srgb, var(--edit-accent) 10%, white);
     --panel: #f1eef6;
@@ -2158,6 +2165,17 @@ html[data-color-mode]:not([data-color-mode=default]) {
     bottom: 44px;
     right: 0;
 }
+@media (min-width: 861px) {
+    .filter-menu .popover {
+        left: auto;
+        right: min(0px, calc(var(--list) - var(--sidebar-content-inset) - 240px - 16px));
+    }
+
+    .app-menu .popover {
+        right: min(0px, calc(var(--list) - var(--sidebar-content-inset) - 216px - 16px));
+    }
+}
+
 .popover > button, .status-choice, .selection-menu button {
     box-shadow: none;
     outline-offset: -3px;
@@ -2414,11 +2432,11 @@ body.editing {
 #editbar {
     position: fixed;
     z-index: 7;
-    left: 23px;
+    left: var(--sidebar-content-inset);
     bottom: 76px;
     top: auto;
     right: auto;
-    width: calc(var(--list) - 46px);
+    width: calc(var(--list) - var(--sidebar-content-inset) - var(--sidebar-content-inset));
     max-height: calc(100dvh - 180px);
     overflow-y: auto;
     padding: 0;
@@ -2472,9 +2490,9 @@ button.edit-session-label {
 }
 
 .edit-history .icon-button {
-    width: 30px;
-    height: 32px;
-    min-height: 32px;
+    width: var(--sidebar-control-size);
+    height: var(--sidebar-control-size);
+    min-height: var(--sidebar-control-size);
 }
 
 .edit-session-actions, .creation-actions {
@@ -2485,7 +2503,7 @@ button.edit-session-label {
 }
 
 .edit-session-actions > button {
-    flex: 1;
+    flex: none;
     padding-inline: 8px;
 }
 
@@ -2586,7 +2604,7 @@ button.edit-session-label {
 body.editing .exhibit-entry {
     gap: 2px;
     min-height: 48px;
-    padding-right: 2px;
+    padding-right: var(--exhibit-action-inset);
     border-radius: 5.5px;
 }
 
@@ -2601,13 +2619,13 @@ body.editing .exhibit-entry:hover:not(.active) {
 }
 
 body.editing #exhibit-list {
-    margin-right: calc(-1 * var(--sidebar-inset));
-    padding-right: calc((var(--exhibit-action-size) - 18px) / 2);
+    margin-right: calc(var(--sidebar-label-inset) - var(--exhibit-action-inset));
+    padding-right: 0;
     scrollbar-gutter: auto;
 }
 
 body.editing .exhibit-entry > .exhibit-label {
-    padding: 8px 0 8px 12px;
+    padding: 8px 0 8px var(--sidebar-label-inset);
     pointer-events: none;
 }
 
@@ -2807,12 +2825,6 @@ body.editing .exhibit-entry.active .icon-button.danger {
     font-size: .875rem;
     overflow-wrap: anywhere;
 }
-@media (max-width: 1120px) and (min-width: 861px) {
-    #editbar {
-        left: 19px;
-        width: calc(var(--list) - 38px);
-    }
-}
 
 @media (max-width: 860px) {
     #editbar {
@@ -2821,11 +2833,11 @@ body.editing .exhibit-entry.active .icon-button.danger {
         gap: 6px 12px;
         top: auto;
         bottom: calc(77px + env(safe-area-inset-bottom));
-        left: 14px;
-        right: 14px;
+        left: var(--sidebar-inset);
+        right: var(--sidebar-inset);
         width: auto;
         max-height: calc(100dvh - 190px);
-        padding: 10px 12px;
+        padding: 10px var(--sidebar-label-inset);
         border-radius: 8px;
         background: #f7f8faf5;
         box-shadow: 0 2px 4px #202b3308, 0 8px 22px #202b331a;
@@ -2854,7 +2866,7 @@ body.editing .exhibit-entry.active .icon-button.danger {
         min-height: 44px;
     }
     #edit-signature {
-        grid-column: 1;
+        grid-column: 1 / -1;
         grid-row: 2;
         margin: 0;
         min-width: 0;
@@ -2863,8 +2875,8 @@ body.editing .exhibit-entry.active .icon-button.danger {
         grid-column: 1 / -1;
     }
     #editbar.signing .edit-session-actions {
-        grid-column: 2;
-        grid-row: 2;
+        grid-column: 1 / -1;
+        grid-row: 3;
     }
     #edit-save-error {
         grid-column: 1 / -1;
@@ -2919,9 +2931,6 @@ body.editing .exhibit-entry.active .icon-button.danger {
         width: 44px;
         height: 44px;
         min-height: 44px;
-    }
-    body.editing {
-        --exhibit-action-size: 44px;
     }
     .conflict-card {
         padding: 16px;

@@ -360,9 +360,19 @@ function renderSidebar() {
     renderList();
 }
 
-function exhibitLabel(record) {
+function exhibitLabel(record, editable = false) {
+    const text = displayName(record);
+    const name = value => `<span class="exhibit-name" ${editable ? 'aria-hidden="true"' : ''}>${esc(value)}</span>`;
+    let title = name(text);
+    if (editable) {
+        if (record.id === selected) {
+            const end = text.search(/\S+$/u);
+            title = `${name(text.slice(0, end))}<span class="exhibit-name-end">${name(text.slice(end))}<button type="button" class="icon-button exhibit-rename" data-rename-exhibit="${esc(record.id)}" aria-label="${esc(t('renameExhibit') + ': ' + text)}" ${editHelp('renameExhibitHint')}>${icon('pencil-line')}</button></span>`;
+        }
+        title = `<span class="exhibit-title-line">${title}</span>`;
+    }
     return `<span class="exhibit-label">
-        <span class="exhibit-name">${esc(displayName(record))}</span>
+        ${title}
         ${!edit && colorMode() !== 'default' ? `<span class="exhibit-status-name">${esc(t(record.status))}</span>` : ''}
         ${record.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
     </span>`;
@@ -378,7 +388,7 @@ function fitSidebar() {
         const measure = document.createElement('div');
         measure.className = 'exhibit-measure';
         measure.setAttribute('aria-hidden', 'true');
-        measure.innerHTML = data().exhibits.map(exhibitLabel).join('');
+        measure.innerHTML = data().exhibits.map(record => exhibitLabel(record)).join('');
         sidebar.append(measure);
         let contentWidth = 0;
         for (const label of measure.children) contentWidth = Math.max(contentWidth, label.getBoundingClientRect().width);
@@ -386,7 +396,7 @@ function fitSidebar() {
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
         // Reserve row padding, action or status space, and a scrollbar gutter.
-        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 72 : 32) + 16);
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }
@@ -411,11 +421,17 @@ function renderList() {
         const details = [titleFloor(e.floorId)];
         if (!e.placed) details.push(t('unplaced'));
         else if (!edit) details.push(t(e.status));
+        if (edit) return `
+        <div class="exhibit-entry ${e.id === selected ? 'active' : ''}">
+            <button type="button" class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-label="${esc(displayName(e))}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}"></button>
+            ${exhibitLabel(e, true)}
+            ${e.id === selected ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}
+        </div>`;
         return `
         <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
-            ${edit ? '' : `<span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>`}
+            <span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>
             ${exhibitLabel(e)}
-        </button>${edit && e.id === selected ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}</div>`;
+        </button></div>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
     fitSidebar();
 }
@@ -1434,8 +1450,8 @@ function openExhibitEditor(isNew = false) {
     if (creationOpen) $('#creation-form input')?.focus();
 }
 
-function renameExhibit() {
-    const record = exhibit();
+function renameExhibit(id = selected) {
+    const record = data()?.exhibits.find(item => item.id === id);
     if (!edit || !record || editSave?.saving) return;
     showDialog('renameExhibit', `<div class="field"><label for="exhibit-name">${esc(t('name'))}</label><input id="exhibit-name" name="name" value="${esc(record.name)}" maxlength="160" required autocomplete="off"></div>${footer('apply')}`, form => {
         const name = exhibitName(String(form.get('name') || ''));
@@ -1444,7 +1460,7 @@ function renameExhibit() {
         }
         closeDialog();
         applyEdit(state => { state.exhibits.find(item => item.id === record.id).name = name; }, { rebuild: true });
-    });
+    }, 'renameExhibit:' + record.id);
     $('#exhibit-name').focus();
     $('#exhibit-name').select();
 }
@@ -1925,6 +1941,7 @@ document.addEventListener('click', async event => {
     if (!element) return;
     try {
         if (element.dataset.floor) { changeFloor(element.dataset.floor); return; }
+        if (element.dataset.renameExhibit) { renameExhibit(element.dataset.renameExhibit); return; }
         if (element.dataset.trashExhibit) { removeExhibit(element.dataset.trashExhibit); return; }
         if (element.dataset.deleteNote) { deleteNoteDialog(element.dataset.deleteNote); return; }
         if (element.dataset.language) { setLanguage(element.dataset.language); render(); return; }

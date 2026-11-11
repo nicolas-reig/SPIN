@@ -226,7 +226,7 @@ Exhibit deletion is staged in edit mode and applied with the signed Save. An exh
 | Stored status | German label | English label |
 | --- | --- | --- |
 | `ok` | Ok | Ok |
-| `problem` | Aufmerksamkeit nötig | Needs attention |
+| `problem` | In Bearbeitung | In progress |
 | `retired` | Außer Betrieb | Out of service |
 
 There is no stored `placed` flag. The app derives map placement from an existing floor assignment and at least one recognized hardware instance. A floor assignment alone does not put an exhibit on the map. Missing model references and instances with invalid transforms are skipped when reading; this can leave an exhibit unplaced. App saves require a floor for hardware instances and allow at most 100 instances per exhibit.

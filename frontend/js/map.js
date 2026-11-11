@@ -112,6 +112,7 @@ export class MapView {
         this.generation = 0;
         this.mode = 'perspective';
         this.selected = null;
+        this.selection = new Set();
         this.frame = 0;
         this.snap = false;
         this.loader = new GLTFLoader();
@@ -199,7 +200,7 @@ export class MapView {
         canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
         canvas.addEventListener('pointerup', e => {
             this.orbitFromTop = null;
-            if (e.button !== 0 || e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.dragging || this.transform.axis) return;
+            if (e.button !== 0 || !this.editing && e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.dragging || this.transform.axis) return;
             const r = canvas.getBoundingClientRect();
             const pointer = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
             const ray = new THREE.Raycaster();
@@ -209,11 +210,11 @@ export class MapView {
                 let o = h.object;
                 while (o && !o.userData.exhibitId) o = o.parent;
                 if (o) {
-                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex || 0);
+                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex || 0, e.shiftKey);
                     return;
                 }
             }
-            this.onSelect(null);
+            this.onSelect(null, 0, e.shiftKey);
         });
         this.resize();
         return this;
@@ -296,10 +297,11 @@ export class MapView {
         this.requestRender();
     }
     async setData(data, floorId, selected, editing = false, {
-        reset = false
+        reset = false, selection = selected ? [selected] : []
     } = {}) {
         this.data = data;
         this.selected = selected;
+        this.selection = new Set(selection);
         this.editing = editing;
         const floor = data.floors.find(f => f.id === floorId);
         if (!floor) {
@@ -383,13 +385,13 @@ export class MapView {
     highlight(id) {
         this.selected = id;
         for (const [exhibitId, group] of this.objects) {
-            const material = this.exhibitMaterial(group.userData.status, exhibitId === id);
+            const material = this.exhibitMaterial(group.userData.status, this.selection.has(exhibitId));
             group.traverse(mesh => {
                 if (mesh.isMesh) mesh.material = material;
             });
         }
         const object = this.objects.get(id);
-        if (object && this.editing && this.tool && object.children[this.activeInstance || 0]) {
+        if (object && this.editing && this.selection.size === 1 && this.tool && object.children[this.activeInstance || 0]) {
             this.transform?.attach(object.children[this.activeInstance || 0]);
         }
         else this.transform?.detach();

@@ -45,6 +45,37 @@ final class RequestCache
         return sys_get_temp_dir() . '/digitaltwin-requests-' . hash('sha256', $root) . '.json';
     }
 
+    private function receipts(): array
+    {
+        $path = self::path($this->root);
+        clearstatcache(true, $path);
+        if (is_link($path)) throw new ApiError('invalidPath');
+        $body = is_file($path) && @filesize($path) <= self::MAX_BYTES ? @file_get_contents($path) : false;
+        $entries = $body === false ? [] : json_decode($body, true);
+        return is_array($entries) ? array_filter($entries, fn($entry) => is_array($entry) &&
+            ($entry['at'] ?? 0) >= time() - self::LIFETIME && is_string($entry['fingerprint'] ?? null)) : [];
+    }
+
+    public function wasApplied(string $request, ?string $fingerprint = null): bool
+    {
+        $entry = $this->receipts()[$request] ?? null;
+        if ($entry && $fingerprint !== null && $entry['fingerprint'] !== $fingerprint) throw new ApiError('requestConflict', 409);
+        return $entry !== null;
+    }
+
+    public function remember(string $request, string $fingerprint): void
+    {
+        $path = self::path($this->root);
+        Files::lock($path, function () use ($path, $request, $fingerprint) {
+            $entries = $this->receipts();
+            $entries[$request] = ['at' => time(), 'fingerprint' => $fingerprint];
+            $entries = array_slice($entries, -256, null, true);
+            while (strlen($body = json_encode($entries, JSON_THROW_ON_ERROR)) > self::MAX_BYTES) array_shift($entries);
+            (new Files())->write($path, $body);
+            chmod($path, 0600);
+        });
+    }
+
     public static function prune(): void
     {
         foreach (glob(sys_get_temp_dir() . '/digitaltwin-requests-*.json') ?: [] as $path) {

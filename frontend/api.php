@@ -7,6 +7,7 @@ require dirname(__DIR__) . '/backend/Store.php';
 require dirname(__DIR__) . '/backend/Files.php';
 require dirname(__DIR__) . '/backend/RequestCache.php';
 require dirname(__DIR__) . '/backend/HumanFiles.php';
+require dirname(__DIR__) . '/backend/JoinFiles.php';
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 try {
@@ -28,7 +29,7 @@ try {
             readfile($a['path']);
             exit;
         }
-        $result = $store->snapshot();
+        $result = ($_GET['action'] ?? '') === 'receipt' ? ['applied' => $store->receipt($_GET['requestId'] ?? '')] : $store->snapshot();
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (($_SERVER['HTTP_X_HUB_REQUEST'] ?? '') !== '1') {
             throw new ApiError('invalidRequest', 403);

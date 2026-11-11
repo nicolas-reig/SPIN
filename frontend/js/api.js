@@ -34,6 +34,9 @@ export class Api {
     async load() {
         return validateSnapshot(await this.request());
     }
+    async receipt(requestId) {
+        return (await this.request('api.php?action=receipt&requestId=' + encodeURIComponent(requestId))).applied === true;
+    }
     async save(payload, options = {}) {
         const r = await this.request('api.php', {
             method: 'POST',

@@ -130,6 +130,8 @@ Exhibits instance these shared files. Several exhibits can use the same file, an
 
 Every valid direct child folder of `Exponate/` becomes an exhibit, and **its folder name is its exhibit name**. There is no separate name or ID to enter in metadata. Renaming the folder changes its identity in the app and any saved links that select it by name.
 
+In edit mode, the pencil beside the exhibit title changes its name. The folder is renamed only after the signed Save; posts, photos and documentation links move with it. Until then, the change can be undone or canceled. Names must be unique, including capitalization differences.
+
 An exhibit can contain:
 
 | Item | Contents |

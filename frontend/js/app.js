@@ -6,8 +6,7 @@ import {
     EditSession,
     identity,
     STATUSES,
-    normalizeStatus,
-    structural
+    normalizeStatus
 } from './domain.js';
 import {
     t,
@@ -24,7 +23,7 @@ import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
 import { cameraMode, viewMode } from './camera.js';
 import { CameraControls } from './camera-controls.js';
-import { editHelp, vectorFields, viewPresets, newExhibit, duplicateExhibit, rebaseEdit } from './edit.js';
+import { editHelp, vectorFields, viewPresets, exhibitName, newExhibit, duplicateExhibit, rebaseEdit, editWasSaved } from './edit.js';
 import { icon } from './icons.js';
 import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
@@ -1124,7 +1123,7 @@ function renderEditInspector() {
     if (editConflict?.open) { renderEditConflict(); return; }
     const record = exhibit();
     const title = creationOpen ? t('newExhibit') : displayName(record);
-    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
+    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
@@ -1435,6 +1434,21 @@ function openExhibitEditor(isNew = false) {
     if (creationOpen) $('#creation-form input')?.focus();
 }
 
+function renameExhibit() {
+    const record = exhibit();
+    if (!edit || !record || editSave?.saving) return;
+    showDialog('renameExhibit', `<div class="field"><label for="exhibit-name">${esc(t('name'))}</label><input id="exhibit-name" name="name" value="${esc(record.name)}" maxlength="160" required autocomplete="off"></div>${footer('apply')}`, form => {
+        const name = exhibitName(String(form.get('name') || ''));
+        if (data().exhibits.some(item => item.id !== record.id && item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            throw Error('duplicateName');
+        }
+        closeDialog();
+        applyEdit(state => { state.exhibits.find(item => item.id === record.id).name = name; }, { rebuild: true });
+    });
+    $('#exhibit-name').focus();
+    $('#exhibit-name').select();
+}
+
 function renderCreation() {
     const record = creation.record;
     const fields = `
@@ -1458,7 +1472,7 @@ function commitCreation() {
     try {
         const raw = creation.record;
         const record = newExhibit(raw.name, raw.floorId);
-        if (data().exhibits.some(item => item.id.toLocaleLowerCase() === record.id.toLocaleLowerCase())) throw Error('duplicateName');
+        if (data().exhibits.some(item => [item.id, item.name].some(value => value.toLocaleLowerCase() === record.id.toLocaleLowerCase()))) throw Error('duplicateName');
         edit.change(state => state.exhibits.push(record));
         creation = null;
         creationOpen = false;
@@ -1571,6 +1585,63 @@ async function saveExit() {
     $('#edit-signature').focus();
 }
 
+function moveRenamedDrafts(session, saved) {
+    const renames = new Map(session.changes().filter(change => change.op === 'put' && change.id !== change.record.name)
+        .map(change => [change.id, change.record.name]));
+    if (!renames.size) return;
+    const noteIds = new Map();
+    for (const [source, target] of renames) {
+        const before = session.base.exhibits.find(record => record.id === source);
+        const after = saved.exhibits.find(record => record.id === target);
+        if (!after) continue;
+        for (const note of before?.notes || []) {
+            const renamed = after.notes.find(item => item.file === note.file);
+            if (note.file && renamed) noteIds.set(note.id, renamed.id);
+        }
+        const draft = drafts[source];
+        if (draft) {
+            if (draft.noteId) draft.noteId = noteIds.get(draft.noteId) || draft.noteId;
+            if (draft.baseRevision === before?.revision) draft.baseRevision = after.revision;
+        }
+        const link = linkDrafts[source];
+        if (link?.id) {
+            const original = before?.links.find(item => item.id === link.id);
+            link.id = after.links.find(item => item.title === original?.title)?.id || link.id;
+        }
+    }
+    for (const store of [drafts, linkDrafts, linkSearches]) {
+        const entries = Object.entries(store);
+        for (const key of Object.keys(store)) delete store[key];
+        for (const [key, value] of entries) store[renames.get(key) || key] = value;
+    }
+    dialogDrafts = Object.assign(Object.create(null), Object.fromEntries(Object.entries(dialogDrafts).map(([key, value]) => {
+        const parts = key.split(':');
+        parts[1] = renames.get(parts[1]) || parts[1];
+        if (parts[0] === 'deleteNote') parts[2] = noteIds.get(parts[2]) || parts[2];
+        return [parts.join(':'), value];
+    })));
+    selected = renames.get(selected) || selected;
+    persistDrafts();
+    persistLinks();
+    saveDraftCategory('dialogs', dialogDrafts);
+}
+
+function finishEditSave(session, saved) {
+    moveRenamedDrafts(session, saved);
+    edit = null;
+    creation = null;
+    creationOpen = false;
+    editConflict = null;
+    editSave = null;
+    cancelledEdit = null;
+    gizmo = '';
+    persistEdit();
+    acceptSnapshot(saved);
+    syncUrl();
+    syncEditTools();
+    announce(t('saved'));
+}
+
 async function confirmEditSave() {
     if (!edit || !editSave?.signing || editSave.saving || !editSave.signature.trim()) return;
     if (editConflict) { actions.structureConflict(); return; }
@@ -1589,17 +1660,7 @@ async function confirmEditSave() {
         const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision, requestId: save.requestId, signature, changes }, { signal: save.controller.signal });
         if (edit !== session) return;
         rememberSignature(signature);
-        edit = null;
-        creation = null;
-        creationOpen = false;
-        editConflict = null;
-        editSave = null;
-        cancelledEdit = null;
-        gizmo = '';
-        persistEdit();
-        acceptSnapshot(result.snapshot);
-        syncEditTools();
-        announce(t('saved'));
+        finishEditSave(session, result.snapshot);
     } catch (error) {
         if (error.name === 'AbortError' || edit !== session || editSave !== save) return;
         save.error = error.key || error.message || 'storage';
@@ -1635,20 +1696,7 @@ async function reconcileCancelledSave(session) {
     try {
         const live = await api.load();
         if (edit !== session) return;
-        const saved = session.changes().every(change => {
-            const record = live[change.kind].find(item => item.id === change.id);
-            return change.op === 'delete' ? !record : record && JSON.stringify(structural(record)) === JSON.stringify(change.record);
-        });
-        if (saved) {
-            edit = null;
-            creation = null;
-            creationOpen = false;
-            gizmo = '';
-            persistEdit();
-            acceptSnapshot(live);
-            syncEditTools();
-            announce(t('saved'));
-        }
+        if (editWasSaved(session, live)) finishEditSave(session, live);
     } catch { announce(t('offline')); }
 }
 
@@ -1679,6 +1727,7 @@ async function structureConflict(expectedSave = null) {
     const session = edit;
     const live = await api.load();
     if (edit !== session || expectedSave && editSave !== expectedSave) return;
+    if (editWasSaved(session, live)) { finishEditSave(session, live); return; }
     const result = rebaseEdit(session, live);
     if (!result.conflicts.length) {
         snapshot = live;
@@ -1710,7 +1759,7 @@ function conflictValue(value) {
 }
 
 function renderEditConflict() {
-    const labels = { floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit' };
+    const labels = { name: 'name', floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
     $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p><div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ['mine', t('useMine')]], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
@@ -1828,6 +1877,7 @@ const actions = {
     recoverEdit,
     resumeCreation: () => openExhibitEditor(true),
     duplicateExhibit: () => duplicateSelected(),
+    renameExhibit,
     cancelConflict: () => { editConflict.open = false; renderInspector(); renderMapUI(); syncEditTools(); },
     cancelSignature: () => {
         drafts[selected].signing = false;

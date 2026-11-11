@@ -283,7 +283,8 @@ small,
 
 .item-actions > .icon-button,
 .item-actions > details > summary,
-.link-actions > .icon-button {
+.link-actions > .icon-button,
+.edit-exhibit-title > .icon-button {
     width: 32px;
     height: 32px;
     min-height: 32px;
@@ -2529,8 +2530,16 @@ button.edit-session-label {
     gap: 12px;
 }
 
-.edit-inspector-header h1 {
+.edit-exhibit-title {
+    display: flex;
+    align-items: flex-start;
     flex: 1;
+    min-width: 0;
+    gap: 6px;
+}
+
+.edit-exhibit-title h1 {
+    flex: 0 1 auto;
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -2824,7 +2833,7 @@ body.editing .exhibit-entry {
     .instance-placement > summary, .exhibit-transform > summary, .view-presets > summary {
         min-height: 44px;
     }
-    .item-actions > .icon-button, .item-actions > details > summary, .link-actions > .icon-button, .hardware-picker > summary {
+    .item-actions > .icon-button, .item-actions > details > summary, .link-actions > .icon-button, .hardware-picker > summary, .edit-exhibit-title > .icon-button {
         width: 44px;
         height: 44px;
         min-height: 44px;

@@ -169,6 +169,7 @@ final class HumanFiles
             }
             $note = [
                 'id' => self::noteId($noteFolder, $name),
+                'file' => $name,
                 'author' => $dated['author'],
                 'at' => $dated['when']->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
                 'body' => trim($body),

@@ -506,6 +506,7 @@ final class Store
         $modelIds = array_column($snapshot['assets'], 'id');
         $operations = [];
         $seen = [];
+        $names = array_column($snapshot['exhibits'], 'name', 'id');
         foreach ($changes as $change) {
             $kind = $change['kind'] ?? '';
             $op = $change['op'] ?? '';
@@ -532,32 +533,52 @@ final class Store
                     throw new ApiError('conflict', 409);
                 }
                 $operations[] = ['deleteExhibit', $id];
+                unset($names[$id]);
                 continue;
             }
             $record = $change['record'] ?? null;
             if (!is_array($record) || ($record['id'] ?? null) !== $id) {
                 throw new ApiError('invalidId');
             }
-            if (($record['name'] ?? null) !== $id) {
-                throw new ApiError('invalidInput');
-            }
+            $name = self::exhibitId($record['name'] ?? null);
             $meta = $this->exhibitMeta($record, $floorIds, $modelIds, $signature);
             if (!$old) $meta['createdAt'] = gmdate('Y-m-d\TH:i:s\Z');
             elseif ($old['createdAt'] !== null) $meta['createdAt'] = $old['createdAt'];
-            $operations[] = ['putExhibit', $id, $meta];
+            $operations[] = ['putExhibit', $id, $meta, $name, (bool)$old];
+            $names[$id] = $name;
+        }
+        $foldedNames = array_map(fn($name) => mb_strtolower($name, 'UTF-8'), array_values($names));
+        if (count(array_unique($foldedNames)) !== count($foldedNames)) {
+            throw new ApiError('duplicateName', 409);
         }
         foreach ($operations as $operation) {
             [$op, $id] = $operation;
-            $value = $operation[2] ?? null;
-            if ($op === 'putExhibit') {
-                $path = $this->path($this->exhibits, $id);
-                $this->files->directory($path);
-                $this->writeJson($path . '/.exhibit.json', $value);
-            } else {
-                $path = $this->path($this->exhibits, $id);
-                $this->files->removeTree($path);
+            if ($op === 'deleteExhibit') {
+                $this->files->removeTree($this->path($this->exhibits, $id));
             }
         }
+        $renames = [];
+        foreach ($operations as $operation) {
+            if ($operation[0] !== 'putExhibit' || !$operation[4]) continue;
+            [, $id, $meta, $name] = $operation;
+            $path = $this->path($this->exhibits, $id);
+            $this->writeJson($path . '/.exhibit.json', $meta);
+            if ($name !== $id) {
+                $temporary = $this->exhibits . '/.rename-' . bin2hex(random_bytes(16));
+                $this->files->move($path, $temporary);
+                $renames[] = [$temporary, $this->path($this->exhibits, $name)];
+            }
+        }
+        foreach ($operations as $operation) {
+            if ($operation[0] === 'putExhibit' && !$operation[4]) {
+                [, , $meta, $name] = $operation;
+                $path = $this->exhibits . '/.rename-' . bin2hex(random_bytes(16));
+                $this->files->directory($path);
+                $this->writeJson($path . '/.exhibit.json', $meta);
+                $renames[] = [$path, $this->path($this->exhibits, $name)];
+            }
+        }
+        foreach ($renames as [$source, $destination]) $this->files->move($source, $destination);
     }
 
     public function mutate(array $payload, array $uploads = []): array

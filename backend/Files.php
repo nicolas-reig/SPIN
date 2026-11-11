@@ -9,6 +9,7 @@ final class Files
     private array $created = [];
     private array $removed = [];
     private array $detached = [];
+    private array $moved = [];
 
     public static function lock(string $key, Closure $action, float $timeout = 10): mixed
     {
@@ -52,8 +53,8 @@ final class Files
         } catch (Throwable $error) {
             $this->active = false;
             try {
-                foreach (array_reverse($this->detached) as [$path, $temporary]) {
-                    if (!rename($temporary, $path)) throw new ApiError('storage', 503);
+                foreach (array_reverse($this->moved) as [$source, $destination]) {
+                    if (!rename($destination, $source)) throw new ApiError('storage', 503);
                 }
                 foreach (array_reverse($this->removed) as $path) $this->directory($path);
                 foreach (array_reverse($this->before, true) as $path => $body) {
@@ -76,6 +77,7 @@ final class Files
             $detached = $this->detached;
             $this->before = $this->created = $this->removed = [];
             $this->detached = [];
+            $this->moved = [];
         }
         foreach ($detached as [, $temporary]) {
             try {
@@ -175,7 +177,16 @@ final class Files
         }
         // Move the whole folder so a failed save can restore its contents without copying photos.
         $temporary = dirname($path) . '/.delete-' . bin2hex(random_bytes(16));
-        if (!rename($path, $temporary)) throw new ApiError('storage', 503);
+        $this->move($path, $temporary);
         $this->detached[] = [$path, $temporary];
+    }
+
+    public function move(string $source, string $destination): void
+    {
+        if (is_link($source) || is_link($destination)) throw new ApiError('invalidPath');
+        clearstatcache(true, $destination);
+        if (file_exists($destination)) throw new ApiError('duplicateName', 409);
+        if (!rename($source, $destination)) throw new ApiError('storage', 503);
+        if ($this->active) $this->moved[] = [$source, $destination];
     }
 }

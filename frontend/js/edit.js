@@ -64,7 +64,7 @@ export function duplicateExhibit(record, records) {
         let stem = record.name;
         while (new TextEncoder().encode(stem + suffix).length > 160) stem = stem.slice(0, -1);
         name = stem + suffix;
-    } while (records.some(item => item.id.toLocaleLowerCase() === name.toLocaleLowerCase()));
+    } while (records.some(item => [item.id, item.name].some(value => value.toLocaleLowerCase() === name.toLocaleLowerCase())));
     copy.id = copy.name = name;
     copy.transform.position[0] += 2;
     copy.notes = [];
@@ -76,7 +76,7 @@ export function duplicateExhibit(record, records) {
 }
 
 const equal = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-const fields = ['floorId', 'transform', 'models', 'views.2D', 'views.3D'];
+const fields = ['name', 'floorId', 'transform', 'models', 'views.2D', 'views.3D'];
 const get = (record, field) => field.split('.').reduce((value, key) => value?.[key], record);
 function put(record, field, value) {
     const parts = field.split('.');
@@ -85,6 +85,19 @@ function put(record, field, value) {
     for (const key of parts) target = target[key] ||= {};
     if (value === undefined) delete target[last];
     else target[last] = structuredClone(value);
+}
+
+export function editWasSaved(session, live) {
+    const changes = session.changes();
+    const targets = new Set(changes.filter(change => change.op === 'put').map(change => change.record.name));
+    return changes.length > 0 && changes.every(change => {
+        const records = live[change.kind];
+        if (change.op === 'delete') return targets.has(change.id) || !records.some(record => record.id === change.id);
+        const target = change.record.name;
+        const record = records.find(item => item.id === target);
+        if (target !== change.id && !targets.has(change.id) && records.some(item => item.id === change.id)) return false;
+        return record && equal(structural(record), { ...change.record, id: target });
+    });
 }
 
 export function rebaseEdit(session, live, choices = {}) {

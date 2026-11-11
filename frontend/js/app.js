@@ -467,13 +467,21 @@ function renderMapUI() {
     mapControls = new CameraControls($('#map-controls'), {
         id: 'map', mode: mapMode, getView: () => map,
         focus: () => actions.focus(),
-        canFocus: () => Boolean(selected && map?.objects.has(selected)),
-        extras: edit && editSelection.size === 1 && exhibit()?.models.length && !creationOpen && !editConflict?.open ? `<span class="toolbar-divider"></span><div class="transform-controls"><div class="transform-tools" role="group" aria-label="${esc(t('gizmo'))}">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details></div>` : ''
+        canFocus: () => Boolean(selected && map?.objects.has(selected))
     });
-    $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); });
-    $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); });
+    renderTransformToolbar();
     $('#map-message').textContent = mapState === 'mapReady' ? '' : t(mapState);
     map?.resize();
+}
+
+function renderTransformToolbar() {
+    const toolbar = $('#transform-toolbar');
+    const available = Boolean(edit && editSelection.size === 1 && exhibit()?.models.length && !creationOpen && !editConflict?.open);
+    toolbar.hidden = !available;
+    toolbar.setAttribute('aria-label', t('gizmo'));
+    toolbar.innerHTML = available ? `<div class="transform-tools">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><span class="toolbar-divider" aria-hidden="true"></span><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details>` : '';
+    $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); });
+    $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); });
 }
 
 async function ensureMap() {

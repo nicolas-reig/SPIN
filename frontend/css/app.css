@@ -284,6 +284,7 @@ small,
 .item-actions > .icon-button,
 .item-actions > details > summary,
 .link-actions > .icon-button,
+.exhibit-rename,
 .edit-exhibit-title > .icon-button {
     width: 32px;
     height: 32px;
@@ -350,6 +351,7 @@ summary {
 }
 
 #sidebar {
+    --sidebar-inset: 16px;
     position: relative;
     z-index: 4;
     display: flex;
@@ -357,7 +359,7 @@ summary {
     min-height: 0;
     background: var(--panel);
     border-radius: 0 14px 14px 0;
-    padding: 32px 16px 20px;
+    padding: 32px var(--sidebar-inset) 20px;
     box-shadow: 3px 0 5px #1e2b3503, 12px 0 40px #1e2b3513;
 }
 
@@ -1439,8 +1441,7 @@ dialog::backdrop {
     }
 
     #sidebar {
-        padding-left: 12px;
-        padding-right: 12px;
+        --sidebar-inset: 12px;
     }
 
     .inspector-header {
@@ -1496,7 +1497,8 @@ dialog::backdrop {
     }
 
     #sidebar {
-        padding: 30px 22px 14px;
+        --sidebar-inset: 22px;
+        padding: 30px var(--sidebar-inset) 14px;
     }
 
     .sidebar-title {
@@ -1875,6 +1877,7 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 
 
 body.editing {
+    --exhibit-action-size: 32px;
     --accent: var(--edit-accent);
     --accent-soft: color-mix(in srgb, var(--edit-accent) 10%, white);
     --panel: #f1eef6;
@@ -2581,9 +2584,81 @@ button.edit-session-label {
 }
 
 body.editing .exhibit-entry {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 66px;
-    gap: 6px;
+    gap: 2px;
+    min-height: 48px;
+    padding-right: 2px;
+    border-radius: 5.5px;
+}
+
+body.editing .exhibit-entry.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 2px 7px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+body.editing .exhibit-entry:hover:not(.active) {
+    background: #e4e7eb;
+}
+
+body.editing #exhibit-list {
+    margin-right: calc(-1 * var(--sidebar-inset));
+    padding-right: calc((var(--exhibit-action-size) - 18px) / 2);
+    scrollbar-gutter: auto;
+}
+
+body.editing .exhibit-entry > .exhibit-label {
+    padding: 8px 0 8px 12px;
+    pointer-events: none;
+}
+
+.exhibit-title-line {
+    display: block;
+    min-height: var(--exhibit-action-size);
+    max-width: 100%;
+}
+
+.exhibit-title-line .exhibit-name, .exhibit-name-end {
+    vertical-align: middle;
+}
+
+.exhibit-name-end {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    gap: 2px;
+}
+
+.exhibit-name-end > .exhibit-name {
+    min-width: 0;
+}
+
+.exhibit-rename {
+    pointer-events: auto;
+}
+
+body.editing .exhibit-row, body.editing .exhibit-row:hover {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    box-shadow: none;
+}
+
+.exhibit-rename, .exhibit-actions {
+    position: relative;
+    z-index: 1;
+}
+
+body.editing .exhibit-entry.active .icon-button {
+    color: inherit;
+}
+
+body.editing .exhibit-entry.active .icon-button.danger {
+    color: #ffe6e6;
 }
 
 .instance-heading {
@@ -2833,7 +2908,7 @@ body.editing .exhibit-entry {
     .instance-placement > summary, .exhibit-transform > summary, .view-presets > summary {
         min-height: 44px;
     }
-    .item-actions > .icon-button, .item-actions > details > summary, .link-actions > .icon-button, .hardware-picker > summary, .edit-exhibit-title > .icon-button {
+    .item-actions > .icon-button, .item-actions > details > summary, .link-actions > .icon-button, .hardware-picker > summary, .edit-exhibit-title > .icon-button, .exhibit-rename {
         width: 44px;
         height: 44px;
         min-height: 44px;
@@ -2844,8 +2919,8 @@ body.editing .exhibit-entry {
         height: 44px;
         min-height: 44px;
     }
-    body.editing .exhibit-entry {
-        grid-template-columns: minmax(0, 1fr) 90px;
+    body.editing {
+        --exhibit-action-size: 44px;
     }
     .conflict-card {
         padding: 16px;

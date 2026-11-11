@@ -213,6 +213,9 @@ The full supported structure is:
 | `models` | Hardware instances, each with a `model` path and optional `transform`. | No hardware. |
 | `views` | Optional `2D` and `3D` camera presets. | Automatic framing of the exhibit's hardware. |
 | `lastEditedBy` | The name from the last signed structural Save in edit mode. It is a single attribution, not a history. Status changes do not update it. | Empty. |
+| `createdAt` | Creation time in ISO 8601 format, recorded by the server when the app creates an exhibit. | Unknown age. Deleting the exhibit requires confirmation. |
+
+Exhibit deletion is staged in edit mode and applied with the signed Save. An exhibit older than ten minutes, with an unknown creation time, or containing posts or links requires a warning confirmation. Saving removes its entire folder, including photos and other files. Undo or Cancel can restore a staged deletion before Save.
 
 | Stored status | German label | English label |
 | --- | --- | --- |

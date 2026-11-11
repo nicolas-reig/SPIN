@@ -8,6 +8,7 @@ final class Files
     private array $before = [];
     private array $created = [];
     private array $removed = [];
+    private array $detached = [];
 
     public static function lock(string $key, Closure $action, float $timeout = 10): mixed
     {
@@ -47,10 +48,13 @@ final class Files
         if ($this->active) return $action();
         $this->active = true;
         try {
-            return $action();
+            $result = $action();
         } catch (Throwable $error) {
             $this->active = false;
             try {
+                foreach (array_reverse($this->detached) as [$path, $temporary]) {
+                    if (!rename($temporary, $path)) throw new ApiError('storage', 503);
+                }
                 foreach (array_reverse($this->removed) as $path) $this->directory($path);
                 foreach (array_reverse($this->before, true) as $path => $body) {
                     if ($body === null) {
@@ -69,8 +73,18 @@ final class Files
             throw $error;
         } finally {
             $this->active = false;
+            $detached = $this->detached;
             $this->before = $this->created = $this->removed = [];
+            $this->detached = [];
         }
+        foreach ($detached as [, $temporary]) {
+            try {
+                self::eraseTree($temporary);
+            } catch (Throwable $error) {
+                error_log('Deleted exhibit cleanup failed: ' . $error->getMessage());
+            }
+        }
+        return $result;
     }
 
     public function directory(string $path): void
@@ -127,5 +141,41 @@ final class Files
             if (!unlink($path)) throw new ApiError('storage', 503);
             if ($remember) $this->before[$path] = $before;
         }
+    }
+
+    private static function treePaths(string $path): iterable
+    {
+        if (is_dir($path) && !is_link($path)) {
+            $entries = scandir($path);
+            if ($entries === false) throw new ApiError('storage', 503);
+            foreach ($entries as $name) {
+                if ($name !== '.' && $name !== '..') yield from self::treePaths($path . '/' . $name);
+            }
+        }
+        yield $path;
+    }
+
+    private static function eraseTree(string $path): void
+    {
+        foreach (self::treePaths($path) as $entry) {
+            $removed = is_dir($entry) && !is_link($entry) ? rmdir($entry) : unlink($entry);
+            if (!$removed) throw new ApiError('storage', 503);
+        }
+    }
+
+    public function removeTree(string $path): void
+    {
+        if (is_link($path)) throw new ApiError('invalidPath');
+        foreach (self::treePaths($path) as $entry) {
+            if (!is_writable(dirname($entry))) throw new ApiError('storage', 503);
+        }
+        if (!$this->active) {
+            self::eraseTree($path);
+            return;
+        }
+        // Move the whole folder so a failed save can restore its contents without copying photos.
+        $temporary = dirname($path) . '/.delete-' . bin2hex(random_bytes(16));
+        if (!rename($path, $temporary)) throw new ApiError('storage', 503);
+        $this->detached[] = [$path, $temporary];
     }
 }

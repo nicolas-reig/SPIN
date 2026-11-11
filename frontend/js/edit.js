@@ -51,7 +51,7 @@ export function newExhibit(name, floorId) {
     return {
         id: exhibitName(name), name: exhibitName(name), floorId: floorId || null, status: 'ok',
         transform: identity(), models: [], views: {}, revision: null,
-        notes: [], links: [], placed: false
+        notes: [], links: [], placed: false, createdAt: new Date().toISOString()
     };
 }
 
@@ -70,6 +70,7 @@ export function duplicateExhibit(record, records) {
     copy.notes = [];
     copy.links = [];
     copy.revision = null;
+    copy.createdAt = new Date().toISOString();
     delete copy.contentTag;
     return copy;
 }
@@ -101,7 +102,7 @@ export function rebaseEdit(session, live, choices = {}) {
             const desired = session.value[change.kind].find(record => record.id === change.id);
             if (change.op === 'delete') {
                 if (!current) continue;
-                if (!equal(structural(base), structural(current)) &&
+                if ((!equal(structural(base), structural(current)) || base.contentTag !== current.contentTag) &&
                     !choose(change, 'record', current, null)) continue;
                 state[change.kind] = state[change.kind].filter(record => record.id !== change.id);
             } else if (!base || !current) {

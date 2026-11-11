@@ -278,14 +278,15 @@ small,
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    gap: 4px;
+    gap: 2px;
 }
 
 .item-actions > .icon-button,
-.item-actions > details > summary {
-    width: 36px;
-    height: 36px;
-    min-height: 36px;
+.item-actions > details > summary,
+.link-actions > .icon-button {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
 }
 
 .lucide {
@@ -1073,7 +1074,7 @@ summary {
 
 .note-options .popover {
     right: -4px;
-    top: 34px;
+    top: calc(100% + 6px);
 }
 
 .composer-correction {
@@ -1809,14 +1810,22 @@ button, summary, select, label, .exhibit-row, .tabs, #map-heading,
 
 .note-footer .note-options .popover {
     top: auto;
-    bottom: 36px;
+    bottom: calc(100% + 6px);
+}
+
+.deletion-warning {
+    margin-block: 14px;
+    padding: 12px 14px;
+    border-radius: 5px;
+    color: var(--red);
+    background: var(--error-bg);
 }
 
 .edit-attribution {
     font-size: .8125rem;
     color: var(--muted);
     min-width: 0;
-    max-width: calc(100% - 84px);
+    max-width: calc(100% - 74px);
 }
 
 .edit-attribution summary {
@@ -2515,12 +2524,14 @@ button.edit-session-label {
 
 .edit-inspector-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
 }
 
 .edit-inspector-header h1 {
+    flex: 1;
+    margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
 }
@@ -2560,22 +2571,10 @@ button.edit-session-label {
     font-size: .8125rem;
 }
 
-body.editing .exhibit-row {
-    padding-right: 90px;
-}
-.exhibit-entry .exhibit-actions {
-    position: absolute;
-    top: 50%;
-    right: 6px;
-    transform: translateY(-50%);
-}
-
-.exhibit-row.active + .exhibit-actions > button {
-    color: #fff;
-}
-
-.exhibit-row.active + .exhibit-actions > button:hover:not(:disabled) {
-    background: #ffffff24;
+body.editing .exhibit-entry {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 66px;
+    gap: 6px;
 }
 
 .instance-heading {
@@ -2825,7 +2824,7 @@ body.editing .exhibit-row {
     .instance-placement > summary, .exhibit-transform > summary, .view-presets > summary {
         min-height: 44px;
     }
-    .item-actions > .icon-button, .item-actions > details > summary, .hardware-picker > summary {
+    .item-actions > .icon-button, .item-actions > details > summary, .link-actions > .icon-button, .hardware-picker > summary {
         width: 44px;
         height: 44px;
         min-height: 44px;
@@ -2836,8 +2835,8 @@ body.editing .exhibit-row {
         height: 44px;
         min-height: 44px;
     }
-    body.editing .exhibit-row {
-        padding-right: 110px;
+    body.editing .exhibit-entry {
+        grid-template-columns: minmax(0, 1fr) 90px;
     }
     .conflict-card {
         padding: 16px;

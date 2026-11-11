@@ -432,6 +432,7 @@ final class Store
                 'floorId' => $floorId,
                 'status' => in_array($meta['status'] ?? null, ['ok', 'problem', 'retired'], true) ? $meta['status'] : 'ok',
                 'lastEditedBy' => is_string($meta['lastEditedBy'] ?? null) ? $meta['lastEditedBy'] : '',
+                'createdAt' => is_string($meta['createdAt'] ?? null) ? $meta['createdAt'] : null,
                 'transform' => self::readTransform($meta['transform'] ?? null),
                 'models' => $models,
                 'placed' => $floorId !== null && count($models) > 0,
@@ -492,21 +493,6 @@ final class Store
         return $meta;
     }
 
-    private function assertEmptyExhibit(string $id): void
-    {
-        $root = $this->path($this->exhibits, $id);
-        foreach (scandir($root) ?: [] as $name) {
-            if (in_array($name, ['.', '..', '.exhibit.json'], true)) {
-                continue;
-            }
-            if (in_array($name, ['Notizen', 'Fotos', 'Links'], true) && is_dir($root . '/' . $name) &&
-                count(array_diff(scandir($root . '/' . $name) ?: [], ['.', '..'])) === 0) {
-                continue;
-            }
-            throw new ApiError('notEmpty', 409);
-        }
-    }
-
     private function structure(array $payload, array $snapshot, string $signature): void
     {
         if (($payload['baseRevision'] ?? null) !== $snapshot['structureRevision']) {
@@ -542,7 +528,9 @@ final class Store
                 if (!$old) {
                     throw new ApiError('invalidInput');
                 }
-                $this->assertEmptyExhibit($id);
+                if (($change['contentTag'] ?? null) !== $old['contentTag']) {
+                    throw new ApiError('conflict', 409);
+                }
                 $operations[] = ['deleteExhibit', $id];
                 continue;
             }
@@ -553,7 +541,10 @@ final class Store
             if (($record['name'] ?? null) !== $id) {
                 throw new ApiError('invalidInput');
             }
-            $operations[] = ['putExhibit', $id, $this->exhibitMeta($record, $floorIds, $modelIds, $signature)];
+            $meta = $this->exhibitMeta($record, $floorIds, $modelIds, $signature);
+            if (!$old) $meta['createdAt'] = gmdate('Y-m-d\TH:i:s\Z');
+            elseif ($old['createdAt'] !== null) $meta['createdAt'] = $old['createdAt'];
+            $operations[] = ['putExhibit', $id, $meta];
         }
         foreach ($operations as $operation) {
             [$op, $id] = $operation;
@@ -564,13 +555,7 @@ final class Store
                 $this->writeJson($path . '/.exhibit.json', $value);
             } else {
                 $path = $this->path($this->exhibits, $id);
-                $this->files->remove($path . '/.exhibit.json');
-                foreach (['Notizen', 'Fotos', 'Links'] as $folder) {
-                    if (is_dir($path . '/' . $folder)) {
-                        $this->files->remove($path . '/' . $folder);
-                    }
-                }
-                $this->files->remove($path);
+                $this->files->removeTree($path);
             }
         }
     }

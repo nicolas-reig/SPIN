@@ -2689,7 +2689,8 @@ body.editing .exhibit-entry.active .icon-button.danger {
 .instance-name {
     flex: 1;
     min-width: 0;
-    padding: 6px 0;
+    padding: 6px 8px;
+    margin-left: -8px;
     text-align: left;
     justify-content: flex-start;
     font-weight: 500;

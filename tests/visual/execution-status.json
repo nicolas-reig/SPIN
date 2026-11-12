@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-11-12T11:41:05.319376+00:00",
+  "recorded_at": "2026-11-12T12:25:05.510244+00:00",
   "baseline_ref": "0071aff11cc3b1accd3c893e69b1b0fb5df02062",
   "baseline_code_sha256": "a5777b541267f901e414dfbb2202eac79247052cd171d4c227e8452238c1ed44",
   "baseline_location": "/Users/nreigs/digitaltwin/ReviewBaseline/WebApp",
@@ -19,7 +19,7 @@
     "Original HTTP app was accessible in parent IAB for manual screenshots; local file protocol was explicitly blocked by browser policy and no workaround was used."
   ],
   "completed_checks": {
-    "python_comparator_and_stage_tests": 16,
+    "python_comparator_and_stage_tests": 26,
     "node_transport_tests": 3,
     "production_php_snapshot_glb_integration_candidate": 1,
     "production_php_snapshot_glb_integration_original_baseline": 1,
@@ -27,7 +27,8 @@
     "php_bridge_syntax": "passed",
     "synthetic_one_rgb_channel_one_pixel_control": "passed: exactly one differing pixel at channel delta 1",
     "synthetic_alpha_only_and_global_drift_controls": "passed",
-    "source_data_bytes_nanosecond_timestamp_copy_integrity": "passed"
+    "source_data_bytes_nanosecond_timestamp_copy_integrity": "passed",
+    "node_transport_loader_profile_tests": 12
   },
   "host": {
     "system": "Darwin",
@@ -43,10 +44,11 @@
   "manual_original_overview_repeatability": "passed: zero differing pixels out of 2250000; exact same JPEG SHA-256",
   "manual_screenshot_comparator_evidence": "real-frame-comparator-validation.json",
   "latest_source_verification": {
-    "node_unit_tests": 34,
+    "node_unit_tests": 44,
     "seeded_edit_actions": 800,
-    "php_bounded_read_test": "passed",
-    "application_javascript_syntax": 25,
+    "camera_corner_projections": 4800,
+    "php_test_suites": 6,
+    "application_javascript_syntax": 26,
     "application_php_syntax": 7
   },
   "baseline_content_note": "Live Blender source/backup files changed externally during review; all exported GLBs, floor metadata and exhibit bytes still match the frozen content. Automated comparisons use the preserved frozen data, never live data.",
@@ -62,5 +64,45 @@
     "clock_and_css": "Exact JS-clock advance and frozen capture probes implemented; finite compositor animations awaited without advancing JS time; browser behavior unexecuted",
     "memory_measurements": "Separate --memory-only profile implemented: CDP JS heap before/after GC, DOM counters, unique reachable CPU geometry array-buffer bytes, actual renderer geometry/texture counts; no measured browser memory result",
     "stale_generation": "One specific asset response is held until another scene is ready, then released; source gate ordering tests pass; browser scenario unexecuted"
-  }
+  },
+  "pass2_source": {
+    "baseline_ref": "3d6c1a8a033ecffd55f28025a94b76702abdafed",
+    "baseline_location": "/Users/nreigs/digitaltwin/ReviewBaselinePass2",
+    "baseline_code_sha256": "ca06243dc634a22c554b0bb8e8772323c94d295f8404c3c2485db9d98c05d70f",
+    "counterfactuals": [
+      {
+        "suite": "filename-contract",
+        "frozen_baseline_exit_code": 255,
+        "first_diagnostic": "PHP Fatal error:  Uncaught RuntimeException: Expected invalidInput/422 to be rejected in /Users/nreigs/digitaltwin/WebApp/tests/php/source-fixtures.php:25",
+        "expected_baseline_pass": false
+      },
+      {
+        "suite": "content-revision",
+        "frozen_baseline_exit_code": 255,
+        "first_diagnostic": "PHP Fatal error:  Uncaught RuntimeException: Mtime-only edited attribution changes must invalidate contentTag in /Users/nreigs/digitaltwin/WebApp/tests/php/source-fixtures.php:13",
+        "expected_baseline_pass": false
+      },
+      {
+        "suite": "transform-contract",
+        "frozen_baseline_exit_code": 255,
+        "first_diagnostic": "PHP Fatal error:  Uncaught RuntimeException: Invalid shared transform must fall back to identity: numeric string in /Users/nreigs/digitaltwin/WebApp/tests/php/source-fixtures.php:13",
+        "expected_baseline_pass": false
+      },
+      {
+        "suite": "saved-view-contract",
+        "frozen_baseline_exit_code": 255,
+        "first_diagnostic": "PHP Fatal error:  Uncaught RuntimeException: Only the invalid individual preset must be ignored, with the explicit new key taking precedence: numeric string component in /Users/nreigs/digitaltwin/WebApp/tests/php/source-fixtures.php:13",
+        "expected_baseline_pass": false
+      },
+      {
+        "suite": "installation-portability",
+        "frozen_baseline_exit_code": 0,
+        "first_diagnostic": "PHP-only installation relocation and external dataset replacement passed",
+        "expected_baseline_pass": true
+      }
+    ],
+    "cross_review": "Camera and backend source reviewers independently reviewed each other; no screenshots or actual content files accessed",
+    "production_ref": "e92e1386dd4063338aa75c5a8ba845174012b4e6"
+  },
+  "browser_memory_profile": "implemented and source-tested; not browser-executed; no total client RAM result"
 }

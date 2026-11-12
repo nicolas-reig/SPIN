@@ -1,0 +1,67 @@
+{
+  "scope": "Comparator sensitivity on real manually captured original-app frames; no candidate validation or automated browser repeatability claim.",
+  "inputs": [
+    {
+      "path": "docs/reviews/ui-consistency/screenshots/01-overview.jpg",
+      "sha256": "e046977e0c3f3975aa2cd31a9d02ca336335d4465f2d01771bca8b95b50aabe5",
+      "dimensions": [
+        2000,
+        1125
+      ]
+    },
+    {
+      "path": "docs/reviews/ui-consistency/screenshots/35-restored-overview.jpg",
+      "sha256": "e046977e0c3f3975aa2cd31a9d02ca336335d4465f2d01771bca8b95b50aabe5",
+      "dimensions": [
+        2000,
+        1125
+      ]
+    }
+  ],
+  "decoded_pixels_roundtrip": {
+    "pass": true,
+    "differing_pixels": 0,
+    "total_pixels": 2250000,
+    "ratio": 0.0,
+    "maximum_channel_delta": 0,
+    "rmse_rgba": 0.0,
+    "bounds": null
+  },
+  "real_one_pixel_negative_control": {
+    "pass": false,
+    "differing_pixels": 1,
+    "total_pixels": 2250000,
+    "ratio": 4.4444444444444444e-07,
+    "maximum_channel_delta": 1,
+    "rmse_rgba": 0.0003333333333333333,
+    "bounds": [
+      1000,
+      562,
+      1001,
+      563
+    ]
+  },
+  "original_overview_vs_restored": {
+    "pass": true,
+    "differing_pixels": 0,
+    "total_pixels": 2250000,
+    "ratio": 0.0,
+    "maximum_channel_delta": 0,
+    "rmse_rgba": 0.0,
+    "bounds": null
+  },
+  "different_real_menu_states": {
+    "pass": false,
+    "differing_pixels": 318840,
+    "total_pixels": 2250000,
+    "ratio": 0.14170666666666668,
+    "maximum_channel_delta": 238,
+    "rmse_rgba": 9.018787008856075,
+    "bounds": [
+      0,
+      0,
+      1600,
+      904
+    ]
+  }
+}

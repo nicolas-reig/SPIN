@@ -49,7 +49,7 @@ try {
             throw new ApiError('uploadLimit', 503);
         }
         if (isset($_POST['payload'])) {
-            $payload = json_decode($_POST['payload'], true, 128, JSON_THROW_ON_ERROR);
+            $payload = Store::decodeJson($_POST['payload']);
             if (!is_array($payload) || !in_array($payload['action'] ?? '', ['note', 'correctNote'], true)) {
                 throw new ApiError('invalidInput');
             }
@@ -87,7 +87,7 @@ try {
             if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 2 * 1024 * 1024) {
                 throw new ApiError('fileTooLarge');
             }
-            $p = json_decode(file_get_contents('php://input'), true, 128, JSON_THROW_ON_ERROR);
+            $p = Store::decodeJson(file_get_contents('php://input'));
             if (!is_array($p)) {
                 throw new ApiError('invalidInput');
             }

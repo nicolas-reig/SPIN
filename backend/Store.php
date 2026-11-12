@@ -165,12 +165,36 @@ final class Store
         $body = file_get_contents($path);
         if ($body === false) throw new ApiError('storage', 503);
         try {
-            $data = json_decode($body, true, 128, JSON_THROW_ON_ERROR);
+            $data = self::decodeJson($body);
         } catch (JsonException) {
             throw new ApiError('invalidMetadata', 503);
         }
         if (!is_array($data)) throw new ApiError('invalidMetadata', 503);
         return $data;
+    }
+
+    public static function decodeJson(string $body): mixed
+    {
+        return self::jsonValue(json_decode($body, false, 128, JSON_THROW_ON_ERROR));
+    }
+
+    private static function jsonValue(mixed $value, ?string $key = null): mixed
+    {
+        if ($value instanceof stdClass) {
+            // Keep vector objects distinct from arrays, including {"0": 0, "1": 0, "2": 0}.
+            if (in_array($key, ['position', 'rotation', 'scale', 'target'], true)) {
+                return $value;
+            }
+            $result = [];
+            foreach (get_object_vars($value) as $name => $part) {
+                $result[$name] = self::jsonValue($part, (string)$name);
+            }
+            return $result;
+        }
+        if (is_array($value)) {
+            return array_map(fn($part) => self::jsonValue($part), $value);
+        }
+        return $value;
     }
 
     private function writeJson(string $path, array $value): void
@@ -210,11 +234,11 @@ final class Store
         $result = [];
         foreach (['position', 'rotation', 'scale'] as $key) {
             $vector = $value[$key] ?? null;
-            if (!is_array($vector) || count($vector) !== 3) {
+            if (!is_array($vector) || !array_is_list($vector) || count($vector) !== 3) {
                 throw new ApiError('invalidTransform');
             }
             foreach ($vector as $number) {
-                if (!is_numeric($number) || !is_finite((float)$number) || abs((float)$number) > 100000 ||
+                if ((!is_int($number) && !is_float($number)) || !is_finite($number) || abs($number) > 100000 ||
                     ($key === 'scale' && ((float)$number < .001 || (float)$number > 1000))) {
                     throw new ApiError('invalidTransform');
                 }
@@ -239,18 +263,19 @@ final class Store
                 throw new ApiError('invalidView');
             }
             foreach (['position', 'target'] as $part) {
-                if (!isset($view[$part]) || !is_array($view[$part]) || count($view[$part]) !== 3) {
+                if (!isset($view[$part]) || !is_array($view[$part]) || !array_is_list($view[$part]) || count($view[$part]) !== 3) {
                     throw new ApiError('invalidView');
                 }
                 foreach ($view[$part] as $number) {
-                    if (!is_numeric($number) || !is_finite((float)$number) || abs((float)$number) > 100000) {
+                    if ((!is_int($number) && !is_float($number)) || !is_finite($number) || abs($number) > 100000) {
                         throw new ApiError('invalidView');
                     }
                 }
                 $result[$key][$part] = array_map('floatval', array_values($view[$part]));
             }
             if ($result[$key]['position'] === $result[$key]['target'] ||
-                !is_numeric($view['span'] ?? null) || $view['span'] <= 0 || $view['span'] > 100000) {
+                (!is_int($view['span'] ?? null) && !is_float($view['span'] ?? null)) ||
+                !is_finite($view['span']) || $view['span'] <= 0 || $view['span'] > 100000) {
                 throw new ApiError('invalidView');
             }
             $result[$key]['span'] = (float)$view['span'];

@@ -147,7 +147,7 @@ An exhibit can contain:
 
 These subfolders can be absent or empty. A folder without `.exhibit.json` still appears in the app, with status **Ok**, no assigned floor and no hardware. Its posts and links remain available.
 
-Use names compatible with Windows: avoid `<>:"/\|?*`, control characters, names starting with a dot, names ending in a dot or space, and reserved names such as `CON` or `NUL`. Names are limited to 160 UTF-8 bytes, including a file's extension when applicable. Avoid names that differ only in capitalization so the same dataset can be moved between operating systems.
+Use valid UTF-8 names compatible with Windows: avoid `<>:"/\|?*`, control characters (including DEL), surrounding whitespace, names starting with a dot, names ending in a dot, and reserved names such as `CON` or `NUL`. Names are limited to 160 UTF-8 bytes, including a file's extension when applicable. The reader skips noncanonical names rather than silently trimming them into a different path. Text entered through the app is still trimmed before a new name is validated. Avoid names that differ only in capitalization so the same dataset can be moved between operating systems.
 
 #### Exhibit metadata: `.exhibit.json`
 

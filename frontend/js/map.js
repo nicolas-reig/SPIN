@@ -15,7 +15,8 @@ import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, v
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 import { TopView } from './top-view.js';
 import { dispose, disposeMaterials, replaceMaterials } from './model-resources.js';
-import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clippingPlanes } from './camera-framing.js';
+import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clippingPlanes, clearViewport } from './camera-framing.js';
+import { focusGeometry, nextBestView, birdFocusView } from './camera-focus.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -194,6 +195,7 @@ export class MapView {
             this.camera.top = span;
             this.camera.bottom = -span;
         }
+        this.updateCameraViewport();
         this.camera.updateProjectionMatrix();
         this.updateCameraClipping();
         this.requestRender();
@@ -525,7 +527,7 @@ export class MapView {
         this.controls.minPolarAngle = Math.min(.000001, ...angles);
         this.controls.maxPolarAngle = Math.max(this.mode === 'top' ? .000001 : Math.PI / 2, ...angles);
     }
-    frameTarget(center, distance, span, animate = true, position = null) {
+    frameTarget(center, distance, span, animate = true, position = null, { orbit = false } = {}) {
         cancelAnimationFrame(this.cameraFrame);
         const offset = this.framingDirection().multiplyScalar(distance);
         const startTarget = this.controls.target.clone();
@@ -533,13 +535,23 @@ export class MapView {
         const endPosition = position || center.clone().add(offset);
         const startSpan = this.orthoSpan || span;
         const startZoom = this.camera.zoom;
+        const startOrbit = new THREE.Spherical().setFromVector3(startPosition.clone().sub(startTarget));
+        const endOrbit = new THREE.Spherical().setFromVector3(endPosition.clone().sub(center));
+        const headingDelta = Math.atan2(Math.sin(endOrbit.theta - startOrbit.theta), Math.cos(endOrbit.theta - startOrbit.theta));
         const started = performance.now();
         const step = () => {
-            const p = !animate || matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.min(1, (performance.now() - started) / 220);
+            const p = !animate || matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.min(1, (performance.now() - started) / (orbit ? 320 : 220));
             const ease = 1 - Math.pow(1 - p, 3);
             this.controls.target.copy(startTarget).lerp(center, ease);
-            this.camera.position.copy(startPosition).lerp(endPosition, ease);
-            this.orthoSpan = startSpan + (span - startSpan) * ease;
+            if (orbit) {
+                const radius = Math.exp(Math.log(Math.max(startOrbit.radius, 1e-12)) * (1 - ease) + Math.log(Math.max(endOrbit.radius, 1e-12)) * ease);
+                this.camera.position.copy(this.controls.target).add(new THREE.Vector3().setFromSpherical(new THREE.Spherical(
+                    radius, startOrbit.phi + (endOrbit.phi - startOrbit.phi) * ease, startOrbit.theta + headingDelta * ease)));
+                this.orthoSpan = Math.exp(Math.log(startSpan) * (1 - ease) + Math.log(span) * ease);
+            } else {
+                this.camera.position.copy(startPosition).lerp(endPosition, ease);
+                this.orthoSpan = startSpan + (span - startSpan) * ease;
+            }
             this.camera.zoom = startZoom + (1 - startZoom) * ease;
             this.controlAngles(this.camera.position);
             this.updateCameraLimits(distance);
@@ -587,21 +599,23 @@ export class MapView {
         };
     }
     fallbackView(ids, mode = this.mode) {
-        mode = cameraMode(mode);
-        const box = new THREE.Box3();
-        for (const id of ids) {
-            const object = this.objects.get(id);
-            if (object) box.union(new THREE.Box3().setFromObject(object));
-        }
-        if (box.isEmpty()) box.copy(this.sceneBounds());
-        const size = box.getSize(new THREE.Vector3());
-        const aspect = this.framingAspect();
-        const scale = Math.min(1, boundsScale(this.sceneBounds()) / 10);
-        const span = Math.max(4 * scale, size.y, size.z, size.x / aspect) * .7;
-        const distance = Math.max(9 * scale, span * 3.2);
-        return frameBounds(box, this.framingDirection(mode), aspect, { distance, span, perspective: mode !== 'top', ...this.framingPadding() });
+        return this.automaticView(ids.map(id => this.objects.get(id)).filter(Boolean), mode);
     }
-    applyView(preset, mode = this.mode) {
+    automaticView(objects, mode = this.mode) {
+        mode = cameraMode(mode);
+        this.root.updateMatrixWorld(true);
+        const geometry = focusGeometry(objects);
+        if (!geometry.points.length) {
+            geometry.box.copy(this.sceneBounds());
+            geometry.points = boundsCorners(geometry.box);
+        }
+        const padding = this.framingPadding();
+        const options = { aspect: this.framingAspect(), direction: this.camera.position.clone().sub(this.controls.target),
+            padding: { horizontal: padding.horizontal * .82, vertical: padding.vertical * .82 }, occluders: this.root.children };
+        return (mode === 'top' ? birdFocusView : nextBestView)(geometry, options) ||
+            frameBounds(geometry.box, this.framingDirection(mode), options.aspect, { perspective: mode !== 'top', ...padding });
+    }
+    applyView(preset, mode = this.mode, options = {}) {
         if (!preset) return;
         mode = cameraMode(mode);
         if (this.mode !== mode) {
@@ -609,22 +623,36 @@ export class MapView {
         }
         const center = new THREE.Vector3(...preset.target);
         const position = new THREE.Vector3(...preset.position);
-        this.frameTarget(center, center.distanceTo(position), preset.span, true, position);
+        this.frameTarget(center, center.distanceTo(position), preset.span, true, position, options);
     }
     viewportBounds() {
         const rect = this.renderer?.domElement.getBoundingClientRect() || { width: 0, height: 0 };
-        if (!rect.width || !rect.height) return { left: -.94, right: .94, top: .94, bottom: -.94 };
-        const inset = Math.min(16, rect.width * .05) / rect.width * 2;
-        return {
-            left: -1 + inset,
-            right: 1 - inset,
-            top: .94,
-            bottom: -.94
-        };
+        const panel = this.container.closest?.('#map-panel');
+        const workspace = panel?.closest('#workspace');
+        const overlays = workspace ? [...workspace.querySelectorAll('#sidebar, #inspector, #map-heading, #map-controls, #transform-toolbar')]
+            .filter(element => !element.hidden && element.getAttribute('aria-hidden') !== 'true' && getComputedStyle(element).visibility !== 'hidden')
+            .map(element => {
+                // Panel springs animate transforms. Frame against their settled
+                // layout, including when Focus is clicked during panel entry.
+                let left = -(window.scrollX || 0), top = -(window.scrollY || 0);
+                for (let node = element; node; node = node.offsetParent) { left += node.offsetLeft; top += node.offsetTop; }
+                const width = element.offsetWidth, height = element.offsetHeight;
+                return { left, top, right: left + width, bottom: top + height, width, height };
+            }) : [];
+        return clearViewport(rect, overlays);
+    }
+    updateCameraViewport(camera = this.camera) {
+        const bounds = this.viewportBounds();
+        const width = this.container.clientWidth || this.width, height = this.container.clientHeight || this.height;
+        if (!width || !height) return;
+        const x = (bounds.left + bounds.right) / 2, y = (bounds.top + bounds.bottom) / 2;
+        if (Math.abs(x) + Math.abs(y) < 1e-10) camera.clearViewOffset();
+        else camera.setViewOffset(width, height, -x * width / 2, y * height / 2, width, height);
     }
     isVisible(id, camera = this.camera, targetDistance = null) {
         const object = this.objects.get(id);
         if (!object) return false;
+        this.updateCameraViewport(camera);
         this.updateCameraClipping(camera, null, targetDistance);
         camera.updateMatrixWorld();
         const bounds = this.viewportBounds();
@@ -658,12 +686,19 @@ export class MapView {
             horizontal: (bounds.right - bounds.left) / 2, vertical: (bounds.top - bounds.bottom) / 2
         });
     }
+    focusObjects() {
+        if (this.editing) return this.transformEntries().map(entry => entry.object);
+        const object = this.objects.get(this.selected);
+        return object ? [object] : [];
+    }
     focus(onlyWhenHidden = false) {
-        const exhibit = this.data.exhibits.find(e => e.id === this.selected);
-        if (!exhibit?.models.length || !this.objects.has(exhibit.id) || (onlyWhenHidden && this.isVisible(exhibit.id))) return;
-        const key = viewKey(this.mode);
-        const preset = exhibit.views?.[key] || this.fallbackView([exhibit.id]);
-        this.applyView(this.focusView(exhibit.id, preset));
+        const objects = this.focusObjects();
+        if (!objects.length || (onlyWhenHidden && objects.length === 1 && this.isVisible(this.selected))) return;
+        this.cancelTransform();
+        const exhibit = this.data?.exhibits.find(record => this.objects.get(record.id) === objects[0]);
+        const preset = objects.length === 1 ? exhibit?.views?.[viewKey(this.mode)] : null;
+        if (preset) this.applyView(this.focusView(exhibit.id, preset));
+        else this.applyView(this.automaticView(objects), this.mode, { orbit: true });
     }
     focusFloor() {
         const ids = this.data.exhibits.filter(exhibit => exhibit.floorId === this.floor.id).map(exhibit => exhibit.id);

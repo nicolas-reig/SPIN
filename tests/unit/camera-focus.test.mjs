@@ -33,6 +33,8 @@ test('next-best-view search turns an edge-on display toward a readable broad fac
     contained(geometry, view, 1, false);
     const repeat = nextBestView(geometry, { direction, occluders: [mesh] });
     near(new THREE.Vector3(...repeat.position).distanceTo(new THREE.Vector3(...view.position)), 0);
+    const below = nextBestView(geometry, { direction: new THREE.Vector3(0, -1, 1).normalize() });
+    assert.ok(below.position[1] > below.target[1], 'automatic views stay above the selection');
 });
 
 test('visibility scoring chooses the open side when a wall hides the otherwise preferred angle', () => {
@@ -111,4 +113,6 @@ test('search bounds expensive visibility work instead of raycasting every candid
     const obstacle = new THREE.Object3D(); obstacle.raycast = () => { casts++; };
     nextBestView(geometry, { occluders: [obstacle] });
     assert.ok(casts > 0 && casts <= 8 * 18, `${casts} visibility rays`);
+    const many = focusGeometry([new THREE.InstancedMesh(new THREE.BoxGeometry(1, 2, 3), material, 800)]);
+    assert.ok(many.samples.length <= 384 && many.points.length <= 8192, 'sampling budget applies across all instances');
 });

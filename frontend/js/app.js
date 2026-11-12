@@ -560,7 +560,7 @@ function renderMapUI() {
     mapControls = new CameraControls($('#map-controls'), {
         id: 'map', mode: mapMode, getView: () => map,
         focus: () => actions.focus(),
-        canFocus: () => Boolean(selected && map?.objects.has(selected))
+        canFocus: () => Boolean(map?.focusObjects().length)
     });
     renderTransformToolbar();
     $('#map-message').textContent = mapState === 'mapReady' ? '' : t(mapState);
@@ -2331,10 +2331,10 @@ const actions = {
         renderSidebar();
     },
     focus: async () => {
-        if (!exhibit()?.placed) { announce(t('unplaced')); return; }
         await ensureMap();
-        map?.focus();
+        if (!map?.focusObjects().length) { announce(t('unplaced')); return; }
         setView('map');
+        map.focus();
         },
     editExhibit: () => openExhibitEditor(),
     newExhibit: () => openExhibitEditor(true),

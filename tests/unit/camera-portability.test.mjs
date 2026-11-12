@@ -22,7 +22,8 @@ globalThis.matchMedia = () => ({ matches: true });
 const THREE = await import('three');
 const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
 const { MapView } = await import('../../frontend/js/map.js');
-const { boundsCorners, frameBounds, controlLimits, clippingPlanes } = await import('../../frontend/js/camera-framing.js');
+const { boundsCorners, frameBounds, controlLimits, clippingPlanes, clearViewport } = await import('../../frontend/js/camera-framing.js');
+const { focusGeometry } = await import('../../frontend/js/camera-focus.js');
 
 function makeView(size = [20, 2, 12], center = [0, 0, 0], aspect = 2) {
     const container = { clientWidth: 800 * aspect, clientHeight: 800 };
@@ -210,6 +211,121 @@ test('a close miniature saved view remains visible inside a much larger building
         assert.equal(view.focusView('box', preset), preset, 'close saved preset is preserved');
         view.destroy();
     }
+});
+
+test('Focus uses the selected components or exhibits together and preserves authored single-exhibit views', () => {
+    for (const mode of ['perspective', 'top']) {
+        const view = makeView([8, 4, .5], [0, 0, 0], 1.2);
+        const first = view.objects.get('box'); view.root.remove(first);
+        const parent = new THREE.Group(); parent.add(first); view.root.add(parent); view.objects.set('box', parent);
+        const unselected = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), view.materials.ok); unselected.position.x = 180; parent.add(unselected);
+        const second = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), view.materials.ok); second.position.set(18, 2, -5); view.root.add(second); view.objects.set('second', second);
+        const preset = { target: [80, 0, 0], position: [80, 150, 300], span: 120 };
+        view.data = { exhibits: [{ id: 'box', views: { '2D': preset, '3D': preset } }, { id: 'second', views: {} }] };
+        view.editing = true; view.selection = new Set(['box', 'second']);
+        view.hardwareSelection = [{ exhibitId: 'box', instanceIndex: 0 }];
+        view.boundsDirty = true; view.setView(mode);
+        let cancelled = 0; view.transform.cancel = () => { cancelled++; return false; };
+        view.focus();
+        assert.equal(cancelled, 1, 'Focus cancels an active preview before measuring geometry');
+        assert.deepEqual(view.focusObjects(), [first]);
+        assert.ok(view.controls.target.distanceTo(first.position) < 1, 'component focus ignores its parent preset and unselected hardware');
+        assert.ok(view.camera.position.distanceTo(view.controls.target) < 25);
+        view.hardwareSelection.push({ exhibitId: 'second', instanceIndex: 0 });
+        // Use a proper component holder for the second exhibit too.
+        const otherParent = new THREE.Group(); view.root.remove(second); otherParent.add(second); view.root.add(otherParent); view.objects.set('second', otherParent);
+        view.focus();
+        assert.deepEqual(view.focusObjects(), [first, second]);
+        assert.ok(view.controls.target.x > 5 && view.controls.target.x < 15, 'shared target lies between the selected components');
+        const geometry = focusGeometry([first, second]);
+        for (const point of geometry.points) {
+            const ndc = point.clone().project(view.camera);
+            assert.ok(Math.abs(ndc.x) < .8 && Math.abs(ndc.y) < .8, 'every selected component fits with padding');
+        }
+        const before = view.camera.position.clone(); view.focus();
+        assert.ok(view.camera.position.distanceTo(before) < 1e-5, 'repeated Focus is stable');
+        view.hardwareSelection = []; view.focus();
+        assert.deepEqual(view.focusObjects(), [parent, otherParent]);
+        assert.ok(view.controls.target.x > 50, 'whole-exhibit selection includes its distant hardware');
+        view.editing = false; view.selected = 'box'; view.focus();
+        vectorNear(view.camera.position.toArray(), preset.position, 1e-8, 'authored preset takes priority');
+        view.destroy();
+    }
+});
+
+test('automatic focus orbits around its pivot without diving through the selection and honors reduced motion', () => {
+    const view = makeView([2, 2, 2]);
+    const previous = { frame: globalThis.requestAnimationFrame, media: globalThis.matchMedia, performance: globalThis.performance };
+    const callbacks = []; let now = 0;
+    try {
+        globalThis.performance = { now: () => now };
+        globalThis.requestAnimationFrame = callback => { callbacks.push(callback); return callbacks.length; };
+        globalThis.matchMedia = () => ({ matches: false });
+        view.controls.target.set(0, 0, 0); view.camera.position.set(0, 5, 10); view.controls.update();
+        const distance = view.camera.position.length(), end = new THREE.Vector3(0, 5, -10);
+        view.frameTarget(new THREE.Vector3(), distance, 5, true, end, { orbit: true });
+        for (now = 40; now <= 320; now += 40) {
+            callbacks.shift()();
+            near(view.camera.position.distanceTo(view.controls.target), distance, 1e-7, 'orbit radius remains clear of the pivot');
+            near(view.camera.position.y, 5, 1e-7, 'orbit stays above the selection');
+            assert.ok(view.orthoSpan > 0);
+        }
+        vectorNear(view.camera.position.toArray(), end.toArray(), 1e-8, 'final focus pose');
+        assert.equal(callbacks.length, 0);
+        globalThis.matchMedia = () => ({ matches: true });
+        const target = new THREE.Vector3(20, 3, -4), position = new THREE.Vector3(25, 10, 8);
+        view.frameTarget(target, target.distanceTo(position), 3, true, position, { orbit: true });
+        vectorNear(view.camera.position.toArray(), position.toArray(), 1e-8, 'reduced motion jumps directly to the result');
+        assert.equal(callbacks.length, 0);
+    } finally {
+        globalThis.requestAnimationFrame = previous.frame; globalThis.matchMedia = previous.media; globalThis.performance = previous.performance;
+        view.destroy();
+    }
+});
+
+test('Focus fits the clear map rectangle between floating panels and controls in desktop and mobile layouts', () => {
+    const rectangle = (left, top, width, height) => ({ left, top, right: left + width, bottom: top + height, width, height });
+    for (const layout of [
+        { canvas: rectangle(0, 0, 1600, 900), overlays: [rectangle(0, 0, 295, 900), rectangle(1234, 0, 366, 900), rectangle(313, 345, 46, 207), rectangle(309, 773, 911, 101)] },
+        { canvas: rectangle(0, 0, 390, 844), overlays: [rectangle(8, 275, 46, 230), rectangle(70, 650, 245, 100), rectangle(0, 779, 390, 65)] }
+    ]) for (const mode of ['perspective', 'top']) {
+        const view = makeView([10, 7, 3], [10, 1, -5], layout.canvas.width / layout.canvas.height);
+        view.viewportBounds = () => clearViewport(layout.canvas, layout.overlays);
+        view.selected = 'box'; view.data = { exhibits: [{ id: 'box', views: {} }] };
+        view.setView(mode); view.focus();
+        const bounds = view.viewportBounds();
+        assert.ok(bounds.right > bounds.left && bounds.top > bounds.bottom);
+        for (const point of focusGeometry(view.focusObjects()).points) {
+            const ndc = point.clone().project(view.camera);
+            assert.ok(ndc.x >= bounds.left && ndc.x <= bounds.right && ndc.y >= bounds.bottom && ndc.y <= bounds.top, 'selected geometry stays clear of the panels');
+        }
+        const projectedTarget = view.controls.target.clone().project(view.camera);
+        near(projectedTarget.x, (bounds.left + bounds.right) / 2, 1e-7, 'horizontal center of clear area');
+        near(projectedTarget.y, (bounds.top + bounds.bottom) / 2, 1e-7, 'vertical center of clear area');
+        framed(view, new THREE.Box3().setFromObject(view.objects.get('box')), mode);
+        view.destroy();
+    }
+});
+
+test('focus framing uses the settled panel layout while its entry spring is still moving', () => {
+    const view = makeView([10, 4, 3], [0, 0, 0], 1600 / 900);
+    view.container.clientWidth = 1600; view.container.clientHeight = 900;
+    const previousStyle = globalThis.getComputedStyle;
+    const inspector = { hidden: false, offsetLeft: 1234, offsetTop: 0, offsetWidth: 366, offsetHeight: 900, offsetParent: null,
+        getAttribute: () => 'false', getBoundingClientRect() { throw Error('animated panel coordinates must not affect framing'); } };
+    const sidebar = { ...inspector, offsetLeft: 0, offsetWidth: 295 };
+    const workspace = { querySelectorAll: () => [sidebar, inspector] };
+    view.container.closest = () => ({ closest: () => workspace });
+    try {
+        globalThis.getComputedStyle = () => ({ visibility: 'visible' });
+        const bounds = view.viewportBounds();
+        near(bounds.left, 307 / 1600 * 2 - 1);
+        near(bounds.right, 1222 / 1600 * 2 - 1);
+        view.selected = 'box'; view.data = { exhibits: [{ id: 'box' }] };
+        view.focus(); framed(view);
+        inspector.getAttribute = () => 'true';
+        assert.ok(view.viewportBounds().right > bounds.right, 'closing panels no longer reserve map space');
+    } finally { globalThis.getComputedStyle = previousStyle; view.destroy(); }
 });
 
 test('empty and zero-volume bounds remain finite, and transformed bounds refresh before camera projection', () => {

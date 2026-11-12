@@ -11,7 +11,7 @@ const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 // Small meshes use every posed vertex; large ones use conservative mesh bounds.
 export function focusGeometry(objects) {
     const parts = [], points = [], samples = [];
-    for (const [owner, object] of [...new Set(objects)].entries()) {
+    for (const object of new Set(objects)) {
         object.updateWorldMatrix(true, true);
         object.traverseVisible(mesh => {
             if (!mesh.isMesh || !mesh.geometry.attributes.position) return;
@@ -21,13 +21,13 @@ export function focusGeometry(objects) {
                 if (mesh.isInstancedMesh) {
                     const local = new Matrix4(); mesh.getMatrixAt(instance, local); matrix.multiply(local);
                 }
-                parts.push({ mesh, matrix, owner });
+                parts.push({ mesh, matrix });
             }
         });
     }
     const vertexBudget = Math.max(8, Math.floor(8192 / Math.max(1, parts.length)));
-    const sampleBudget = Math.max(1, Math.floor(384 / Math.max(1, parts.length)));
-    for (const { mesh, matrix, owner } of parts) {
+    for (const [partIndex, { mesh, matrix }] of parts.entries()) {
+        const sampleBudget = Math.floor((partIndex + 1) * 384 / parts.length) - Math.floor(partIndex * 384 / parts.length);
         const geometry = mesh.geometry, positions = geometry.attributes.position;
         const vertex = index => mesh.getVertexPosition(index, new Vector3()).applyMatrix4(matrix);
         if (positions.count <= vertexBudget) {
@@ -47,7 +47,7 @@ export function focusGeometry(objects) {
             const normal = vertices[1].clone().sub(vertices[0]).cross(vertices[2].clone().sub(vertices[0]));
             const area = normal.length() * .5 * triangles / count;
             if (!area) continue;
-            samples.push({ point: vertices[0].add(vertices[1]).add(vertices[2]).multiplyScalar(1 / 3), normal: normal.normalize(), area, owner });
+            samples.push({ point: vertices[0].add(vertices[1]).add(vertices[2]).multiplyScalar(1 / 3), normal: normal.normalize(), area });
         }
     }
     const finite = points.filter(point => point.toArray().every(Number.isFinite));
@@ -67,8 +67,12 @@ function fitPoints(geometry, direction, aspect, { horizontal = .78, vertical = .
     const { backward, right, vertical: cameraUp } = basis(direction);
     const origin = geometry.box.getCenter(new Vector3());
     const points = geometry.points.map(point => point.clone().sub(origin));
-    const xs = points.map(point => point.dot(right)), ys = points.map(point => point.dot(cameraUp));
-    const midX = (Math.min(...xs) + Math.max(...xs)) / 2, midY = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const xs = [], ys = []; let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const point of points) {
+        const x = point.dot(right), y = point.dot(cameraUp); xs.push(x); ys.push(y);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
     const target = origin.addScaledVector(right, midX).addScaledVector(cameraUp, midY);
     let distance = 0, span = 0;
     const scale = geometry.box.getSize(new Vector3()).length() || 1;
@@ -122,7 +126,7 @@ function visibility(geometry, candidate, occluders, budget) {
 export function nextBestView(geometry, { aspect = 1, direction = new Vector3(.65, .75, 1), padding, occluders = [] } = {}) {
     if (!geometry.points.length) return null;
     const current = basis(direction).backward;
-    const directions = [current];
+    const directions = current.y >= Math.sin(12 * radians) && current.y <= Math.sin(80 * radians) ? [current] : [];
     for (const elevation of [20, 35, 50, 65]) for (let heading = 0; heading < 360; heading += 30) {
         directions.push(new Vector3(...orbitOffset(1, heading, elevation)));
     }

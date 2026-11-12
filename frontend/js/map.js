@@ -258,12 +258,17 @@ export class MapView {
             dispose(result.scene, this.sharedMaterials);
             return null;
         }
-        const shareable = smoothNormals(result.scene);
-        replaceMaterials(result.scene, material);
-        // The first instance owns the template's geometry until this build is disposed.
-        // Skinned meshes keep fresh skeletons by retaining the normal loading path.
-        if (shareable) templates?.set(asset.id, result.scene);
-        return result.scene;
+        try {
+            const shareable = smoothNormals(result.scene);
+            replaceMaterials(result.scene, material);
+            // The first instance owns the template's geometry until this build is disposed.
+            // Skinned meshes keep fresh skeletons by retaining the normal loading path.
+            if (shareable) templates?.set(asset.id, result.scene);
+            return result.scene;
+        } catch (error) {
+            dispose(result.scene, this.sharedMaterials);
+            throw error;
+        }
     }
     clearScene() {
         this.transform?.detach();

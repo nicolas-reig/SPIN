@@ -45,7 +45,27 @@ export async function staticGet(appRoot, rawPath) {
   } catch { return {status:404, body:Buffer.from('Not found'), contentType:'text/plain'}; }
 }
 
-export async function installTransport(context, appRoot, audit, php = 'php') {
+function responseGate(matches) {
+  let release, entered;
+  const resumed = new Promise(resolve=>{release=resolve;});
+  const requested = new Promise(resolve=>{entered=resolve;});
+  let used=false;
+  return {release, requested,
+    async beforeResponse(url) {
+      if(used || !matches(url))return;
+      used=true;entered();await resumed;
+    }};
+}
+
+export function assetGate(id) {
+  return responseGate(url=>url.pathname==='/api.php' && url.searchParams.get('action')==='asset' && url.searchParams.get('id')===id);
+}
+
+export function snapshotGate() {
+  return responseGate(url=>url.pathname==='/api.php' && !url.searchParams.has('action'));
+}
+
+export async function installTransport(context, appRoot, audit, php = 'php', control = {}) {
   await context.route('**/*', async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -56,6 +76,7 @@ export async function installTransport(context, appRoot, audit, php = 'php') {
         await route.fulfill({status:405, contentType:'application/json', body:'{"error":"testReadOnly"}'});
         return;
       }
+      await control.gate?.beforeResponse(url);
       const response = url.pathname === '/api.php'
         ? await phpGet(appRoot, url.search.slice(1), php)
         : await staticGet(appRoot, url.pathname);

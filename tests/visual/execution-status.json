@@ -49,5 +49,18 @@
     "application_javascript_syntax": 25,
     "application_php_syntax": 7
   },
-  "baseline_content_note": "Live Blender source/backup files changed externally during review; all exported GLBs, floor metadata and exhibit bytes still match the frozen content. Automated comparisons use the preserved frozen data, never live data."
+  "baseline_content_note": "Live Blender source/backup files changed externally during review; all exported GLBs, floor metadata and exhibit bytes still match the frozen content. Automated comparisons use the preserved frozen data, never live data.",
+  "pass2_harness": {
+    "recorded_at": "2026-11-12T12:22:23.518897+00:00",
+    "browser_execution": "not attempted by verification agent; scenarios and CDP memory capture remain unexecuted",
+    "python_comparator_staging_glb_tests": 26,
+    "node_transport_glb_loader_profile_and_prelaunch_failure_tests": 12,
+    "production_php_bridge_original_baseline_integration": "passed separately",
+    "generated_glbs": "Actual vendored GLTFLoader parsed all four hardware topologies and all three floor scales without network",
+    "pixel_tolerance": 0,
+    "source_data_preservation": "Original bytes and nanosecond mtimes fingerprinted; generated GLBs and any config-root adaptation occur only in disposable copies",
+    "clock_and_css": "Exact JS-clock advance and frozen capture probes implemented; finite compositor animations awaited without advancing JS time; browser behavior unexecuted",
+    "memory_measurements": "Separate --memory-only profile implemented: CDP JS heap before/after GC, DOM counters, unique reachable CPU geometry array-buffer bytes, actual renderer geometry/texture counts; no measured browser memory result",
+    "stale_generation": "One specific asset response is held until another scene is ready, then released; source gate ordering tests pass; browser scenario unexecuted"
+  }
 }

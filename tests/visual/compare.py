@@ -8,6 +8,45 @@ import math
 from pathlib import Path
 from PIL import Image, ImageChops
 
+ENVIRONMENT_KEYS = ('viewport', 'device_scale_factor', 'browser_version', 'browser_arguments', 'clock_epoch',
+                    'profile', 'backend', 'browser_executable', 'playwright_version', 'environment')
+STATE_KEYS = ('url', 'view', 'colorMode', 'selected', 'floor', 'editing', 'viewport', 'heading',
+              'openDialog', 'openMenus', 'canvasState', 'animation_ms')
+
+
+def validate_report(report, side):
+    errors = []
+    for key in ENVIRONMENT_KEYS:
+        if key not in report or report[key] is None:
+            errors.append(f'{side} missing environment metadata: {key}')
+    frames = report.get('frames')
+    if not isinstance(frames, list):
+        return errors + [f'{side} missing frame list']
+    names = [frame.get('name') for frame in frames if isinstance(frame, dict)]
+    if len(names) != len(frames) or any(not isinstance(name, str) or not name for name in names):
+        errors.append(f'{side} invalid frame names')
+    valid_names = [name for name in names if isinstance(name, str)]
+    if len(valid_names) != len(set(valid_names)):
+        errors.append(f'{side} duplicate frame names')
+    for frame in frames:
+        if not isinstance(frame, dict):
+            continue
+        filename = frame.get('file')
+        if not isinstance(filename, str) or Path(filename).name != filename or not filename.endswith('.png'):
+            errors.append(f'{side} invalid frame filename: {frame.get("name")}')
+        for key in ('canvas', *STATE_KEYS[:-1]):
+            if key not in frame:
+                errors.append(f'{side} missing frame metadata: {frame.get("name")} {key}')
+        if frame.get('clock_frozen') is not True:
+            errors.append(f'{side} screenshot clock was not verified frozen: {frame.get("name")}')
+    for context in report.get('contexts', []):
+        for key in ('blockedWrites', 'errors', 'pageErrors', 'consoleErrors'):
+            if key not in context or context[key]:
+                errors.append(f'{side} browser context failure: {context.get("name")} {key}')
+    if report.get('failure'):
+        errors.append(f'{side} recorded a browser failure')
+    return errors
+
 
 def compare_images(baseline, candidate, diff_path=None):
     a, b = Image.open(baseline).convert('RGBA'), Image.open(candidate).convert('RGBA')
@@ -52,28 +91,40 @@ def compare_runs(baseline_dir, candidate_dir, output):
     output.mkdir(parents=True, exist_ok=True)
     a = json.loads((baseline_dir / 'run.json').read_text())
     b = json.loads((candidate_dir / 'run.json').read_text())
-    frames_a = {frame['name']: frame for frame in a['frames']}
-    frames_b = {frame['name']: frame for frame in b['frames']}
+    frames_a = {frame['name']: frame for frame in a.get('frames', []) if isinstance(frame, dict) and isinstance(frame.get('name'), str)}
+    frames_b = {frame['name']: frame for frame in b.get('frames', []) if isinstance(frame, dict) and isinstance(frame.get('name'), str)}
     results = []
-    invariant_errors = []
-    for key in ('viewport', 'device_scale_factor', 'browser_version', 'browser_arguments', 'clock_epoch', 'profile', 'backend', 'browser_executable', 'playwright_version', 'environment'):
+    invariant_errors = validate_report(a, 'baseline') + validate_report(b, 'candidate')
+    for key in ENVIRONMENT_KEYS:
         if a.get(key) != b.get(key):
             invariant_errors.append('Environment mismatch: ' + key)
     for key in ('assets', 'exhibits'):
-        if a['stage']['original'][key]['sha256'] != b['stage']['original'][key]['sha256']:
-            invariant_errors.append('Input data mismatch: ' + key)
+        for phase in ('original', 'staged'):
+            sha_a = a.get('stage', {}).get(phase, {}).get(key, {}).get('sha256')
+            sha_b = b.get('stage', {}).get(phase, {}).get(key, {}).get('sha256')
+            if not isinstance(sha_a, str) or not isinstance(sha_b, str) or not sha_a or not sha_b:
+                invariant_errors.append(f'Missing input fingerprint: {phase} {key}')
+            elif sha_a != sha_b:
+                invariant_errors.append(f'Input data mismatch: {phase} {key}')
+    if a.get('stage', {}).get('fixture') != b.get('stage', {}).get('fixture'):
+        invariant_errors.append('Fixture definition mismatch')
     for name in sorted(set(frames_a) | set(frames_b)):
         if name not in frames_a or name not in frames_b:
             results.append({'name': name, 'pass': False, 'reason': 'missing frame'})
             continue
         frame_a, frame_b = frames_a[name], frames_b[name]
-        result = {'name': name, **compare_images(baseline_dir / frame_a['file'], candidate_dir / frame_b['file'], output / (name + '.png'))}
+        try:
+            if any(not isinstance(frame.get('file'), str) or Path(frame['file']).name != frame['file'] for frame in (frame_a, frame_b)):
+                raise ValueError('Invalid frame filename')
+            result = {'name': name, **compare_images(baseline_dir / frame_a['file'], candidate_dir / frame_b['file'], output / (Path(frame_a['file']).name))}
+        except (OSError, ValueError, KeyError) as error:
+            results.append({'name': name, 'pass': False, 'reason': 'unreadable frame', 'error': str(error)})
+            continue
         if frame_a.get('canvas') != frame_b.get('canvas'):
             result['canvas_rect_changed'] = True
             result['pass'] = False
             result['reason'] = 'canvas rectangle changed'
-        state_keys = ('url', 'view', 'colorMode', 'selected', 'floor', 'editing', 'viewport', 'heading', 'openDialog', 'canvasState')
-        state_changes = [key for key in state_keys if frame_a.get(key) != frame_b.get(key)]
+        state_changes = [key for key in STATE_KEYS if frame_a.get(key) != frame_b.get(key)]
         if state_changes:
             result['state_changes'] = state_changes
             result['pass'] = False
@@ -95,7 +146,10 @@ def compare_runs(baseline_dir, candidate_dir, output):
         stability[side] = []
         for group, members in groups.items():
             for frame in members[1:]:
-                check = compare_images(directory / members[0]['file'], directory / frame['file'])
+                try:
+                    check = compare_images(directory / members[0]['file'], directory / frame['file'])
+                except (OSError, ValueError, KeyError) as error:
+                    check = {'pass': False, 'reason': 'unreadable settled frame', 'error': str(error)}
                 stability[side].append({'group': group, 'frame': frame['name'], **check})
                 if not check['pass']:
                     invariant_errors.append(f'{side} unsettled repeated state: {group}')

@@ -13,7 +13,7 @@ const data=path.resolve(option('--data',baseline));
 const output=path.resolve(option('--output',path.join(here,'artifacts/suite')));
 const python=option('--python',process.env.PYTHON||'python3');
 const passthrough=[];
-for(const key of ['--browser','--php','--backend'])if(option(key))passthrough.push(key,option(key));
+for(const key of ['--browser','--php','--backend','--seed'])if(option(key))passthrough.push(key,option(key));
 function run(executable,args){
   const result=spawnSync(executable,args,{stdio:'inherit',cwd:here});
   if(result.error)throw result.error;

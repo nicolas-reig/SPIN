@@ -2,6 +2,7 @@
 """Fingerprint application/data trees and stage disposable metadata-preserving copies."""
 from __future__ import annotations
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from glb_fixture import floor_glb, hardware_glb
 
 CODE_ROOTS = ('frontend', 'backend', 'config.php')
 SKIP = {'.DS_Store', '.git', 'node_modules', '__pycache__'}
@@ -25,6 +27,8 @@ def digest(path):
 
 def tree_manifest(root, *, code=False):
     root = Path(root).resolve()
+    if not root.is_dir():
+        raise ValueError('Missing input directory: ' + str(root))
     starts = [root / name for name in CODE_ROOTS] if code else [root]
     rows = []
     for start in starts:
@@ -60,51 +64,74 @@ def write_json(path, value):
     os.utime(path, ns=(FIXED_NS, FIXED_NS))
 
 
-def matrix_fixture(stage):
-    """Add explicit test content only to disposable copies; retain source-data frames too."""
+def available_name(folder, base, *, suffix=''):
+    name, number = base, 1
+    while (folder / (name + suffix)).exists():
+        number += 1
+        name = f'{base} {number}'
+    return name
+
+
+def matrix_fixture(stage, seed=271828):
+    """Add portable seeded geometry only to disposable copies; never assume real bounds."""
     assets, exhibits = stage / 'Assets', stage / 'Exponate'
-    floors = sorted((assets / 'Floors').glob('*/model.glb'))
-    hardware = sorted((assets / 'HardwareModels').glob('*.glb'))
-    if not floors or not hardware:
-        raise ValueError('Matrix profile needs one real floor GLB and hardware GLB')
-    for number in ('-1', '1'):
-        target = assets / 'Floors' / number / 'model.glb'
-        if target.exists():
-            raise ValueError(f'Matrix fixture would overwrite existing floor {number}')
-        target.parent.mkdir(parents=True)
-        shutil.copy2(floors[0], target)
+    existing = {p.name for p in (assets / 'Floors').iterdir()} if (assets / 'Floors').exists() else set()
+    numbers = []
+    candidate = 0
+    while len(numbers) < 3:
+        if str(candidate) not in existing:
+            numbers.append(str(candidate))
+        candidate += 1
     metadata_path = assets / 'Floors' / '.floors.json'
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
-    metadata.update({'-1': {'de': 'Test UG', 'en': 'Test basement'}, '1': {'de': 'Test OG', 'en': 'Test upper floor'}})
+    floors = []
+    for index, (number, dimensions) in enumerate(zip(numbers, ((4, 3), (24, 18), (150, 90)))):
+        target = assets / 'Floors' / number / 'model.glb'
+        target.parent.mkdir(parents=True)
+        target.write_bytes(floor_glb(seed + index, *dimensions))
+        os.utime(target, ns=(FIXED_NS, FIXED_NS))
+        metadata[number] = {'de': f'Test {index + 1}', 'en': f'Test {index + 1}'}
+        floors.append({'id': number, 'dimensions': list(dimensions), 'model_id': f'Floors/{number}/model.glb'})
     write_json(metadata_path, metadata)
-    model = hardware[0].relative_to(assets).as_posix()
+    hardware = []
+    for index, shape in enumerate(('closed-indexed', 'wedge-open', 'nested-shared', 'skinned')):
+        folder = assets / 'HardwareModels'
+        name = available_name(folder, 'Visual seeded ' + shape, suffix='.glb')
+        target = folder / (name + '.glb')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(hardware_glb(seed + index, shape))
+        os.utime(target, ns=(FIXED_NS, FIXED_NS))
+        hardware.append({'id': target.relative_to(assets).as_posix(), 'shape': shape})
     identity = {'position': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': [1, 1, 1]}
-    # Use original placed coordinates so added instances lie inside the building frame.
-    originals = sorted(exhibits.glob('*/.exhibit.json'))
-    original = next((json.loads(p.read_text()) for p in originals if json.loads(p.read_text()).get('models')), {})
-    transform = original.get('models', [{}])[0].get('transform', identity)
-    for index, status in enumerate(('ok', 'problem', 'retired')):
-        name = f'Visual {status}'
-        folder = exhibits / name
-        if folder.exists():
-            raise ValueError('Matrix fixture name already exists: ' + name)
-        instances = []
-        for offset in (0, 2, 4):
-            placement = json.loads(json.dumps(transform))
-            placement['position'][0] += index * 8 + offset
-            instances.append({'model': model, 'transform': placement})
-        write_json(folder / '.exhibit.json', {'floor': 0, 'status': status, 'transform': identity, 'models': instances, 'views': {}})
-        note = folder / 'Notizen' / 'Visual 10_11_2026 12.00.md'
-        note.parent.mkdir(parents=True, exist_ok=True)
-        note.write_text('# Deterministic visual fixture\n\nA post with **bold**, a [link](https://example.invalid) and a list.\n\n1. First\n2. Second\n')
-        os.utime(note, ns=(FIXED_NS, FIXED_NS))
-        link = folder / 'Links' / 'Visual documentation.url'
-        link.parent.mkdir(parents=True, exist_ok=True)
-        link.write_text('[InternetShortcut]\nURL=https://example.invalid/manual\n')
-        os.utime(link, ns=(FIXED_NS, FIXED_NS))
+    records = []
+    for floor_index, item in enumerate(floors):
+        width, depth = item['dimensions']
+        scale = min(width, depth) * .035
+        for index, status in enumerate(('ok', 'problem', 'retired')):
+            name = available_name(exhibits, f'Visual {status} floor {floor_index + 1}')
+            folder = exhibits / name
+            instances = []
+            for model_index, model in enumerate(hardware):
+                transform = {'position': [(model_index - 1.5) * width * .18, 0, (index - 1) * depth * .25],
+                             'rotation': [0, (seed + model_index * 37 + index * 19) % 360, 0],
+                             'scale': [scale, scale, scale]}
+                instances.append({'model': model['id'], 'transform': transform})
+            write_json(folder / '.exhibit.json', {'floor': int(item['id']), 'status': status,
+                                                 'transform': identity, 'models': instances, 'views': {}})
+            note = folder / 'Notizen' / 'Visual 10_11_2026 12.00.md'
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text('# Deterministic visual fixture\n\nA post with **bold**, a [link](https://example.invalid) and a list.\n\n1. First\n2. Second\n')
+            os.utime(note, ns=(FIXED_NS, FIXED_NS))
+            link = folder / 'Links' / 'Visual documentation.url'
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.write_text('[InternetShortcut]\nURL=https://example.invalid/manual\n')
+            os.utime(link, ns=(FIXED_NS, FIXED_NS))
+            records.append({'id': name, 'floor_id': item['id'], 'status': status, 'models': len(instances)})
+    return {'version': 1, 'seed': seed, 'home_floor': floors[1]['id'], 'floors': floors,
+            'hardware': hardware, 'exhibits': records}
 
 
-def stage_copy(source, data, profile, destination=None):
+def stage_copy(source, data, profile, destination=None, *, php='php', seed=271828):
     stage = Path(destination) if destination else Path(tempfile.mkdtemp(prefix='digitaltwin-visual-'))
     stage.mkdir(parents=True, exist_ok=True)
     original = fingerprint(source, data)
@@ -122,15 +149,25 @@ def stage_copy(source, data, profile, destination=None):
     for key in ('code', 'assets', 'exhibits'):
         if original[key]['sha256'] != copied[key]['sha256']:
             raise ValueError(f'Staged {key} content/mtime differs before fixture augmentation')
-    if profile == 'matrix':
-        matrix_fixture(stage)
-    config = subprocess.check_output(['php', '-r', '$v=require $argv[1];echo json_encode($v);', str(app / 'config.php')], text=True)
+    fixture = matrix_fixture(stage, seed) if profile == 'matrix' else None
+    config = subprocess.check_output([php, '-r', '$v=require $argv[1];echo json_encode($v);', str(app / 'config.php')], text=True)
     configured = json.loads(config)
+    if not isinstance(configured, dict):
+        raise ValueError('config.php must return a settings object')
+    overrides = {}
     for key, name in (('assets_dir', 'Assets'), ('exhibits_dir', 'Exponate')):
+        if not isinstance(configured.get(key), str):
+            raise ValueError('config.php missing data setting: ' + key)
         if Path(configured[key]).resolve() != (stage / name).resolve():
-            raise ValueError('config.php must use sibling data folders; refusing to access other data')
+            overrides[key] = {'source_value': configured[key], 'staged_folder': name}
+            configured[key] = str((stage / name).resolve())
+    if overrides:
+        # Test-only config adaptation: retain every unrelated setting and record the delta.
+        encoded = base64.b64encode(json.dumps(configured, ensure_ascii=False).encode()).decode()
+        (app / 'config.php').write_text("<?php return json_decode(base64_decode('" + encoded + "'), true, 512, JSON_THROW_ON_ERROR);\n")
     final = fingerprint(app, stage)
-    return {'root': str(stage.resolve()), 'profile': profile, 'original': original, 'staged': final}
+    return {'root': str(stage.resolve()), 'profile': profile, 'original': original, 'staged': final,
+            'fixture': fixture, 'config_overrides': overrides}
 
 
 def main():
@@ -140,8 +177,10 @@ def main():
     parser.add_argument('--data', required=True)
     parser.add_argument('--profile', default='source', choices=('source', 'matrix'))
     parser.add_argument('--destination')
+    parser.add_argument('--php', default=os.environ.get('PHP', 'php'))
+    parser.add_argument('--seed', type=int, default=271828)
     args = parser.parse_args()
-    result = fingerprint(args.source, args.data) if args.operation == 'fingerprint' else stage_copy(args.source, args.data, args.profile, args.destination)
+    result = fingerprint(args.source, args.data) if args.operation == 'fingerprint' else stage_copy(args.source, args.data, args.profile, args.destination, php=args.php, seed=args.seed)
     print(json.dumps(result, ensure_ascii=False))
 
 if __name__ == '__main__':

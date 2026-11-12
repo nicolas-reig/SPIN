@@ -7,7 +7,7 @@ import {
     EditSession,
     identity,
     STATUSES,
-    normalizeStatus
+    normalizeStatus, validTransform
 } from './domain.js';
 import {
     t,
@@ -25,12 +25,14 @@ import { installSelects, closeMenus } from './select.js';
 import { cameraMode, viewMode } from './camera.js';
 import { CameraControls } from './camera-controls.js';
 import { PanelMotion } from './panel-motion.js';
-import { editHelp, vectorFields, viewPresets, exhibitName, newExhibit, duplicateExhibit, rebaseEdit, editWasSaved } from './edit.js';
+import { editHelp, vectorFields, transformNumber, viewPresets, exhibitName, newExhibit, duplicateExhibit, rebaseEdit, editWasSaved } from './edit.js';
 import { icon } from './icons.js';
 import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
+import { hardwareKey, normalizeHardwareSelection, commonTransform } from './transform-selection.js';
+import { installNumberDrag } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 let noteEditor = null;
 installSelects();
@@ -61,6 +63,9 @@ let snapshot = null,
     noticeTimer, noticeClearTimer;
 let creation = null, creationOpen = false, editConflict = null;
 let editSelection = new Set();
+let hardwareSelection = [];
+let transformSpace = 'world';
+let numberDrag;
 let joinGeneration = 0;
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
@@ -106,6 +111,55 @@ const exhibit = () => data()?.exhibits.find(e => e.id === selected);
 const selectedExhibits = () => data()?.exhibits.filter(record => editSelection.has(record.id)) || [];
 const isSelected = id => edit ? editSelection.has(id) : id === selected;
 const floor = () => data()?.floors.find(f => f.id === floorId);
+function selectionTransforms() {
+    if (!edit) return [];
+    if (hardwareSelection.length) return hardwareSelection.flatMap(entry => {
+        const record = data().exhibits.find(record => record.id === entry.exhibitId);
+        const transform = record?.models[entry.instanceIndex]?.transform;
+        return transform && record.floorId === floorId ? [{ ...entry, transform }] : [];
+    });
+    const records = selectedExhibits();
+    if (records.some(record => record.floorId !== floorId)) return [];
+    return records.filter(record => record.models.length).map(record => ({ exhibitId: record.id, transform: record.transform }));
+}
+
+function fieldTargets(input) {
+    if (input.hasAttribute('data-selection-vector')) return selectionTransforms();
+    const record = exhibit();
+    if (!record) return [];
+    const instanceIndex = input.hasAttribute('data-group-vector') ? undefined : Number(input.dataset.instance);
+    const transform = instanceIndex == null ? record.transform : record.models[instanceIndex]?.transform;
+    return transform ? [{ exhibitId: record.id, instanceIndex, transform }] : [];
+}
+
+function commitTransforms(changes) {
+    if (!edit || !changes.length) return;
+    if (changes.some(change => !validTransform(change.transform))) { announce(t('invalidTransform')); return; }
+    applyEdit(state => {
+        for (const { exhibitId, instanceIndex, transform } of changes) {
+            const record = state.exhibits.find(record => record.id === exhibitId);
+            if (instanceIndex == null && record) record.transform = structuredClone(transform);
+            else if (record?.models[instanceIndex]) record.models[instanceIndex].transform = structuredClone(transform);
+        }
+    });
+    updateTransformFields();
+}
+
+function selectionFields() {
+    const entries = selectionTransforms();
+    return entries.length > 1 ? `<form id="structure-form" novalidate>${vectorFields(commonTransform(entries), 'data-selection-vector', 'selection')}<div class="error" id="structure-error" role="alert" hidden></div></form>` : '';
+}
+
+function bindSelectionFields() {
+    $('#structure-form')?.addEventListener('change', event => applyEditorField(event.target));
+    $('#structure-form')?.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
+}
+
+function renderMultiTransformInspector() {
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${hardwareSelection.length} ${esc(t('hardwareComponents'))}</h1></div><div class="panel-content" id="structure-panel"><p class="small muted">${esc(t('hardwareMultiHint'))}</p>${selectionFields()}</div>`;
+    bindSelectionFields();
+    syncEditTools();
+}
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
 onColorModeChange(() => { if (snapshot) renderList(); });
 const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
@@ -199,6 +253,7 @@ function persistEdit() {
         creationOpen,
         selected,
         selection: [...editSelection],
+        hardwareSelection, transformSpace, axisConstraint, snap,
         floorId,
         activeInstance,
         gizmo,
@@ -482,12 +537,13 @@ function renderMapUI() {
 
 function renderTransformToolbar() {
     const toolbar = $('#transform-toolbar');
-    const available = Boolean(edit && editSelection.size === 1 && exhibit()?.models.length && !creationOpen && !editConflict?.open);
+    const available = Boolean(edit && selectionTransforms().length && !creationOpen && !editConflict?.open);
     toolbar.hidden = !available;
     toolbar.setAttribute('aria-label', t('gizmo'));
-    toolbar.innerHTML = available ? `<div class="transform-tools">${[['translate', 'move', 'move', 'moveHardwareHint'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint']].map(([tool, label, name, help]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}</button>`).join('')}</div><span class="toolbar-divider" aria-hidden="true"></span><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${editHelp('snapHint')} ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details>` : '';
-    $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); });
-    $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); });
+    toolbar.innerHTML = available ? `<div class="transform-tools">${[['translate', 'move', 'move', 'moveHardwareHint', 'G'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint', 'R'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint', 'S'], ['combined', 'combinedTransform', 'move-3d', 'combinedTransformHint', '']].map(([tool, label, name, help, shortcut]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}${shortcut ? `<small class="tool-shortcut" aria-hidden="true">${shortcut}</small>` : ''}</button>`).join('')}</div><span class="toolbar-divider" aria-hidden="true"></span><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="transform-space">${esc(t('transformOrientation'))}</label><select id="transform-space">${options([['world', t('globalOrientation')], ['local', t('localOrientation')]], transformSpace)}</select><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details>` : '';
+    $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); persistEdit(); });
+    $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); persistEdit(); });
+    $('#transform-space')?.addEventListener('change', event => { transformSpace = event.target.value; syncEditTools(); persistEdit(); });
 }
 
 async function ensureMap() {
@@ -512,15 +568,9 @@ async function initializeMap() {
                 $('#map-canvas').classList.toggle('floor-loading', key === 'mapLoading');
                 $('#map-message').textContent = key === 'mapReady' ? '' : t(key);
             },
-            onTransform: (id, index, transform) => {
-                if (!edit) return;
-                applyEdit(s => {
-                    const e = s.exhibits.find(x => x.id === id);
-                    if (e?.models[index]) e.models[index].transform = transform;
-                });
-                updateTransformFields();
-            },
-            onInvalidTransform: () => announce(t('invalidTransform'))
+            onTransform: commitTransforms,
+            onTransformPreview: changes => updateTransformFields(changes),
+            onInvalidTransform: key => announce(t(key || 'invalidTransform'))
         });
         await instance.init();
         map = instance;
@@ -537,26 +587,37 @@ async function initializeMap() {
 }
 async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
-        reset, selection: edit ? [...editSelection] : selected ? [selected] : []
+        reset, selection: edit ? [...editSelection] : selected ? [selected] : [], hardwareSelection: edit ? hardwareSelection : []
     });
 }
 
-async function select(id, instanceIndex = 0, extend = false) {
+async function select(id, instanceIndex = 0, extend = false, hardware = false) {
     if (editSave?.saving) return;
     joinGeneration++;
     map?.cancelTransform();
+    numberDrag?.cancel();
     creationOpen = false;
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
     const previous = selected;
     const focused = document.activeElement?.closest('#exhibit-list [data-select]');
     const clicked = data().exhibits.find(x => x.id === id);
-    if (edit && extend) {
+    if (edit && hardware && clicked?.models[instanceIndex]) {
+        const entry = { exhibitId: id, instanceIndex };
+        const key = hardwareKey(entry);
+        if (!extend || clicked.floorId !== floorId) hardwareSelection = [entry];
+        else if (hardwareSelection.some(item => hardwareKey(item) === key)) hardwareSelection = hardwareSelection.filter(item => hardwareKey(item) !== key);
+        else hardwareSelection.push(entry);
+        editSelection = new Set(hardwareSelection.length ? hardwareSelection.map(item => item.exhibitId) : [id]);
+        selected = editSelection.has(id) ? id : [...editSelection][0] || null;
+    } else if (edit && extend) {
+        hardwareSelection = [];
         if (!clicked) return;
         if (editSelection.has(id)) editSelection.delete(id);
         else editSelection.add(id);
         selected = editSelection.has(selected) ? selected : [...editSelection][0] || null;
     } else {
+        hardwareSelection = [];
         selected = clicked?.id || null;
         editSelection = new Set(selected ? [selected] : []);
     }
@@ -570,7 +631,6 @@ async function select(id, instanceIndex = 0, extend = false) {
     const changed = Boolean(e.floorId && floorId !== e.floorId);
     activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
     if (e.floorId) floorId = e.floorId;
-    map?.setActiveInstance(activeInstance);
     renderList();
     renderInspector();
     renderMapUI();
@@ -589,10 +649,12 @@ async function select(id, instanceIndex = 0, extend = false) {
 function changeFloor(id) {
     if (editSave?.saving) return;
     map?.cancelTransform();
+    numberDrag?.cancel();
     creationOpen = false;
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
     floorId = id;
+    hardwareSelection = [];
     const e = exhibit();
     if (e?.floorId !== id) { selected = null; editSelection.clear(); }
     renderMapUI();
@@ -1222,7 +1284,8 @@ function renderJoinInspector() {
             <p class="small muted">${esc(t('joinHint'))}</p>
             <div class="error" id="join-error" role="alert" ${problem ? '' : 'hidden'}>${esc(problem ? t(problem) : '')}</div>
             <div class="creation-actions">${button('cancel', 'cancelJoin', 'quiet')}<button type="submit" class="primary" ${problem ? 'disabled' : ''}>${esc(t('join'))}</button></div>
-        </form></div>`;
+        </form><div id="structure-panel">${selectionFields()}</div></div>`;
+    bindSelectionFields();
     $('#join-target').addEventListener('change', event => {
         if (!editSelection.has(event.target.value)) return;
         joinGeneration++;
@@ -1254,6 +1317,7 @@ async function joinSelection() {
         joined.joinedFrom = joined.joinedFrom.filter(id => session.base.exhibits.some(record => record.id === id));
         if (!joined.joinedFrom.length) delete joined.joinedFrom;
         map?.cancelTransform();
+        hardwareSelection = [];
         editSelection = new Set([target]);
         activeInstance = 0;
         gizmo = '';
@@ -1273,6 +1337,7 @@ async function joinSelection() {
 function editHistory(direction) {
     if (!edit || editSave?.saving) return;
     map?.cancelTransform();
+    numberDrag?.cancel();
     const joined = exhibit()?.joinedFrom || [];
     const before = edit.value;
     edit[direction]();
@@ -1291,7 +1356,9 @@ function editHistory(direction) {
 }
 
 function renderEditInspector() {
+    numberDrag?.cancel();
     if (editConflict?.open) { renderEditConflict(); return; }
+    if (!creationOpen && hardwareSelection.length > 1) { renderMultiTransformInspector(); return; }
     if (!creationOpen && editSelection.size > 1) { renderJoinInspector(); return; }
     const record = exhibit();
     const title = creationOpen ? t('newExhibit') : displayName(record);
@@ -1304,8 +1371,8 @@ function renderEditInspector() {
         <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div></details></div>
         <div id="instance-list">${record.models.map((instance, index) => {
             const asset = hardware.find(item => item.id === instance.model);
-            return `<article class="model-instance ${index === activeInstance ? 'active' : ''}">
-                <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${index}" aria-pressed="${index === activeInstance}" ${editHelp('selectHardwareHint')}>${esc(asset?.name || instance.model)}${record.models.filter(item => item.model === instance.model).length > 1 ? `<small>${index + 1}</small>` : ''}</button>
+            return `<article class="model-instance ${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index) ? 'active' : ''}">
+                <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${index}" aria-pressed="${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index)}" ${editHelp('selectHardwareHint')}>${esc(asset?.name || instance.model)}${record.models.filter(item => item.model === instance.model).length > 1 ? `<small>${index + 1}</small>` : ''}</button>
                     <div class="item-actions"><button type="button" class="icon-button" data-duplicate-instance="${index}" aria-label="${esc(t('duplicate') + ': ' + (asset?.name || instance.model))}" ${editHelp('duplicateHardwareHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-remove-instance="${index}" aria-label="${esc(t('remove') + ': ' + (asset?.name || instance.model))}" ${editHelp('removeHardwareHint')}>${icon('trash')}</button></div></div>
                 <details class="instance-placement"><summary ${editHelp('instancePlacementHint')}>${esc(t('placement'))}</summary><label class="sr-only" for="instance-model-${index}">${esc(t('model'))}</label><select id="instance-model-${index}" data-instance-model="${index}" ${editHelp('replaceHardwareHint')}>${options(hardware.map(item => [item.id, item.name]), instance.model)}</select>${vectorFields(instance.transform, `data-instance="${index}"`, index)}</details>
             </article>`;
@@ -1317,7 +1384,6 @@ function renderEditInspector() {
     form.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
     form.addEventListener('change', event => applyEditorField(event.target));
     if (record.models.length) form.querySelector('#ex-floor option[value=""]').disabled = true;
-    map?.setActiveInstance(activeInstance);
     syncEditTools();
 }
 
@@ -1332,6 +1398,7 @@ function render() {
     editSelection = new Set(edit ? [...editSelection].filter(id => data().exhibits.some(record => record.id === id)) : []);
     if (edit && selected && !editSelection.size) editSelection.add(selected);
     if (edit && editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
+    hardwareSelection = edit ? normalizeHardwareSelection(hardwareSelection, data(), floorId) : [];
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
     renderInspector();
@@ -1479,6 +1546,7 @@ function enterEdit() {
     if (edit) return;
     if (recoverableEdit) { recoverEdit(); return; }
     edit = new EditSession(snapshot);
+    hardwareSelection = [];
     editSelection = new Set(selected ? [selected] : []);
     creation = null;
     creationOpen = false;
@@ -1490,9 +1558,8 @@ function enterEdit() {
 }
 
 function syncEditTools() {
-    const available = edit && editSelection.size === 1 && !editSave?.saving && !creationOpen && !editConflict?.open && exhibit()?.models.length;
-    map?.setTool(available ? gizmo : '', snap);
-    map?.setAxis(axisConstraint);
+    const available = edit && !editSave?.saving && !creationOpen && !editConflict?.open && selectionTransforms().length;
+    map?.setTool(available ? gizmo : '', snap, transformSpace, axisConstraint);
 }
 
 function changed() {
@@ -1510,6 +1577,7 @@ function applyEdit(change, { rebuild = false, reset = false } = {}) {
         state.exhibits.forEach(record => { record.placed = Boolean(record.floorId && record.models.length); });
     });
     if (!didChange) return false;
+    hardwareSelection = normalizeHardwareSelection(hardwareSelection, data(), floorId);
     if (!edit.value.exhibits.some(record => record.id === selected)) selected = null;
     editConflict = null;
     if (editSave) editSave.error = null;
@@ -1535,7 +1603,7 @@ function structureError(key, input = null) {
 }
 
 function validEditorFields() {
-    const inputs = [...($('#structure-form')?.querySelectorAll('input') || [])];
+    const inputs = [...($('#structure-form')?.querySelectorAll('input') || [])].filter(input => !(input.hasAttribute('data-selection-vector') && !input.value));
     const invalid = inputs.find(input => !input.checkValidity() || input.type === 'number' && !input.value.trim());
     if (!invalid) return true;
     structureError(invalid.type === 'number' ? 'invalidTransform' : 'invalidInput', invalid);
@@ -1550,6 +1618,19 @@ function applyEditorField(input) {
         structureError('invalidTransform', input);
         return;
     }
+    if (input.dataset.vector) {
+        map?.cancelTransform();
+        const value = Number(input.value);
+        const changes = fieldTargets(input).map(entry => {
+            const transform = structuredClone(entry.transform);
+            transform[input.dataset.vector][Number(input.dataset.axis)] = value;
+            return { ...entry, transform };
+        });
+        if (changes.some(entry => !validTransform(entry.transform))) { structureError('invalidTransform', input); return; }
+        commitTransforms(changes);
+        if ($('#structure-error')) $('#structure-error').hidden = true;
+        return;
+    }
     if ($('#structure-error')) $('#structure-error').hidden = true;
     const reset = input.id === 'ex-floor' && Boolean(input.value) && input.value !== floorId;
     const previousFloor = floorId;
@@ -1561,28 +1642,43 @@ function applyEditorField(input) {
                 if (target.models.length && !input.value) throw Error('invalidFloor');
                 target.floorId = input.value || null;
             } else if (input.dataset.instanceModel !== undefined) target.models[Number(input.dataset.instanceModel)].model = input.value;
-            else if (input.dataset.vector) {
-                const transform = input.hasAttribute('data-group-vector') ? target.transform : target.models[Number(input.dataset.instance)]?.transform;
-                if (!transform) return;
-                let value = Number(input.value);
-                if (snap && input.dataset.vector === 'position') value = Math.round(value);
-                if (snap && input.dataset.vector === 'rotation') value = Math.round(value / 15) * 15;
-                transform[input.dataset.vector][Number(input.dataset.axis)] = value;
-                input.value = value;
-            }
         }, { reset });
     } catch (error) { floorId = previousFloor; structureError(error.key || error.message, input); }
 }
 
-function updateTransformFields() {
-    const record = exhibit();
-    if (!record) return;
+function updateTransformFields(preview = null) {
     $('#structure-form')?.querySelectorAll('[data-vector]').forEach(input => {
         if (input === document.activeElement) return;
-        const transform = input.hasAttribute('data-group-vector') ? record.transform : record.models[Number(input.dataset.instance)]?.transform;
-        if (transform) input.value = Number(transform[input.dataset.vector][Number(input.dataset.axis)].toFixed(4));
+        const entries = fieldTargets(input).map(entry => preview?.find(change => change.exhibitId === entry.exhibitId && change.instanceIndex === entry.instanceIndex) || entry);
+        if (!entries.length) return;
+        const value = commonTransform(entries)[input.dataset.vector][Number(input.dataset.axis)];
+        input.value = value == null ? '' : transformNumber(value);
     });
 }
+
+numberDrag = installNumberDrag($('#inspector'), {
+    start(drag) {
+        if (!edit || editSave?.saving) return false;
+        map?.cancelTransform();
+        drag.entries = fieldTargets(drag.input).map(entry => ({ ...entry, transform: structuredClone(entry.transform) }));
+        return drag.entries.length > 0;
+    },
+    preview(drag, event) {
+        const key = drag.input.dataset.vector, axis = Number(drag.input.dataset.axis);
+        const step = key === 'position' ? 1 : key === 'rotation' ? 15 : .1;
+        const limit = key === 'scale' ? 1000 : 100000;
+        drag.changes = drag.entries.map(entry => {
+            const transform = structuredClone(entry.transform);
+            let value = entry.transform[key][axis] + drag.delta;
+            if (snap || event.ctrlKey) value = Math.round(value / step) * step;
+            transform[key][axis] = Math.max(-limit, Math.min(limit, value));
+            return { ...entry, transform };
+        });
+        map?.previewTransforms(drag.changes); updateTransformFields(drag.changes);
+    },
+    commit(drag) { if (drag.changes) commitTransforms(drag.changes); },
+    cancel(drag) { map?.previewTransforms(drag.entries); updateTransformFields(); }
+});
 
 function openExhibitEditor(isNew = false) {
     if (!edit || editSave?.saving) return;
@@ -1696,6 +1792,7 @@ function addHardware(model) {
     const previous = record.models[activeInstance];
     transform.position = previous ? [previous.transform.position[0] + 1.5, previous.transform.position[1], previous.transform.position[2]] : map?.placementPosition(record.transform) || [0, 0, 0];
     activeInstance = record.models.length;
+    hardwareSelection = [{ exhibitId: record.id, instanceIndex: activeInstance }];
     gizmo = 'translate';
     applyEdit(state => state.exhibits.find(item => item.id === record.id).models.push({ model, transform }), { rebuild: true });
 }
@@ -1708,6 +1805,7 @@ function removeHardware(index) {
     showDialog('removeHardware', `<p>${esc(name)}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('remove')}`, async () => {
         closeDialog();
         map?.cancelTransform();
+        hardwareSelection = hardwareSelection.filter(entry => entry.exhibitId !== record.id || entry.instanceIndex !== index).map(entry => entry.exhibitId === record.id && entry.instanceIndex > index ? { ...entry, instanceIndex: entry.instanceIndex - 1 } : entry);
         activeInstance = Math.max(0, Math.min(activeInstance, record.models.length - 2));
         applyEdit(state => state.exhibits.find(item => item.id === record.id).models.splice(index, 1), { rebuild: true });
     });
@@ -1721,6 +1819,7 @@ function duplicateHardware(index) {
     const copy = structuredClone(record.models[index]);
     copy.transform.position[0] += 1.5;
     activeInstance = record.models.length;
+    hardwareSelection = [{ exhibitId: record.id, instanceIndex: activeInstance }];
     applyEdit(state => state.exhibits.find(item => item.id === record.id).models.push(copy), { rebuild: true });
 }
 
@@ -1728,7 +1827,8 @@ function cancelEdit() {
     if (!edit) return;
     joinGeneration++;
     map?.cancelTransform();
-    cancelledEdit = { edit, creation, creationOpen, selected, selection: [...editSelection], floorId, activeInstance, gizmo, signature: editSave?.signature || '', requestId: editSave?.requestId || '' };
+    numberDrag?.cancel();
+    cancelledEdit = { edit, creation, creationOpen, selected, selection: [...editSelection], hardwareSelection: structuredClone(hardwareSelection), transformSpace, axisConstraint, snap, floorId, activeInstance, gizmo, signature: editSave?.signature || '', requestId: editSave?.requestId || '' };
     const dirty = edit.changes().length || creation;
     edit = null;
     creation = null;
@@ -1749,6 +1849,10 @@ function restoreEdit() {
     const signature = cancelledEdit.signature;
     const requestId = cancelledEdit.requestId;
     editSelection = new Set(cancelledEdit.selection || (cancelledEdit.selected ? [cancelledEdit.selected] : []));
+    hardwareSelection = cancelledEdit.hardwareSelection || [];
+    transformSpace = cancelledEdit.transformSpace || 'world';
+    axisConstraint = cancelledEdit.axisConstraint || '';
+    snap = Boolean(cancelledEdit.snap);
     ({ edit, creation, creationOpen, selected, floorId, activeInstance, gizmo } = cancelledEdit);
     cancelledEdit = null;
     editSave = signature ? { signature, requestId, signing: false, saving: false } : null;
@@ -1762,6 +1866,7 @@ async function saveExit() {
     if (pendingJoinDrafts()) { announce(t('joinHasDrafts')); return; }
     if (editConflict) { actions.structureConflict(); return; }
     map?.cancelTransform();
+    numberDrag?.cancel();
     if (creation) {
         creationOpen = true;
         renderInspector(); renderMapUI(); syncEditTools(); setView('detail');
@@ -2041,6 +2146,10 @@ function recoverEdit() {
     floorId = saved.floorId || floorId;
     activeInstance = saved.activeInstance || 0;
     gizmo = saved.gizmo || '';
+    hardwareSelection = normalizeHardwareSelection(saved.hardwareSelection, data(), floorId);
+    transformSpace = saved.transformSpace === 'local' ? 'local' : 'world';
+    axisConstraint = ['X', 'Y', 'Z'].includes(saved.axisConstraint) ? saved.axisConstraint : '';
+    snap = Boolean(saved.snap);
     editSave = saved.signature ? { signature: saved.signature, requestId: saved.requestId || '', signing: false, saving: false } : null;
     recoverableEdit = null;
     changed();
@@ -2054,6 +2163,7 @@ function duplicateSelected(id = selected) {
     map?.cancelTransform();
     const copy = duplicateExhibit(record, data().exhibits);
     selected = copy.id;
+    hardwareSelection = [];
     editSelection = new Set([copy.id]);
     creationOpen = false;
     applyEdit(state => state.exhibits.push(copy), { rebuild: true });
@@ -2061,9 +2171,10 @@ function duplicateSelected(id = selected) {
 }
 
 function setEditTool(tool) {
-    if (!edit || editSelection.size !== 1 || !exhibit()?.models.length || editSave?.saving) return;
+    if (!edit || !selectionTransforms().length || editSave?.saving) return;
     map?.cancelTransform();
     gizmo = gizmo === tool ? '' : tool;
+    persistEdit();
     syncEditTools();
     renderMapUI();
     $(`[data-tool="${tool}"]`)?.focus({ preventScroll: true });
@@ -2202,11 +2313,7 @@ document.addEventListener('click', async event => {
         if (element.dataset.duplicateExhibit) { duplicateSelected(element.dataset.duplicateExhibit); return; }
         if (element.dataset.addHardware) { addHardware(element.dataset.addHardware); return; }
         if (element.dataset.editInstance !== undefined) {
-            map?.cancelTransform();
-            activeInstance = Number(element.dataset.editInstance);
-            map?.setActiveInstance(activeInstance);
-            renderInspector(); renderMapUI(); syncEditTools();
-            return;
+            select(selected, Number(element.dataset.editInstance), event.shiftKey, true); return;
         }
         if (element.dataset.removeInstance !== undefined) { removeHardware(Number(element.dataset.removeInstance)); return; }
         if (element.dataset.duplicateInstance !== undefined) { duplicateHardware(Number(element.dataset.duplicateInstance)); return; }
@@ -2233,6 +2340,19 @@ document.addEventListener('keydown', event => {
         editSave?.signing ? confirmEditSave() : saveExit();
         return;
     }
+    if (edit && event.target.matches('input[data-vector]') && ['Enter', 'Escape'].includes(event.key)) {
+        event.preventDefault();
+        const input = event.target;
+        if (event.key === 'Escape') {
+            const value = commonTransform(fieldTargets(input))[input.dataset.vector][Number(input.dataset.axis)];
+            input.value = value == null ? '' : transformNumber(value);
+        } else {
+            applyEditorField(input);
+            if (!input.checkValidity() || !input.value.trim()) return;
+        }
+        input.blur(); return;
+    }
+    if (!typing && edit && map?.transformKey(event)) { event.preventDefault(); return; }
     if (event.key === 'Escape') {
         if (map?.cancelTransform()) { event.preventDefault(); return; }
         if (editSave?.signing) { event.preventDefault(); cancelEditSignature(); return; }
@@ -2248,7 +2368,10 @@ document.addEventListener('keydown', event => {
             actions[key === 'y' || event.shiftKey ? 'redo' : 'undo']();
         } else if (!event.metaKey && !event.ctrlKey && !event.altKey && ['g', 'r', 's'].includes(key)) {
             event.preventDefault();
-            setEditTool({ g: 'translate', r: 'rotate', s: 'scale' }[key]);
+            const tool = { g: 'translate', r: 'rotate', s: 'scale' }[key];
+            if (selectionTransforms().length && !creationOpen && !editConflict?.open) {
+                gizmo = tool; syncEditTools(); renderTransformToolbar(); map?.beginTransform(tool); persistEdit();
+            }
         }
     }
     if (event.target.matches('[data-select]') && ['Enter', ' '].includes(event.key)) {

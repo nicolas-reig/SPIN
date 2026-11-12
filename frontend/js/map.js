@@ -5,14 +5,12 @@ import {
 import {
     OrbitControls
 } from 'three/addons/controls/OrbitControls.js';
-import {
-    TransformControls
-} from 'three/addons/controls/TransformControls.js';
+import { TransformController } from './transform-controller.js';
+import { transformKey } from './transform-math.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 
 import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, viewKey } from './camera.js';
-import { validTransform } from './domain.js';
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 import { TopView } from './top-view.js';
 import { dispose, disposeMaterials, replaceMaterials } from './model-resources.js';
@@ -48,6 +46,7 @@ export class MapView {
         onSelect = () => {},
         onTransform = () => {},
         onInvalidTransform = () => {},
+        onTransformPreview = () => {},
         onState = () => {},
         onMode = () => {},
         onCamera = () => {}
@@ -56,6 +55,7 @@ export class MapView {
         this.onSelect = onSelect;
         this.onTransform = onTransform;
         this.onInvalidTransform = onInvalidTransform;
+        this.onTransformPreview = onTransformPreview;
         this.onState = onState;
         this.onMode = onMode;
         this.onCamera = onCamera;
@@ -81,6 +81,7 @@ export class MapView {
         this.mode = 'perspective';
         this.selected = null;
         this.selection = new Set();
+        this.hardwareSelection = [];
         this.frame = 0;
         this.snap = false;
         this.loader = new GLTFLoader();
@@ -119,32 +120,13 @@ export class MapView {
             this.requestRender();
         });
         this.controls.addEventListener('start', () => cancelAnimationFrame(this.cameraFrame));
-        this.transform = new TransformControls(this.camera, this.renderer.domElement);
-        this.scene.add(this.transform.getHelper());
+        this.transform = new TransformController({
+            scene: this.scene, camera: this.camera, canvas: this.renderer.domElement, controls: this.controls,
+            onChange: () => { this.boundsDirty = true; this.requestRender(); },
+            onCommit: changes => this.onTransform(changes), onError: key => this.onInvalidTransform(key),
+            onPreview: changes => this.onTransformPreview(changes)
+        });
         this.updateColors();
-        this.transform.addEventListener('dragging-changed', e => {
-            this.controls.enabled = !e.value;
-            if (!e.value && this.transform.object && !this.cancelledTransform) {
-                const o = this.transform.object;
-                const transform = {
-                    position: o.position.toArray(),
-                    rotation: [o.rotation.x, o.rotation.y, o.rotation.z].map(v => v * 180 / Math.PI),
-                    scale: o.scale.toArray()
-                };
-                if (validTransform(transform)) this.onTransform(o.userData.exhibitId, o.userData.instanceIndex, transform);
-                else {
-                    const previous = this.data.exhibits.find(record => record.id === o.userData.exhibitId)?.models[o.userData.instanceIndex]?.transform;
-                    if (previous) applyTransform(o, previous);
-                    this.onInvalidTransform();
-                    this.requestRender();
-                }
-            }
-            if (!e.value) this.cancelledTransform = false;
-        });
-        this.transform.addEventListener('change', () => {
-            this.boundsDirty = true;
-            this.requestRender();
-        });
         this.observer = new ResizeObserver(() => this.resize());
         this.observer.observe(this.container);
         const canvas = this.renderer.domElement;
@@ -174,7 +156,7 @@ export class MapView {
         canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
         canvas.addEventListener('pointerup', e => {
             this.orbitFromTop = null;
-            if (e.button !== 0 || !this.editing && e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.dragging || this.transform.axis) return;
+            if (e.button !== 0 || !this.editing && e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.active) return;
             const r = canvas.getBoundingClientRect();
             const pointer = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
             const ray = new THREE.Raycaster();
@@ -184,7 +166,7 @@ export class MapView {
                 let o = h.object;
                 while (o && !o.userData.exhibitId) o = o.parent;
                 if (o) {
-                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex || 0, e.shiftKey);
+                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex ?? 0, e.shiftKey, this.editing);
                     return;
                 }
             }
@@ -229,6 +211,7 @@ export class MapView {
             this.frame = 0;
             try {
                 if (this.boundsDirty || this.cameraLimitsDirty) this.updateCameraLimits();
+                this.transform?.update();
                 const offset = this.camera.position.clone().sub(this.controls.target);
                 this.renderer.domElement.dataset.cameraOffset = offset.toArray().join(',');
                 this.onCamera(this.navigationState());
@@ -281,7 +264,7 @@ export class MapView {
         }
     }
     clearScene() {
-        this.transform?.detach();
+        this.transform?.setSelection([]);
         this.topView?.clear();
         this.scene.remove(this.root);
         dispose(this.root, this.sharedMaterials);
@@ -291,14 +274,17 @@ export class MapView {
         this.updateCameraLimits();
         this.objects.clear();
         this.floor = null;
+        this.installedKey = null;
         this.requestRender();
     }
     async setData(data, floorId, selected, editing = false, {
-        reset = false, selection = selected ? [selected] : []
+        reset = false, selection = selected ? [selected] : [], hardwareSelection = []
     } = {}) {
+        this.cancelTransform();
         this.data = data;
         this.selected = selected;
         this.selection = new Set(selection);
+        this.hardwareSelection = hardwareSelection;
         this.editing = editing;
         const floor = data.floors.find(f => f.id === floorId);
         if (!floor) {
@@ -309,29 +295,48 @@ export class MapView {
             return;
         }
         const exhibits = data.exhibits.filter(e => e.floorId === floorId);
-        const key = JSON.stringify([floor, exhibits.map(e => [e.id, e.transform, e.models])]);
-        if (key === this.key) {
+        const key = JSON.stringify([floor, data.assets, exhibits.map(e => [e.id, e.models.map(instance => instance.model)])]);
+        if (key === this.installedKey) {
+            // An undo may return to the installed layout while another layout is
+            // still loading. Invalidate that load before reusing this scene.
+            this.generation++;
+            this.key = key;
             for (const exhibit of data.exhibits) {
                 const object = this.objects.get(exhibit.id);
                 if (!object) continue;
                 object.userData.status = exhibit.status;
+                applyTransform(object, exhibit.transform);
+                exhibit.models.forEach((instance, index) => applyTransform(object.children[index], instance.transform));
             }
+            this.boundsDirty = true;
             this.highlight(selected);
+            if (reset) this.home();
+            this.onState(this.partialModels ? 'mapPartial' : 'mapReady');
             return;
         }
         this.key = key;
         const generation = ++this.generation;
         if (this.floor && this.floor.id !== floorId) this.clearScene();
         this.onState('mapLoading');
-        this.transform?.detach();
+        this.transform?.setSelection([]);
         const next = new THREE.Group();
         applyTransform(next, floor.transform);
         const objects = new Map();
         const templates = new Map();
         const assets = new Map();
         for (const asset of data.assets) if (!assets.has(asset.id)) assets.set(asset.id, asset);
+        const failures = new Set();
+        const loadModel = async (asset, material) => {
+            if (asset && failures.has(asset.id)) return null;
+            try { return await this.model(asset, material, templates, generation); }
+            catch (error) {
+                failures.add(asset?.id || 'floor');
+                console.warn('Could not load model:', asset?.id, error);
+                return null;
+            }
+        };
         try {
-            const building = await this.model(assets.get(floor.modelId), this.materials.floor, templates, generation);
+            const building = await loadModel(assets.get(floor.modelId), this.materials.floor);
             if (building) {
                 building.userData.floor = true;
                 next.add(building);
@@ -353,7 +358,7 @@ export class MapView {
                     holder.userData.instanceIndex = index;
                     applyTransform(holder, instance.transform);
                     group.add(holder);
-                    const model = await this.model(assets.get(instance.model), this.exhibitMaterial(exhibit.status), templates, generation);
+                    const model = await loadModel(assets.get(instance.model), this.exhibitMaterial(exhibit.status));
                     if (model) holder.add(model);
                     if (generation !== this.generation) {
                         dispose(next, this.sharedMaterials);
@@ -375,14 +380,16 @@ export class MapView {
             this.updateCameraLimits();
             this.objects = objects;
             this.floor = floor;
+            this.installedKey = key;
             for (const exhibit of this.data.exhibits) {
                 const object = objects.get(exhibit.id);
                 if (object) object.userData.status = exhibit.status;
             }
             this.highlight(this.selected);
+            this.partialModels = failures.size > 0;
             if (reset) this.home();
             this.requestRender();
-            this.onState('mapReady');
+            this.onState(this.partialModels ? 'mapPartial' : 'mapReady');
         } catch (e) {
             dispose(next, this.sharedMaterials);
             if (generation === this.generation) {
@@ -393,41 +400,47 @@ export class MapView {
         }
     }
     exhibitMaterial(status, selected = false) {
-        if (selected) return this.materials[this.editing ? 'editSelection' : 'selection'];
+        if (selected) return this.materials.selection;
         return this.editing ? this.materials.retired : this.materials[status] || this.materials.ok;
+    }
+    transformEntries() {
+        if (!this.editing) return [];
+        if (this.hardwareSelection.length) return this.hardwareSelection.flatMap(entry => {
+            const object = this.objects.get(entry.exhibitId)?.children[entry.instanceIndex];
+            return object ? [{ ...entry, object }] : [];
+        });
+        return [...this.selection].flatMap(exhibitId => {
+            const object = this.objects.get(exhibitId);
+            return object ? [{ exhibitId, object }] : [];
+        });
     }
     highlight(id) {
         this.selected = id;
+        const hardware = new Set(this.hardwareSelection.map(transformKey));
         for (const [exhibitId, group] of this.objects) {
-            const material = this.exhibitMaterial(group.userData.status, this.selection.has(exhibitId));
-            group.traverse(mesh => {
-                if (mesh.isMesh) mesh.material = material;
-            });
+            for (const [instanceIndex, holder] of group.children.entries()) {
+                const material = hardware.has(transformKey({ exhibitId, instanceIndex })) ? this.materials.editSelection :
+                    this.exhibitMaterial(group.userData.status, this.selection.has(exhibitId));
+                holder.traverse(mesh => { if (mesh.isMesh) mesh.material = material; });
+            }
         }
-        const object = this.objects.get(id);
-        if (object && this.editing && this.selection.size === 1 && this.tool && object.children[this.activeInstance || 0]) {
-            this.transform?.attach(object.children[this.activeInstance || 0]);
-        }
-        else this.transform?.detach();
+        this.transform?.setSelection(this.transformEntries());
         this.requestRender();
-    }
-    setActiveInstance(index) {
-        this.activeInstance = index;
-        this.highlight(this.selected);
     }
     cancelTransform() {
-        if (!this.transform?.dragging) return false;
-        this.cancelledTransform = true;
-        this.transform.reset();
-        this.down = null;
-        this.orbitFromTop = null;
-        this.transform.pointerUp(null);
-        const canvas = this.renderer?.domElement;
-        if (typeof PointerEvent === 'function' && canvas?.hasPointerCapture(this.pointerId)) {
-            canvas.dispatchEvent(new PointerEvent('pointerup', { pointerId: this.pointerId, button: 0 }));
+        const cancelled = this.transform?.cancel?.() || false;
+        this.down = null; this.orbitFromTop = null;
+        return cancelled;
+    }
+    beginTransform(mode) { cancelAnimationFrame(this.cameraFrame); return this.transform?.begin(mode) || false; }
+    transformKey(event) { return this.transform?.key(event) || false; }
+    previewTransforms(changes) {
+        for (const { exhibitId, instanceIndex, transform } of changes) {
+            const group = this.objects.get(exhibitId);
+            const object = instanceIndex == null ? group : group?.children[instanceIndex];
+            if (object) { applyTransform(object, transform); object.updateMatrixWorld(true); }
         }
-        this.requestRender();
-        return true;
+        this.boundsDirty = true; this.transform?.update(); this.requestRender();
     }
     placementPosition(transform) {
         if (!this.controls) return [0, 0, 0];
@@ -439,16 +452,9 @@ export class MapView {
         const position = this.controls.target.clone().applyMatrix4(matrix);
         return [position.x, 0, position.z];
     }
-    setTool(tool, snap = false) {
-        this.tool = tool;
-        this.snap = snap;
-        if (!this.transform) return;
-        this.transform.setMode(tool || 'translate');
-        this.transform.setSpace('local');
-        this.transform.setTranslationSnap(snap ? 1 : null);
-        this.transform.setRotationSnap(snap ? Math.PI / 12 : null);
-        this.transform.setScaleSnap(snap ? .1 : null);
-        this.highlight(this.selected);
+    setTool(tool, snap = false, space = 'world', axis = '') {
+        this.tool = tool; this.snap = snap;
+        this.transform?.configure(tool, snap, space, axis);
     }
     sceneBounds() {
         if (this.boundsDirty || !this.bounds) {
@@ -644,6 +650,7 @@ export class MapView {
         this.applyView(this.floor.views?.[key] || this.fallbackView(ids));
     }
     setView(mode, preserve = false) {
+        this.cancelTransform();
         mode = cameraMode(mode);
         cancelAnimationFrame(this.cameraFrame);
         const state = this.navigationState();
@@ -664,7 +671,7 @@ export class MapView {
         this.controls.maxPolarAngle = mode === 'top' ? .000001 : Math.PI / 2;
         this.renderer.domElement.dataset.view = mode;
         this.renderer.domElement.dataset.projection = this.camera.isOrthographicCamera ? 'orthographic' : 'perspective';
-        this.transform.camera = this.camera;
+        if (this.transform) this.transform.camera = this.camera;
         this.updateCameraLimits(nextDistance);
         this.resize();
         this.controls.update();
@@ -717,13 +724,6 @@ export class MapView {
             }
         }
         this.controls.update();
-        this.requestRender();
-    }
-    setAxis(axis) {
-        if (!this.transform) return;
-        this.transform.showX = !axis || axis === 'X';
-        this.transform.showY = !axis || axis === 'Y';
-        this.transform.showZ = !axis || axis === 'Z';
         this.requestRender();
     }
     destroy() {

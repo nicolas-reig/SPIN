@@ -1,5 +1,6 @@
 import { Matrix4, Vector3, Quaternion, Euler, MathUtils } from 'three';
 import { validTransform } from './domain.js';
+import { decomposeTransform } from './transform-math.js';
 
 const matrix = transform => new Matrix4().compose(
     new Vector3(...transform.position),
@@ -14,24 +15,17 @@ export function joinExhibits(records, targetId) {
     if (floors.size > 1) throw Error('joinDifferentFloors');
     if (records.reduce((count, record) => count + record.models.length, 0) > 100) throw Error('joinTooManyModels');
     const joined = structuredClone(target);
-    const inverse = matrix(target.transform).invert();
+    const targetMatrix = matrix(target.transform);
+    if (targetMatrix.determinant() === 0) throw Error('transformCollapsedParent');
+    const inverse = targetMatrix.invert();
     for (const record of records) {
         if (record.id === targetId) continue;
         const parent = inverse.clone().multiply(matrix(record.transform));
         for (const instance of record.models) {
             const world = parent.clone().multiply(matrix(instance.transform));
-            const position = new Vector3(), rotation = new Quaternion(), scale = new Vector3();
-            world.decompose(position, rotation, scale);
-            const restored = new Matrix4().compose(position, rotation, scale);
-            if (world.elements.some((value, index) => Math.abs(value - restored.elements[index]) > .00001 * Math.max(1, Math.abs(value)))) {
-                throw Error('joinUnevenScale');
-            }
-            const angles = new Euler().setFromQuaternion(rotation);
-            const transform = {
-                position: position.toArray(),
-                rotation: [angles.x, angles.y, angles.z].map(MathUtils.radToDeg),
-                scale: scale.toArray()
-            };
+            let transform;
+            try { ({ transform } = decomposeTransform(world, new Quaternion().setFromEuler(new Euler(...instance.transform.rotation.map(MathUtils.degToRad))))); }
+            catch (error) { throw Error(error.message === 'transformShear' ? 'joinUnevenScale' : error.message); }
             if (!validTransform(transform)) throw Error('invalidTransform');
             joined.models.push({ model: instance.model, transform });
         }

@@ -196,6 +196,12 @@ test('status-only changes reuse the installed scene and rebuilding uses independ
     assert.equal(previousDisposals(), 0);
     statusData.exhibits[0].models[0].transform.position[0] += 2;
     await view.setData(statusData, 'floor', 'first');
+    assert.equal(calls.length, 1);
+    assert.equal(view.root, firstRoot);
+    assert.equal(view.objects.get('first').children[0].position.x, 2);
+    assert.equal(previousDisposals(), 0);
+    statusData.exhibits[0].models.push({ model: 'hardware', transform: transform() });
+    await view.setData(statusData, 'floor', 'first');
     const current = meshes(view.root)[0].geometry;
     const currentDisposals = disposals(current);
     assert.equal(calls.length, 2);
@@ -359,7 +365,7 @@ test('destroy invalidates a pending load and its late result is released without
     assert.deepEqual(states, ['mapLoading']);
 });
 
-test('preprocessing errors release the unattached imported scene and report mapUnavailable', async () => {
+test('an invalid hardware asset is released once and does not hide the remaining map', async () => {
     const { view, calls, states } = makeView();
     const raw = sourceScene();
     raw.geometry.toNonIndexed = () => { throw new Error('synthetic geometry preprocessing failure'); };
@@ -374,11 +380,33 @@ test('preprocessing errors release the unattached imported scene and report mapU
     assert.equal(raw.geometryDisposals(), 1);
     assert.equal(raw.materialDisposals(), 1);
     assert.equal(raw.scene.parent, null);
-    assert.equal(view.root.children.length, 0);
-    assert.equal(view.objects.size, 0);
-    assert.equal(view.floor, null);
-    assert.deepEqual(states, ['mapLoading', 'mapUnavailable']);
+    assert.equal(view.root.children.length, 3);
+    assert.equal(view.objects.size, 2);
+    assert.equal(view.floor.id, 'floor');
+    assert.deepEqual(states, ['mapLoading', 'mapPartial']);
     view.destroy();
     assert.equal(raw.geometryDisposals(), 1);
     assert.equal(raw.materialDisposals(), 1);
+});
+
+test('returning to the installed layout cancels a pending model replacement', async () => {
+    const { view } = makeView();
+    const original = dataset();
+    await view.setData(original, 'floor', null);
+    const installed = view.root;
+    let release;
+    const delayed = new Promise(resolve => { release = resolve; });
+    let loaded;
+    const started = new Promise(resolve => { loaded = resolve; });
+    const imported = sourceScene();
+    view.loader.loadAsync = async () => { loaded(); await delayed; return { scene: imported.scene }; };
+    const changed = dataset(5);
+    const pending = view.setData(changed, 'floor', null);
+    await started;
+    await view.setData(original, 'floor', null);
+    release(); await pending;
+    assert.equal(view.root, installed);
+    assert.equal(view.objects.get('second').children.length, 2);
+    assert.equal(imported.geometryDisposals(), 1);
+    view.destroy();
 });

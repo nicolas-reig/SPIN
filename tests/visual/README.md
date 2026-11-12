@@ -107,3 +107,17 @@ Memory sessions are separate from pixel captures. The runner holds the initial r
 Each new context supplies a cold application scene, followed by warm selections, repeated floor rebuild/return cycles, a controlled superseded load, an edit and undo, viewport changes, renderer destruction, and document navigation. Samples include Chromium `Runtime.getHeapUsage` before/after explicit garbage collection, DOM counters, current scene/resource inventories, and actual `renderer.info.memory` geometry/texture counts. Unique CPU geometry buffer bytes include indexes, interleaved attributes and morph attributes. These are distinct measurements: CPU buffer bytes are not VRAM, renderer counters are not GPU byte sizes, and JavaScript heap is not total browser or operating-system RAM. The context is fresh; operating-system file caches are not flushed. No universal heap threshold or improvement claim is inferred from an unexecuted profile.
 
 The source tests use the actual vendored `GLTFLoader` to parse every generated shape without network access. They also verify shared/interleaved buffer counting and superseded concurrent-build observation. This establishes fixture and instrumentation behavior in Node, not browser GPU measurements or visual equivalence.
+
+## After project consolidation (12 November 2026)
+
+There is one active application at `/Users/nreigs/Projects/digitaltwin/WebApp`.
+The historical `ReviewBaseline` and `ReviewBaselinePass2` trees referenced above
+are preserved inside `../../../Archive/digitaltwin-before-consolidation-2026-11-12.tar.gz`
+(relative to this directory), under `digitaltwin unorganized/`. Extract them into
+a separate temporary directory and supply those extracted paths when running the
+historical comparison. Do not replace the active Assets or Exponate.
+
+The transform UI now intentionally differs from the old pixel baselines. Current
+transform implementation and manual interaction verification are recorded in
+[transform-editing-todo.md](../../docs/transform-editing-todo.md). The historical
+strict pixel and browser memory gates above retain their original status.

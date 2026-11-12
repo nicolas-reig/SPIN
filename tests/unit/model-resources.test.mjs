@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     Bone, BoxGeometry, BufferGeometry, DataTexture, Float32BufferAttribute,
-    Group, InstancedMesh, Mesh, MeshStandardMaterial, Skeleton, SkinnedMesh, Texture
+    Group, InstancedMesh, Line, LineBasicMaterial, Mesh, MeshStandardMaterial,
+    Points, PointsMaterial, Skeleton, SkinnedMesh, Texture
 } from '../../frontend/vendor/three/build/three.core.js';
 import { dispose, disposeMaterials, replaceMaterials } from '../../frontend/js/model-resources.js';
 
@@ -186,6 +187,72 @@ test('replacement material retains a bitmap source shared with an imported textu
     dispose(root);
     assert.equal(replacementDisposals(), 1);
     assert.equal(bitmap.closes, 1);
+});
+
+test('mesh replacement preserves Points and Line materials with shared texture and bitmap aliases', t => {
+    const ImageBitmap = withBitmapClass(t);
+    const bitmap = new ImageBitmap();
+    const retainedTexture = new Texture(bitmap);
+    const lineTexture = retainedTexture.clone();
+    const discardedTexture = retainedTexture.clone();
+    const imported = [
+        new MeshStandardMaterial({ map: retainedTexture }),
+        new MeshStandardMaterial({ map: discardedTexture })
+    ];
+    const pointsMaterial = new PointsMaterial({ map: retainedTexture });
+    const lineMaterial = new LineBasicMaterial({ map: lineTexture });
+    const replacement = new MeshStandardMaterial();
+    const importedDisposals = imported.map(disposals);
+    const pointsDisposals = disposals(pointsMaterial);
+    const lineDisposals = disposals(lineMaterial);
+    const retainedTextureDisposals = disposals(retainedTexture);
+    const lineTextureDisposals = disposals(lineTexture);
+    const discardedTextureDisposals = disposals(discardedTexture);
+    const geometry = new BoxGeometry();
+    const root = new Group();
+    const mesh = new Mesh(geometry, imported);
+    const points = new Points(geometry, pointsMaterial);
+    const line = new Line(geometry, lineMaterial);
+    root.add(mesh, points, line);
+
+    replaceMaterials(root, replacement);
+
+    assert.equal(mesh.material, replacement);
+    assert.equal(points.material, pointsMaterial);
+    assert.equal(line.material, lineMaterial);
+    assert.ok(importedDisposals.every(count => count() === 1));
+    assert.equal(pointsDisposals(), 0);
+    assert.equal(lineDisposals(), 0);
+    assert.equal(retainedTextureDisposals(), 0);
+    assert.equal(lineTextureDisposals(), 0);
+    assert.equal(discardedTextureDisposals(), 1);
+    assert.equal(bitmap.closes, 0);
+
+    dispose(root);
+    assert.equal(pointsDisposals(), 1);
+    assert.equal(lineDisposals(), 1);
+    assert.equal(retainedTextureDisposals(), 1);
+    assert.equal(lineTextureDisposals(), 1);
+    assert.equal(bitmap.closes, 1);
+});
+
+test('a material shared with a non-mesh primitive stays live after mesh replacement', () => {
+    const imported = new LineBasicMaterial();
+    const replacement = new MeshStandardMaterial();
+    const importedDisposals = disposals(imported);
+    const geometry = new BoxGeometry();
+    const root = new Group();
+    const mesh = new Mesh(geometry, imported);
+    const line = new Line(geometry, imported);
+    root.add(mesh, line);
+
+    replaceMaterials(root, replacement);
+
+    assert.equal(mesh.material, replacement);
+    assert.equal(line.material, imported);
+    assert.equal(importedDisposals(), 0);
+    dispose(root);
+    assert.equal(importedDisposals(), 1);
 });
 
 test('shared skeleton bone textures are released once across skinned mesh parts', () => {

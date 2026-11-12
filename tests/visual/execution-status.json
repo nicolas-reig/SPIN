@@ -1,0 +1,53 @@
+{
+  "recorded_at": "2026-11-12T11:41:05.319376+00:00",
+  "baseline_ref": "0071aff11cc3b1accd3c893e69b1b0fb5df02062",
+  "baseline_code_sha256": "a5777b541267f901e414dfbb2202eac79247052cd171d4c227e8452238c1ed44",
+  "baseline_location": "/Users/nreigs/digitaltwin/ReviewBaseline/WebApp",
+  "application_source_modified_by_visual_agent": false,
+  "baseline_frames_captured": 0,
+  "candidate_frames_captured": 0,
+  "visual_equivalence": "not established",
+  "real_captured_frame_negative_control": "passed: exactly one RGB-channel-level change in one pixel; unchanged alpha",
+  "baseline_repeatability": "automated suite not run; manual original overview repeatability passed",
+  "candidate_repeatability": "not run",
+  "implemented_harness": "Playwright real app with static route fulfillment and unchanged production PHP GET CLI transport; no listening server",
+  "observed_environment_limits": [
+    "Initial php -S 127.0.0.1:8765 -t frontend failed: Operation not permitted.",
+    "Initial Google Chrome headless Playwright smoke launch exited SIGABRT before a page; subsequent process kill was EPERM.",
+    "Node REPL smoke call did not return and was canceled; it produced no usable browser result.",
+    "No further browser/listener/file-protocol workaround was attempted.",
+    "Original HTTP app was accessible in parent IAB for manual screenshots; local file protocol was explicitly blocked by browser policy and no workaround was used."
+  ],
+  "completed_checks": {
+    "python_comparator_and_stage_tests": 16,
+    "node_transport_tests": 3,
+    "production_php_snapshot_glb_integration_candidate": 1,
+    "production_php_snapshot_glb_integration_original_baseline": 1,
+    "javascript_syntax": "run.mjs, suite.mjs, transport.mjs passed",
+    "php_bridge_syntax": "passed",
+    "synthetic_one_rgb_channel_one_pixel_control": "passed: exactly one differing pixel at channel delta 1",
+    "synthetic_alpha_only_and_global_drift_controls": "passed",
+    "source_data_bytes_nanosecond_timestamp_copy_integrity": "passed"
+  },
+  "host": {
+    "system": "Darwin",
+    "release": "27.2.0",
+    "machine": "arm64",
+    "python": "3.13.3",
+    "node": "v24.22.1",
+    "php": "PHP 8.5.12 (cli) (built: Oct 19 2026 17:02:46) (NTS)"
+  },
+  "limitation": "Browser scenarios are syntax-checked but not browser-executed; selectors, clock behavior and GPU pixel repeatability still require the documented permitted-environment run.",
+  "automated_browser_capture_status": "blocked",
+  "manual_original_ui_screenshots": 35,
+  "manual_original_overview_repeatability": "passed: zero differing pixels out of 2250000; exact same JPEG SHA-256",
+  "manual_screenshot_comparator_evidence": "real-frame-comparator-validation.json",
+  "latest_source_verification": {
+    "node_unit_tests": 34,
+    "seeded_edit_actions": 800,
+    "php_bounded_read_test": "passed",
+    "application_javascript_syntax": 25,
+    "application_php_syntax": 7
+  },
+  "baseline_content_note": "Live Blender source/backup files changed externally during review; all exported GLBs, floor metadata and exhibit bytes still match the frozen content. Automated comparisons use the preserved frozen data, never live data."
+}

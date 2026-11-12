@@ -20,6 +20,19 @@ export class TransformController {
         this.group = new THREE.Group(); this.group.name = 'Transform gizmos'; this.group.visible = false;
         scene.add(this.group);
         this.colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00'];
+        this.constraintGuide = new THREE.Group(); this.constraintGuide.name = 'Transform constraint preview'; this.constraintGuide.visible = false;
+        this.constraintAxes = axes.map(axis => {
+            const direction = axisVector(axis);
+            const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([direction.clone().negate(), direction]),
+                new THREE.LineBasicMaterial({ color: this.colors[axes.indexOf(axis)], depthTest: false, depthWrite: false, transparent: true, opacity: .8 }));
+            line.name = axis; line.renderOrder = 9999;
+            this.constraintGuide.add(line); return line;
+        });
+        this.constraintPlane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({
+            depthTest: false, depthWrite: false, transparent: true, opacity: .07, side: THREE.DoubleSide,
+        }));
+        this.constraintPlane.name = 'Allowed plane'; this.constraintPlane.renderOrder = 9998;
+        this.constraintGuide.add(this.constraintPlane); scene.add(this.constraintGuide);
         this.abort = new AbortController();
         const listen = (target, type, callback, capture = false) => target.addEventListener(type, callback, { capture, signal: this.abort.signal });
         listen(canvas, 'pointerdown', event => this.pointerDown(event), true);
@@ -45,7 +58,11 @@ export class TransformController {
         if (rebuild) this.rebuild();
         this.update(); this.onChange();
     }
-    setColors(...colors) { this.colors = colors; this.rebuild(); }
+    setColors(...colors) {
+        this.colors = colors;
+        this.constraintAxes.forEach((line, index) => line.material.color.set(colors[index]));
+        this.rebuild();
+    }
     clearHandles() {
         this.group.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
         this.group.clear();
@@ -105,9 +122,33 @@ export class TransformController {
         const depth = Math.max(this.camera.near, -center.clone().applyMatrix4(this.camera.matrixWorldInverse).z);
         return 2 * depth * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) / this.camera.zoom / height;
     }
+    updateConstraintGuide() {
+        const active = this.active, axis = active?.axis;
+        const constrained = axis && axis.length <= 2 && [...axis].every(value => axes.includes(value));
+        this.constraintGuide.visible = Boolean(constrained && this.mode && this.entries.length);
+        if (!this.constraintGuide.visible) return;
+        // Use the constraint basis, rather than the rotating/scaling gizmo basis.
+        this.constraintGuide.position.copy(this.group.position);
+        this.constraintGuide.quaternion.copy(active.orientation);
+        const rect = this.canvas.getBoundingClientRect();
+        const viewportSpan = this.worldPerPixel() * Math.max(rect.width, rect.height);
+        // The lines reach beyond the view frustum, even with an axis nearly end-on.
+        const lineSpan = Math.max(viewportSpan, this.camera.far * 2);
+        this.constraintAxes.forEach(line => {
+            line.visible = axis.includes(line.name); line.scale.setScalar(lineSpan);
+        });
+        this.constraintPlane.visible = axis.length === 2;
+        if (this.constraintPlane.visible) {
+            const excluded = axes.find(value => !axis.includes(value));
+            this.constraintPlane.quaternion.setFromUnitVectors(axisVector('Z'), axisVector(excluded));
+            this.constraintPlane.scale.setScalar(viewportSpan * .5);
+            this.constraintPlane.material.color.copy(this.constraintAxes[axes.indexOf(excluded)].material.color);
+        }
+        this.constraintGuide.updateMatrixWorld(true);
+    }
     update() {
         this.group.visible = Boolean(this.mode && this.entries.length);
-        if (!this.group.visible) { this.canvas.style.cursor = ''; return; }
+        if (!this.group.visible) { this.constraintGuide.visible = false; this.canvas.style.cursor = ''; return; }
         if (!this.active) {
             this.group.position.copy(selectionCenter(this.entries));
             this.group.quaternion.copy(this.orientation());
@@ -119,6 +160,7 @@ export class TransformController {
             child.visible = !this.constraint || axis.length > 1 || axis === this.constraint;
         }
         this.group.updateMatrixWorld(true);
+        this.updateConstraintGuide();
     }
     ray(event) {
         const rect = this.canvas.getBoundingClientRect();
@@ -302,6 +344,7 @@ export class TransformController {
             this.group.quaternion.copy(rotation).multiply(orientation);
             this.onPreview(changes);
         } catch (error) { a.error = error.message; }
+        this.updateConstraintGuide();
         this.onChange();
     }
 
@@ -330,6 +373,8 @@ export class TransformController {
         this.active.transaction.restore(); this.onPreview(this.active.transaction.changes()); this.finish(); return true;
     }
     dispose() {
-        this.cancel(); this.abort.abort(); this.clearHandles(); this.scene.remove(this.group); this.canvas.style.cursor = '';
+        this.cancel(); this.abort.abort(); this.clearHandles();
+        this.constraintGuide.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
+        this.scene.remove(this.group, this.constraintGuide); this.canvas.style.cursor = '';
     }
 }

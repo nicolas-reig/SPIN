@@ -15,6 +15,7 @@ import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, v
 import { validTransform } from './domain.js';
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 import { TopView } from './top-view.js';
+import { dispose, disposeMaterials, replaceMaterials } from './model-resources.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -24,21 +25,12 @@ function applyTransform(object, t) {
     object.scale.fromArray(t.scale);
 }
 
-function disposeMaterials(materials) {
-    const textures = new Set();
-    for (const material of materials) {
-        for (const value of Object.values(material)) {
-            if (value?.isTexture) textures.add(value);
-        }
-        material.dispose();
-    }
-    for (const texture of textures) texture.dispose();
-}
-
 function smoothNormals(object) {
     const geometries = new Map();
+    let shareable = true;
     object.traverse(mesh => {
         if (!mesh.isMesh) return;
+        if (mesh.isSkinnedMesh) shareable = false;
         const original = mesh.geometry;
         if (!geometries.has(original)) {
             geometries.set(original, toCreasedNormals(original, Math.PI / 6));
@@ -48,33 +40,7 @@ function smoothNormals(object) {
     for (const [original, smoothed] of geometries) {
         if (original !== smoothed) original.dispose();
     }
-}
-
-function replaceMaterials(object, material) {
-    const originals = new Set();
-    object.traverse(mesh => {
-        if (!mesh.isMesh) return;
-        for (const original of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-            if (original && original !== material) originals.add(original);
-        }
-        mesh.material = material;
-    });
-    disposeMaterials(originals);
-}
-
-function dispose(object, keepMaterials = new Set()) {
-    const geometries = new Set();
-    const materials = new Set();
-    object.traverse(o => {
-        if (o.geometry) geometries.add(o.geometry);
-        if (o.material) {
-            for (const material of Array.isArray(o.material) ? o.material : [o.material]) {
-                if (!keepMaterials.has(material)) materials.add(material);
-            }
-        }
-    });
-    for (const geometry of geometries) geometry.dispose();
-    disposeMaterials(materials);
+    return shareable;
 }
 export class MapView {
     constructor(container, {
@@ -278,11 +244,25 @@ export class MapView {
             }
         });
     }
-    async model(asset, material = this.materials.floor) {
+    async model(asset, material = this.materials.floor, templates = null, generation = this.generation) {
+        if (generation !== this.generation) return null;
         if (!asset) return new THREE.Group();
+        const template = templates?.get(asset.id);
+        if (template) {
+            const object = template.clone(true);
+            object.traverse(mesh => { if (mesh.isMesh) mesh.material = material; });
+            return object;
+        }
         const result = await this.loader.loadAsync(asset.url);
-        smoothNormals(result.scene);
+        if (generation !== this.generation) {
+            dispose(result.scene, this.sharedMaterials);
+            return null;
+        }
+        const shareable = smoothNormals(result.scene);
         replaceMaterials(result.scene, material);
+        // The first instance owns the template's geometry until this build is disposed.
+        // Skinned meshes keep fresh skeletons by retaining the normal loading path.
+        if (shareable) templates?.set(asset.id, result.scene);
         return result.scene;
     }
     clearScene() {
@@ -311,7 +291,8 @@ export class MapView {
             this.onState('mapReady');
             return;
         }
-        const key = JSON.stringify([floor, data.exhibits.filter(e => e.floorId === floorId).map(e => [e.id, e.transform, e.models])]);
+        const exhibits = data.exhibits.filter(e => e.floorId === floorId);
+        const key = JSON.stringify([floor, exhibits.map(e => [e.id, e.transform, e.models])]);
         if (key === this.key) {
             for (const exhibit of data.exhibits) {
                 const object = this.objects.get(exhibit.id);
@@ -329,12 +310,21 @@ export class MapView {
         const next = new THREE.Group();
         applyTransform(next, floor.transform);
         const objects = new Map();
+        const templates = new Map();
+        const assets = new Map();
+        for (const asset of data.assets) if (!assets.has(asset.id)) assets.set(asset.id, asset);
         try {
-            const asset = data.assets.find(a => a.id === floor.modelId);
-            const building = await this.model(asset);
-            building.userData.floor = true;
-            next.add(building);
-            for (const exhibit of data.exhibits.filter(e => e.floorId === floorId && e.models.length)) {
+            const building = await this.model(assets.get(floor.modelId), this.materials.floor, templates, generation);
+            if (building) {
+                building.userData.floor = true;
+                next.add(building);
+            }
+            if (generation !== this.generation) {
+                dispose(next, this.sharedMaterials);
+                return;
+            }
+            for (const exhibit of exhibits) {
+                if (!exhibit.models.length) continue;
                 const group = new THREE.Group();
                 group.userData.exhibitId = exhibit.id;
                 group.userData.status = exhibit.status;
@@ -345,8 +335,13 @@ export class MapView {
                     holder.userData.exhibitId = exhibit.id;
                     holder.userData.instanceIndex = index;
                     applyTransform(holder, instance.transform);
-                    holder.add(await this.model(data.assets.find(asset => asset.id === instance.model), this.exhibitMaterial(exhibit.status)));
                     group.add(holder);
+                    const model = await this.model(assets.get(instance.model), this.exhibitMaterial(exhibit.status), templates, generation);
+                    if (model) holder.add(model);
+                    if (generation !== this.generation) {
+                        dispose(next, this.sharedMaterials);
+                        return;
+                    }
                 }
                 objects.set(exhibit.id, group);
             }

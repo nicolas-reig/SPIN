@@ -107,7 +107,7 @@ export class TransformController {
     }
     update() {
         this.group.visible = Boolean(this.mode && this.entries.length);
-        if (!this.group.visible) return;
+        if (!this.group.visible) { this.canvas.style.cursor = ''; return; }
         if (!this.active) {
             this.group.position.copy(selectionCenter(this.entries));
             this.group.quaternion.copy(this.orientation());
@@ -149,7 +149,7 @@ export class TransformController {
     }
     pointerMove(event) {
         if (!this.active) {
-            this.canvas.style.cursor = this.pick(event) ? 'crosshair' : '';
+            this.canvas.style.cursor = this.pick(event) ? 'grab' : '';
             return;
         }
         this.consume(event);
@@ -183,6 +183,7 @@ export class TransformController {
             localOrientation: objectOrientation(this.entries[0].object), viewAxis, lock: 0, error: null,
             oldControls: this.controls.enabled, worldPerPixel: this.worldPerPixel(transaction.center) };
         this.controls.enabled = false;
+        this.canvas.style.cursor = 'grabbing';
         this.canvas.dataset.transform = mode;
         this.canvas.focus({ preventScroll: true });
         this.group.position.copy(transaction.center); this.group.quaternion.copy(this.active.orientation);
@@ -310,7 +311,9 @@ export class TransformController {
         this.controls.enabled = active.oldControls;
         delete this.canvas.dataset.transform;
         if (active.pointerId != null && this.canvas.hasPointerCapture(active.pointerId)) this.canvas.releasePointerCapture(active.pointerId);
-        this.update(); this.onChange(); return active;
+        this.update();
+        this.canvas.style.cursor = this.pick({ clientX: active.last.x, clientY: active.last.y }) ? 'grab' : '';
+        this.onChange(); return active;
     }
     confirm() {
         if (!this.active) return false;

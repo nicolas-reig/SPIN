@@ -81,8 +81,14 @@ class ExactPixelComparatorTests(unittest.TestCase):
         directory.mkdir()
         for name in names:
             self.save(directory / (name + '.png'), Image.new('RGB', (20, 20), (10, 20, 30)))
-        metadata = {'complete': complete, 'frames': [{'name': name, 'file': name + '.png'} for name in names],
-            'stage': {'original': {'assets': {'sha256': 'a'}, 'exhibits': {'sha256': 'b'}}}}
+        state = {'canvas': None, 'url': '/index.html', 'view': 'map', 'colorMode': 'default', 'selected': None,
+                 'floor': '0', 'editing': False, 'viewport': {'width': 20, 'height': 20}, 'heading': None,
+                 'openDialog': False, 'openMenus': 0, 'canvasState': {}, 'clock_frozen': True}
+        metadata = {'complete': complete, 'frames': [{'name': name, 'file': name + '.png', **state} for name in names],
+            'viewport': state['viewport'], 'device_scale_factor': 1, 'browser_version': 'test-browser',
+            'browser_arguments': [], 'clock_epoch': '2026-11-12T12:00:00Z', 'profile': 'source', 'backend': 'webgl',
+            'browser_executable': '/test/browser', 'playwright_version': 'test', 'environment': {'test': True},
+            'stage': {phase: {'assets': {'sha256': 'a'}, 'exhibits': {'sha256': 'b'}} for phase in ('original', 'staged')}}
         (directory / 'run.json').write_text(json.dumps(metadata))
         return directory
 
@@ -119,6 +125,49 @@ class ExactPixelComparatorTests(unittest.TestCase):
         self.assertFalse(result['pass'])
         self.assertEqual(result['frames'][0]['differing_pixels'], 0)
         self.assertEqual(result['frames'][0]['state_changes'], ['selected'])
+
+    def test_duplicate_frame_names_are_rejected_even_with_identical_pixels(self):
+        a = self.run_fixture(self.root / 'baseline'); b = self.run_fixture(self.root / 'candidate')
+        metadata = json.loads((b / 'run.json').read_text())
+        metadata['frames'].append(metadata['frames'][0].copy())
+        (b / 'run.json').write_text(json.dumps(metadata))
+        result = compare_runs(a, b, self.root / 'out')
+        self.assertFalse(result['pass'])
+        self.assertIn('candidate duplicate frame names', result['environment_errors'])
+
+    def test_missing_matching_metadata_cannot_make_two_runs_pass(self):
+        a = self.run_fixture(self.root / 'baseline'); b = self.run_fixture(self.root / 'candidate')
+        for directory in (a, b):
+            metadata = json.loads((directory / 'run.json').read_text())
+            del metadata['browser_version']; del metadata['frames'][0]['clock_frozen']
+            (directory / 'run.json').write_text(json.dumps(metadata))
+        result = compare_runs(a, b, self.root / 'out')
+        self.assertFalse(result['pass'])
+        self.assertTrue(any('missing environment metadata' in value for value in result['environment_errors']))
+        self.assertTrue(any('clock was not verified' in value for value in result['environment_errors']))
+
+    def test_same_pixels_with_a_different_open_menu_count_fail(self):
+        a = self.run_fixture(self.root / 'baseline'); b = self.run_fixture(self.root / 'candidate')
+        metadata = json.loads((b / 'run.json').read_text()); metadata['frames'][0]['openMenus'] = 1
+        (b / 'run.json').write_text(json.dumps(metadata))
+        result = compare_runs(a, b, self.root / 'out')
+        self.assertFalse(result['pass']); self.assertEqual(result['frames'][0]['state_changes'], ['openMenus'])
+
+    def test_missing_image_is_reported_as_failure(self):
+        a = self.run_fixture(self.root / 'baseline'); b = self.run_fixture(self.root / 'candidate')
+        (b / 'scene.png').unlink()
+        result = compare_runs(a, b, self.root / 'out')
+        self.assertFalse(result['pass']); self.assertEqual(result['frames'][0]['reason'], 'unreadable frame')
+
+    def test_staged_fixture_content_and_browser_error_must_match(self):
+        a = self.run_fixture(self.root / 'baseline'); b = self.run_fixture(self.root / 'candidate')
+        metadata = json.loads((b / 'run.json').read_text()); metadata['stage']['staged']['assets']['sha256'] = 'different'
+        metadata['contexts'] = [{'name': 'failed', 'blockedWrites': [], 'errors': [], 'pageErrors': ['render failed'], 'consoleErrors': []}]
+        (b / 'run.json').write_text(json.dumps(metadata))
+        result = compare_runs(a, b, self.root / 'out')
+        self.assertFalse(result['pass'])
+        self.assertIn('Input data mismatch: staged assets', result['environment_errors'])
+        self.assertIn('candidate browser context failure: failed pageErrors', result['environment_errors'])
 
 
 if __name__ == '__main__':

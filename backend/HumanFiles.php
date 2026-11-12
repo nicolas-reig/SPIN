@@ -16,10 +16,10 @@ final class HumanFiles
 
     public static function filename(string $value): string
     {
-        $value = trim($value);
         if (
-            $value === '' || strlen($value) > 160 || str_starts_with($value, '.') ||
-            preg_match('/[<>:"\/\\\\|?*\x00-\x1f]/u', $value) ||
+            $value === '' || $value !== trim($value) || strlen($value) > 160 || str_starts_with($value, '.') ||
+            preg_match('//u', $value) !== 1 ||
+            preg_match('/[<>:"\/\\\\|?*\x00-\x1f\x7f]/u', $value) ||
             preg_match('/[. ]$/u', $value) ||
             preg_match('/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/iu', $value)
         ) {

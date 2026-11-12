@@ -2,6 +2,8 @@
 
 Baseline: `0071aff11cc3b1accd3c893e69b1b0fb5df02062` (12 November 2026).
 
+Follow-up: the four source findings listed at the end of this first-pass report have since been addressed. See [portability-followup.md](portability-followup.md) for the latest 88-test result and the still-pending browser acceptance gate.
+
 ## Review boundaries
 
 | Reviewer | Scope | Evidence allowed |
@@ -65,6 +67,6 @@ The complete source/data baseline is preserved at `/Users/nreigs/digitaltwin/Rev
 
 ## Remaining findings
 
-The independent source audit found no new dataset-specific names, floor counts or geometry exceptions. It also identified existing limitations outside these patches: fixed camera orbit/clipping bounds for very large scenes; permissive numeric-string/object-vector metadata reads; trailing-whitespace filename discovery; and modification-time-only note date edits that do not invalidate refresh tags. These remain follow-up items rather than silently changed behavior.
+The first independent source audit found no new dataset-specific names, floor counts or geometry exceptions. It identified fixed camera orbit/clipping bounds, permissive numeric-string/object-vector metadata reads, whitespace filename discovery and modification-time-only note date edits that did not invalidate refresh tags. Those four items were subsequently addressed in the [portability follow-up](portability-followup.md); they are retained here as first-pass history.
 
 The [UI consistency report](ui-consistency/README.md) documents screenshot-backed findings separately. Conditional conflict, upload and correction states are not claimed as fully inspected.

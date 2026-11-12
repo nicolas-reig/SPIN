@@ -2,6 +2,33 @@ import { Vector3 } from 'three';
 
 const halfFov = Math.tan(38 * Math.PI / 360);
 
+// Find a clear rectangle within the full-bleed canvas. Panels and floating
+// controls may cover it without changing the renderer's width or aspect ratio.
+export function clearViewport(rect, overlays = []) {
+    const { width, height } = rect;
+    if (!width || !height) return { left: -.94, right: .94, top: .94, bottom: -.94 };
+    const left = rect.left || 0, top = rect.top || 0, inset = Math.min(16, width * .05);
+    let regions = [{ left: inset, right: width - inset, top: height * .03, bottom: height * .97 }];
+    for (const overlay of overlays) {
+        if (!overlay.width || !overlay.height) continue;
+        const obstacle = { left: overlay.left - left - 12, right: overlay.right - left + 12, top: overlay.top - top - 12, bottom: overlay.bottom - top + 12 };
+        const next = [];
+        for (const region of regions) {
+            if (obstacle.right <= region.left || obstacle.left >= region.right || obstacle.bottom <= region.top || obstacle.top >= region.bottom) next.push(region);
+            else next.push(
+                { ...region, right: Math.min(region.right, obstacle.left) }, { ...region, left: Math.max(region.left, obstacle.right) },
+                { ...region, bottom: Math.min(region.bottom, obstacle.top) }, { ...region, top: Math.max(region.top, obstacle.bottom) }
+            );
+        }
+        regions = next.filter(region => region.right > region.left && region.bottom > region.top)
+            .sort((a, b) => (b.right - b.left) * (b.bottom - b.top) - (a.right - a.left) * (a.bottom - a.top)).slice(0, 32);
+    }
+    const region = regions[0];
+    // An entirely hidden mobile map will resize and re-evaluate when revealed.
+    if (!region) return { left: -.94, right: .94, top: .94, bottom: -.94 };
+    return { left: region.left / width * 2 - 1, right: region.right / width * 2 - 1, top: 1 - region.top / height * 2, bottom: 1 - region.bottom / height * 2 };
+}
+
 export function boundsScale(box) {
     const size = box.getSize(new Vector3());
     return Math.max(size.x, size.y, size.z) || 10;

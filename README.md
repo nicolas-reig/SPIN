@@ -283,6 +283,10 @@ Older files using `top` and `three` are still read as `2D` and `3D`. If both nam
 
 The app ignores invalid individual presets and uses automatic framing instead. Selecting an exhibit that is outside the visible map uses its preset for the current mode, or calculates a view from its hardware if none is saved. The Focus control uses the same presets. Floor framing uses its saved view when available, otherwise the building bounds.
 
+Automatic **Focus** searches camera directions around the selection, scores projected surface area and surface-direction information, then checks the best separated candidates for occlusion by hardware and the building. The information score is a lightweight approximation inspired by [viewpoint entropy](https://vccimaging.org/Publications/Vazquez2001VSU/Vazquez2001VSU.pdf). It favors readable broad faces, fits the complete selection with padding, and centers it in the clear map area between panels and floating controls. Camera motion follows the shortest orbit with smooth zoom; reduced motion applies the result immediately. Repeating Focus keeps an already suitable view stable.
+
+**2D Focus** uses a separate bird’s-eye solver: it fits the horizontal footprint, searches for a useful heading for the available screen shape, and preserves the current heading when rotating would offer little improvement. Model height determines camera clearance rather than footprint zoom. In edit mode, Focus targets the selected hardware components or all selected exhibits together. A saved view still takes priority for a single whole exhibit; component and multiple selections use automatic framing.
+
 The app calculates identifiers, revision hashes and content tags while reading files. Do not add `id`, `name`, `floorId`, `placed`, `revision`, `structureRevision`, `contentTag` or journal records to these JSON files. Structural saves rewrite `.exhibit.json` with the supported fields listed above; extra custom fields will not be preserved by that save.
 
 ### Posts, photos and documentation links

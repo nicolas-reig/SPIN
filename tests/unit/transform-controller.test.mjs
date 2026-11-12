@@ -82,6 +82,74 @@ test('global/local axis cycling, plane exclusion and component numeric input use
     assert.deepEqual(entries[0].object.position.toArray(), [1, 2, 3]); controller.dispose();
 });
 
+test('axis previews follow constrained movement, rotation and scale and hide on release', () => {
+    const { controller, entries, key } = setup({ count: 2 });
+    const { constraintGuide: guide, constraintAxes: lines, constraintPlane: plane } = controller;
+    const center = controller.group.position.clone();
+    assert.equal(guide.visible, false);
+    for (const mode of ['translate', 'rotate', 'scale']) {
+        controller.begin(mode); assert.equal(guide.visible, false);
+        key('x'); key('2');
+        assert.equal(guide.visible, true); assert.equal(plane.visible, false);
+        assert.deepEqual(lines.filter(line => line.visible).map(line => line.name), ['X']);
+        near(guide.position.distanceTo(controller.group.position), 0);
+        near(guide.quaternion.angleTo(controller.active.orientation), 0);
+        if (mode === 'translate') near(guide.position.x, center.x + 2);
+        else near(guide.position.distanceTo(center), 0);
+        key('x'); assert.equal(guide.visible, true);
+        key('x'); assert.equal(guide.visible, false);
+        key('Escape');
+    }
+    controller.begin('translate', {}, { axis: 'Z', modal: false });
+    assert.equal(guide.visible, true); assert.equal(lines[2].visible, true);
+    key('3'); controller.confirm(); assert.equal(guide.visible, false);
+    near(entries[0].object.position.z, 3);
+    controller.begin('rotate', {}, { axis: 'E' }); assert.equal(guide.visible, false);
+    key('r'); assert.equal(controller.active.axis, 'TRACKBALL'); assert.equal(guide.visible, false);
+    controller.dispose();
+});
+
+test('excluded-axis plane previews show both allowed axes in the original global or local basis', () => {
+    const { controller, entries, parent, key } = setup();
+    parent.rotation.x = .3; entries[0].object.rotation.z = Math.PI / 4;
+    controller.begin('translate'); key('y', { shiftKey: true });
+    const { constraintGuide: guide, constraintAxes: lines, constraintPlane: plane } = controller;
+    assert.equal(guide.visible, true); assert.equal(plane.visible, true);
+    assert.deepEqual(lines.filter(line => line.visible).map(line => line.name), ['X', 'Z']);
+    const normal = () => new THREE.Vector3(0, 0, 1).applyQuaternion(plane.getWorldQuaternion(new THREE.Quaternion()));
+    near(normal().dot(new THREE.Vector3(0, 1, 0)), 1);
+    key('y', { shiftKey: true }); key('2');
+    const expectedNormal = new THREE.Vector3(0, 1, 0).applyQuaternion(controller.active.localOrientation);
+    near(normal().dot(expectedNormal), 1);
+    const displacement = guide.position.clone().sub(controller.active.transaction.center);
+    near(displacement.dot(normal()), 0);
+    near(displacement.length(), Math.sqrt(8));
+    // A preview rotation must leave the guide aligned with the chosen basis.
+    key('Escape'); controller.begin('rotate'); key('z'); key('4'); key('5');
+    near(guide.quaternion.angleTo(new THREE.Quaternion()), 0);
+    assert.ok(controller.group.quaternion.angleTo(guide.quaternion) > .5);
+    controller.dispose();
+});
+
+test('constraint previews stay visible across camera types and inherit accessibility axis colors', () => {
+    for (const cameraMode of ['perspective', 'orthographic']) {
+        const { controller, camera, key } = setup({ cameraMode });
+        controller.begin('scale', {}, { axis: 'XZ' });
+        const { constraintGuide: guide, constraintAxes: lines, constraintPlane: plane } = controller;
+        assert.equal(guide.visible, true); const span = plane.scale.x;
+        assert.ok(lines[0].scale.x >= camera.far * 2);
+        camera.zoom = 2; camera.updateProjectionMatrix(); controller.update(); near(plane.scale.x, span / 2);
+        controller.setColors('#aa0088', '#007788', '#cc9900', '#ffffff');
+        assert.deepEqual(lines.map(line => line.material.color.getHexString()), ['aa0088', '007788', 'cc9900']);
+        assert.equal(plane.material.color.getHexString(), '007788');
+        const objects = guide.children.slice();
+        for (let i = 0; i < 20; i++) controller.preview();
+        assert.deepEqual(guide.children, objects);
+        key('Escape'); assert.equal(guide.visible, false);
+        controller.dispose(); assert.equal(guide.parent, null);
+    }
+});
+
 test('numeric errors stay modal, reject confirmation and recover after correction', () => {
     const { controller, key, errors, commits } = setup(); controller.begin('scale'); key('='); key('1'); key('/'); key('0'); key('Enter');
     assert.equal(commits.length, 0); assert.equal(errors.at(-1), 'transformNumber'); assert.ok(controller.active);
@@ -102,10 +170,15 @@ test('nonuniform parent shear and singular parents reject without partial select
 
 test('selection change, pointer loss, blur and disposal restore previews', () => {
     const { controller, entries, key, controls } = setup();
-    controller.begin('translate'); key('x'); key('7'); controller.setSelection(entries); near(entries[0].object.position.x, 0);
-    controller.begin('translate'); key('x'); key('7'); window.dispatchEvent(new Event('blur')); near(entries[0].object.position.x, 0);
-    controller.begin('translate', {}, { modal: false }); controller.active.pointerId = 5; key('x'); key('7'); controller.canvas.dispatchEvent(new Event('lostpointercapture')); near(entries[0].object.position.x, 0);
+    const { constraintGuide: guide } = controller;
+    const resources = guide.children.flatMap(child => [child.geometry, child.material]); let disposed = 0;
+    resources.forEach(resource => resource.addEventListener('dispose', () => disposed++));
+    controller.begin('translate'); key('x'); key('7'); controller.setSelection(entries); near(entries[0].object.position.x, 0); assert.equal(guide.visible, false);
+    controller.begin('translate'); key('x'); key('7'); window.dispatchEvent(new Event('blur')); near(entries[0].object.position.x, 0); assert.equal(guide.visible, false);
+    controller.begin('translate', {}, { modal: false }); controller.active.pointerId = 5; key('x'); key('7'); controller.canvas.dispatchEvent(new Event('lostpointercapture')); near(entries[0].object.position.x, 0); assert.equal(guide.visible, false);
+    controller.begin('translate'); key('x'); key('7'); controller.configure('combined', false, 'local'); assert.equal(guide.visible, false);
     controller.begin('translate'); key('x'); key('7'); controller.dispose(); near(entries[0].object.position.x, 0); assert.equal(controls.enabled, true);
+    assert.equal(guide.visible, false); assert.equal(guide.parent, null); assert.equal(disposed, resources.length);
 });
 
 test('gizmos retain screen size in perspective and orthographic views', () => {

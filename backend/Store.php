@@ -226,6 +226,12 @@ final class Store
         return ['position' => [0, 0, 0], 'rotation' => [0, 0, 0], 'scale' => [1, 1, 1]];
     }
 
+    private static function coordinateNumber(int|float $value): float
+    {
+        $rounded = floor(abs((float)$value) * 1000000 + .5) / 1000000;
+        return $rounded == 0 ? 0.0 : ($value < 0 ? -$rounded : $rounded);
+    }
+
     private static function transform(mixed $value): array
     {
         if (!is_array($value)) {
@@ -243,7 +249,7 @@ final class Store
                     throw new ApiError('invalidTransform');
                 }
             }
-            $result[$key] = array_map('floatval', array_values($vector));
+            $result[$key] = array_map(self::coordinateNumber(...), array_values($vector));
         }
         return $result;
     }
@@ -271,14 +277,15 @@ final class Store
                         throw new ApiError('invalidView');
                     }
                 }
-                $result[$key][$part] = array_map('floatval', array_values($view[$part]));
+                $result[$key][$part] = array_map(self::coordinateNumber(...), array_values($view[$part]));
             }
             if ($result[$key]['position'] === $result[$key]['target'] ||
                 (!is_int($view['span'] ?? null) && !is_float($view['span'] ?? null)) ||
                 !is_finite($view['span']) || $view['span'] <= 0 || $view['span'] > 100000) {
                 throw new ApiError('invalidView');
             }
-            $result[$key]['span'] = (float)$view['span'];
+            $result[$key]['span'] = self::coordinateNumber($view['span']);
+            if ($result[$key]['span'] <= 0) throw new ApiError('invalidView');
         }
         return $result;
     }

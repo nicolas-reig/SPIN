@@ -73,3 +73,21 @@ versions, is preserved in the verified recovery archive under `../Archive`.
 Every one of the 33 primary content files matches its pre-task SHA-256.
 
 The application is available at http://127.0.0.1:8000 while its local server runs.
+
+## Six-decimal precision update — 12 November 2026
+
+All editable transform components and saved-camera position/target/span values
+are rounded to at most six decimal places in the inspector, committed edits,
+undo/redo, drafts, API reads and signed saves. Half values round away from zero;
+negative zero and unnecessary trailing zeros are removed. Rendering calculations
+retain their working precision; committed values use the shared precision rule.
+
+Ten of eleven active metadata files required rounding. Their originals are in
+`../Archive/coordinate-metadata-before-six-decimals-2026-11-12.tar.gz` relative
+to WebApp. An audit verified 207 coordinate components and preserved all other
+metadata values. This follow-up intentionally updates the placement metadata
+that was preserved byte-for-byte during the original consolidation.
+
+Verification: 67 JavaScript tests and seven PHP suites pass. The live inspector
+shows six-decimal values, a typed nine-decimal coordinate rounds on Enter, and
+Undo restores its starting value. The browser test change was not signed/saved.

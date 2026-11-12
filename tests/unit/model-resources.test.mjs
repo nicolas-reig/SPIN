@@ -73,7 +73,7 @@ test('disposing an obsolete build preserves separate geometry in the current bui
     dispose(current);
 });
 
-test('replacing imported materials closes one bitmap shared by distinct texture sources', t => {
+test('replacing imported materials closes one bitmap shared by distinct textures', t => {
     const ImageBitmap = withBitmapClass(t);
     const bitmap = new ImageBitmap();
     const original = new Texture(bitmap);
@@ -127,7 +127,10 @@ test('ordinary image sources and retained application textures are not closed', 
     assert.equal(ordinaryImage.closes, 0);
 });
 
-test('material cleanup works when ImageBitmap is unavailable and deduplicates material inputs', () => {
+test('material cleanup works when ImageBitmap is unavailable and deduplicates material inputs', t => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'ImageBitmap');
+    delete globalThis.ImageBitmap;
+    t.after(() => { if (original) Object.defineProperty(globalThis, 'ImageBitmap', original); });
     const texture = new DataTexture(new Uint8Array(4), 1, 1);
     const material = new MeshStandardMaterial({ map: texture, normalMap: texture });
     const materialDisposals = disposals(material);
@@ -137,6 +140,52 @@ test('material cleanup works when ImageBitmap is unavailable and deduplicates ma
 
     assert.equal(materialDisposals(), 1);
     assert.equal(textureDisposals(), 1);
+});
+
+test('retained material textures and their bitmap aliases survive model disposal', t => {
+    const ImageBitmap = withBitmapClass(t);
+    const bitmap = new ImageBitmap();
+    const shared = new Texture(bitmap);
+    const discardedClone = shared.clone();
+    const retained = new MeshStandardMaterial({ map: shared });
+    const discarded = new MeshStandardMaterial({ map: shared, normalMap: discardedClone });
+    const sharedDisposals = disposals(shared);
+    const cloneDisposals = disposals(discardedClone);
+    const materialDisposals = disposals(discarded);
+    const root = new Group();
+    const geometry = new BoxGeometry();
+    root.add(new Mesh(geometry, retained), new Mesh(geometry, discarded));
+
+    dispose(root, new Set([retained]));
+
+    assert.equal(materialDisposals(), 1);
+    assert.equal(sharedDisposals(), 0);
+    assert.equal(cloneDisposals(), 1);
+    assert.equal(bitmap.closes, 0);
+    disposeMaterials([retained]);
+    assert.equal(sharedDisposals(), 1);
+    assert.equal(bitmap.closes, 1);
+});
+
+test('replacement material retains a bitmap source shared with an imported texture', t => {
+    const ImageBitmap = withBitmapClass(t);
+    const bitmap = new ImageBitmap();
+    const importedTexture = new Texture(bitmap);
+    const replacementTexture = importedTexture.clone();
+    const imported = new MeshStandardMaterial({ map: importedTexture });
+    const replacement = new MeshStandardMaterial({ map: replacementTexture });
+    const textureDisposals = disposals(importedTexture);
+    const replacementDisposals = disposals(replacementTexture);
+    const root = new Mesh(new BoxGeometry(), imported);
+
+    replaceMaterials(root, replacement);
+
+    assert.equal(textureDisposals(), 1);
+    assert.equal(replacementDisposals(), 0);
+    assert.equal(bitmap.closes, 0);
+    dispose(root);
+    assert.equal(replacementDisposals(), 1);
+    assert.equal(bitmap.closes, 1);
 });
 
 test('shared skeleton bone textures are released once across skinned mesh parts', () => {

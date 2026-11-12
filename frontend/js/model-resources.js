@@ -1,8 +1,19 @@
 // These helpers release resources owned by a model tree. Geometry must not be
 // shared with another live tree; application materials are retained explicitly.
-export function disposeMaterials(materials) {
+export function disposeMaterials(materials, keepMaterials = new Set()) {
+    const keptMaterials = new Set(keepMaterials);
     const textures = new Set();
+    const keptTextures = new Set();
+    const keptImages = new Set();
+    for (const material of keptMaterials) {
+        for (const value of Object.values(material)) {
+            if (!value?.isTexture) continue;
+            keptTextures.add(value);
+            keptImages.add(value.source?.data ?? value.image);
+        }
+    }
     for (const material of new Set(materials)) {
+        if (keptMaterials.has(material)) continue;
         for (const value of Object.values(material)) {
             if (value?.isTexture) textures.add(value);
         }
@@ -10,8 +21,9 @@ export function disposeMaterials(materials) {
     }
     const bitmaps = new Set();
     for (const texture of textures) {
+        if (keptTextures.has(texture)) continue;
         const image = texture.source?.data ?? texture.image;
-        if (typeof globalThis.ImageBitmap === 'function' && image instanceof globalThis.ImageBitmap) bitmaps.add(image);
+        if (!keptImages.has(image) && typeof globalThis.ImageBitmap === 'function' && image instanceof globalThis.ImageBitmap) bitmaps.add(image);
         texture.dispose();
     }
     // GLTFLoader can clone textures while retaining the same ImageBitmap source.
@@ -28,7 +40,7 @@ export function replaceMaterials(object, material) {
         }
         mesh.material = material;
     });
-    disposeMaterials(originals);
+    disposeMaterials(originals, [material]);
 }
 
 export function dispose(object, keepMaterials = new Set()) {
@@ -49,5 +61,5 @@ export function dispose(object, keepMaterials = new Set()) {
     for (const instance of instances) instance.dispose();
     for (const skeleton of skeletons) skeleton.dispose();
     for (const geometry of geometries) geometry.dispose();
-    disposeMaterials(materials);
+    disposeMaterials(materials, keepMaterials);
 }

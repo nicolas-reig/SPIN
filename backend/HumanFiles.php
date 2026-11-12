@@ -163,7 +163,7 @@ final class HumanFiles
             if (!$dated) {
                 continue;
             }
-            $body = file_get_contents($path);
+            $body = file_get_contents($path, false, null, 0, 100001);
             if ($body === false || strlen($body) > 100000) {
                 continue;
             }
@@ -196,7 +196,7 @@ final class HumanFiles
         usort($notes, fn($a, $b) => strcmp($b['at'], $a['at']) ?: strcmp($b['id'], $a['id']));
         $linkFolder = $exhibit . '/Links';
         foreach ($this->files($linkFolder, '.url') as $name => $path) {
-            $body = file_get_contents($path);
+            $body = file_get_contents($path, false, null, 0, 5001);
             if ($body === false || strlen($body) > 5000) {
                 continue;
             }

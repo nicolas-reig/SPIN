@@ -16,6 +16,7 @@ import { validTransform } from './domain.js';
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 import { TopView } from './top-view.js';
 import { dispose, disposeMaterials, replaceMaterials } from './model-resources.js';
+import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clippingPlanes } from './camera-framing.js';
 
 const radians = v => v * Math.PI / 180;
 
@@ -62,6 +63,7 @@ export class MapView {
         this.scene.background = new THREE.Color('#e8edf0');
         this.root = new THREE.Group();
         this.scene.add(this.root);
+        this.boundsDirty = true;
         this.objects = new Map();
         this.materials = Object.fromEntries(Object.entries(colorScheme().materials).map(([name, color]) => {
             const material = new THREE.MeshStandardMaterial({
@@ -108,11 +110,14 @@ export class MapView {
         this.controls.enableDamping = false;
         this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE };
         this.controls.keys = { LEFT: 'ArrowRight', UP: 'ArrowDown', RIGHT: 'ArrowLeft', BOTTOM: 'ArrowUp' };
-        this.controls.minDistance = 2;
-        this.controls.maxDistance = 450;
+        this.updateCameraLimits();
         this.controls.maxPolarAngle = Math.PI / 2;
         this.controls.minPolarAngle = .000001;
-        this.controls.addEventListener('change', () => this.requestRender());
+        this.controls.addEventListener('change', () => {
+            if (this.boundsDirty || this.cameraLimitsDirty) this.updateCameraLimits();
+            else this.updateCameraClipping();
+            this.requestRender();
+        });
         this.controls.addEventListener('start', () => cancelAnimationFrame(this.cameraFrame));
         this.transform = new TransformControls(this.camera, this.renderer.domElement);
         this.scene.add(this.transform.getHelper());
@@ -136,7 +141,10 @@ export class MapView {
             }
             if (!e.value) this.cancelledTransform = false;
         });
-        this.transform.addEventListener('change', () => this.requestRender());
+        this.transform.addEventListener('change', () => {
+            this.boundsDirty = true;
+            this.requestRender();
+        });
         this.observer = new ResizeObserver(() => this.resize());
         this.observer.observe(this.container);
         const canvas = this.renderer.domElement;
@@ -204,6 +212,7 @@ export class MapView {
             this.camera.bottom = -span;
         }
         this.camera.updateProjectionMatrix();
+        this.updateCameraClipping();
         this.requestRender();
     }
     updateColors() {
@@ -219,6 +228,7 @@ export class MapView {
         this.frame = requestAnimationFrame(async () => {
             this.frame = 0;
             try {
+                if (this.boundsDirty || this.cameraLimitsDirty) this.updateCameraLimits();
                 const offset = this.camera.position.clone().sub(this.controls.target);
                 this.renderer.domElement.dataset.cameraOffset = offset.toArray().join(',');
                 this.onCamera(this.navigationState());
@@ -277,6 +287,8 @@ export class MapView {
         dispose(this.root, this.sharedMaterials);
         this.root = new THREE.Group();
         this.scene.add(this.root);
+        this.boundsDirty = true;
+        this.updateCameraLimits();
         this.objects.clear();
         this.floor = null;
         this.requestRender();
@@ -359,6 +371,8 @@ export class MapView {
             dispose(this.root, this.sharedMaterials);
             this.root = next;
             this.scene.add(next);
+            this.boundsDirty = true;
+            this.updateCameraLimits();
             this.objects = objects;
             this.floor = floor;
             for (const exhibit of this.data.exhibits) {
@@ -436,9 +450,57 @@ export class MapView {
         this.transform.setScaleSnap(snap ? .1 : null);
         this.highlight(this.selected);
     }
+    sceneBounds() {
+        if (this.boundsDirty || !this.bounds) {
+            this.root.updateMatrixWorld(true);
+            this.bounds = new THREE.Box3().setFromObject(this.root);
+            this.boundsDirty = false;
+            this.cameraLimitsDirty = true;
+        }
+        return this.bounds;
+    }
+    updateCameraClipping(camera = this.camera, box = null, targetDistance = null) {
+        const dirty = !box && this.boundsDirty;
+        box ??= this.sceneBounds();
+        if ((dirty || this.cameraLimitsDirty) && camera === this.camera && this.controls) {
+            const distance = camera.position.distanceTo(this.controls.target);
+            Object.assign(this.controls, controlLimits(box, distance));
+            this.cameraLimitsDirty = false;
+        }
+        targetDistance ??= camera === this.camera && this.controls ? camera.position.distanceTo(this.controls.target) : Infinity;
+        const { near, far } = clippingPlanes(box, camera, targetDistance);
+        if (camera.near !== near || camera.far !== far) {
+            camera.near = near;
+            camera.far = far;
+            camera.updateProjectionMatrix();
+        }
+    }
+    updateCameraLimits(distance = this.camera.position.distanceTo(this.controls?.target || new THREE.Vector3())) {
+        const box = this.sceneBounds();
+        if (this.controls) Object.assign(this.controls, controlLimits(box, this.camera.position.distanceTo(this.controls.target), distance));
+        this.cameraLimitsDirty = false;
+        this.updateCameraClipping(this.camera, box);
+    }
+    framingDirection(mode = this.mode) {
+        return new THREE.Vector3(...(mode === 'top' ? orbitOffset(1, 0, 90) : cameraOffset(mode, 1))).normalize();
+    }
+    framingAspect() {
+        const width = this.container.clientWidth || this.width || 1;
+        const height = this.container.clientHeight || this.height || 1;
+        return width / height;
+    }
+    framingPadding() {
+        const bounds = this.viewportBounds();
+        return { horizontal: Math.min(.94, (bounds.right - bounds.left) / 2), vertical: Math.min(.94, (bounds.top - bounds.bottom) / 2) };
+    }
+    controlAngles(...positions) {
+        const angles = positions.map(position => new THREE.Spherical().setFromVector3(position.clone().sub(this.controls.target)).phi);
+        this.controls.minPolarAngle = Math.min(.000001, ...angles);
+        this.controls.maxPolarAngle = Math.max(this.mode === 'top' ? .000001 : Math.PI / 2, ...angles);
+    }
     frameTarget(center, distance, span, animate = true, position = null) {
         cancelAnimationFrame(this.cameraFrame);
-        const offset = new THREE.Vector3(...cameraOffset(this.mode, distance));
+        const offset = this.framingDirection().multiplyScalar(distance);
         const startTarget = this.controls.target.clone();
         const startPosition = this.camera.position.clone();
         const endPosition = position || center.clone().add(offset);
@@ -452,8 +514,17 @@ export class MapView {
             this.camera.position.copy(startPosition).lerp(endPosition, ease);
             this.orthoSpan = startSpan + (span - startSpan) * ease;
             this.camera.zoom = startZoom + (1 - startZoom) * ease;
+            this.controlAngles(this.camera.position);
+            this.updateCameraLimits(distance);
             this.resize();
             this.controls.update();
+            // OrbitControls makes exact poles safe by tilting them 1e-6 radians.
+            // Keep the coordinates of an explicitly requested saved view exact.
+            if (position && p === 1) {
+                this.camera.position.copy(position);
+                aimCamera(this.camera, center);
+                this.updateCameraClipping();
+            }
             if (p < 1) this.cameraFrame = requestAnimationFrame(step);
         };
         step();
@@ -467,11 +538,14 @@ export class MapView {
         this.fit();
     }
     fit() {
-        const box = new THREE.Box3().setFromObject(this.root);
-        const center = box.getCenter(new THREE.Vector3());
+        const box = this.sceneBounds();
         const size = box.getSize(new THREE.Vector3());
-        const span = Math.max(size.x, size.z, 10);
-        this.frameTarget(center, span * 1.6, span * .65);
+        const scale = Math.min(1, boundsScale(box) / 10);
+        const span = Math.max(size.x, size.z, 10 * scale);
+        const view = frameBounds(box, this.framingDirection(), this.framingAspect(), {
+            distance: span * 1.6, span: span * .65, perspective: this.mode !== 'top', ...this.framingPadding()
+        });
+        this.frameTarget(new THREE.Vector3(...view.target), new THREE.Vector3(...view.target).distanceTo(new THREE.Vector3(...view.position)), view.span);
     }
     captureView(mode = this.mode) {
         mode = cameraMode(mode);
@@ -482,7 +556,7 @@ export class MapView {
         return {
             position: (top && this.mode !== 'top') || (!top && this.mode === 'top') ? target.map((value, index) => value + offset[index]) : this.camera.position.toArray(),
             target,
-            span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3, distance * .36)
+            span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3 * Math.min(1, boundsScale(this.sceneBounds()) / 10), distance * .36)
         };
     }
     fallbackView(ids, mode = this.mode) {
@@ -492,13 +566,13 @@ export class MapView {
             const object = this.objects.get(id);
             if (object) box.union(new THREE.Box3().setFromObject(object));
         }
-        if (box.isEmpty()) box.setFromObject(this.root);
-        const center = box.getCenter(new THREE.Vector3());
+        if (box.isEmpty()) box.copy(this.sceneBounds());
         const size = box.getSize(new THREE.Vector3());
-        const aspect = Math.max(.2, this.container.clientWidth / this.container.clientHeight);
-        const span = Math.max(4, size.y, size.z, size.x / aspect) * .7;
-        const distance = Math.max(9, span * 3.2);
-        return { target: center.toArray(), position: center.clone().add(new THREE.Vector3(...cameraOffset(mode, distance))).toArray(), span };
+        const aspect = this.framingAspect();
+        const scale = Math.min(1, boundsScale(this.sceneBounds()) / 10);
+        const span = Math.max(4 * scale, size.y, size.z, size.x / aspect) * .7;
+        const distance = Math.max(9 * scale, span * 3.2);
+        return frameBounds(box, this.framingDirection(mode), aspect, { distance, span, perspective: mode !== 'top', ...this.framingPadding() });
     }
     applyView(preset, mode = this.mode) {
         if (!preset) return;
@@ -511,7 +585,7 @@ export class MapView {
         this.frameTarget(center, center.distanceTo(position), preset.span, true, position);
     }
     viewportBounds() {
-        const rect = this.renderer.domElement.getBoundingClientRect();
+        const rect = this.renderer?.domElement.getBoundingClientRect() || { width: 0, height: 0 };
         if (!rect.width || !rect.height) return { left: -.94, right: .94, top: .94, bottom: -.94 };
         const inset = Math.min(16, rect.width * .05) / rect.width * 2;
         return {
@@ -521,56 +595,41 @@ export class MapView {
             bottom: -.94
         };
     }
-    isVisible(id, camera = this.camera) {
+    isVisible(id, camera = this.camera, targetDistance = null) {
         const object = this.objects.get(id);
         if (!object) return false;
+        this.updateCameraClipping(camera, null, targetDistance);
         camera.updateMatrixWorld();
         const bounds = this.viewportBounds();
         const box = new THREE.Box3().setFromObject(object);
         const center = box.getCenter(new THREE.Vector3()).project(camera);
         if (center.z < -1 || center.z > 1) return false;
-        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
-            const point = new THREE.Vector3(x, y, z).project(camera);
+        for (const point of boundsCorners(box)) {
+            point.project(camera);
             if (point.x < bounds.left || point.x > bounds.right || point.y < bounds.bottom || point.y > bounds.top || point.z > 1 || point.z < -1) return false;
         }
         return true;
     }
     focusView(id, preset, mode = this.mode) {
-        const aspect = this.width / this.height;
+        const object = this.objects.get(id);
+        if (!object) return preset;
+        const aspect = this.framingAspect();
         const perspective = cameraMode(mode) === 'perspective';
         const camera = perspective ? new THREE.PerspectiveCamera(38, aspect, .05, 2000) :
             new THREE.OrthographicCamera(-preset.span * aspect, preset.span * aspect, preset.span, -preset.span, .05, 2000);
         const target = new THREE.Vector3(...preset.target);
         camera.position.fromArray(preset.position);
-        camera.lookAt(target);
+        aimCamera(camera, target);
         camera.updateMatrixWorld();
-        if (this.isVisible(id, camera)) return preset;
-        const box = new THREE.Box3().setFromObject(this.objects.get(id));
+        if (this.isVisible(id, camera, camera.position.distanceTo(target))) return preset;
+        const box = new THREE.Box3().setFromObject(object);
         const bounds = this.viewportBounds();
-        const points = [];
-        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
-            points.push(new THREE.Vector3(x, y, z).project(camera));
-        }
-        const scale = Math.max(1,
-            (Math.max(...points.map(p => p.x)) - Math.min(...points.map(p => p.x))) / (bounds.right - bounds.left),
-            (Math.max(...points.map(p => p.y)) - Math.min(...points.map(p => p.y))) / (bounds.top - bounds.bottom));
-        if (perspective) {
-            camera.position.sub(target).multiplyScalar(scale).add(target);
-        } else {
-            camera.left *= scale;
-            camera.right *= scale;
-            camera.top *= scale;
-            camera.bottom *= scale;
-        }
-        camera.updateProjectionMatrix();
-        camera.updateMatrixWorld();
-        const center = box.getCenter(new THREE.Vector3());
-        const projected = center.clone().project(camera);
-        const depth = -center.clone().applyMatrix4(camera.matrixWorldInverse).z;
-        const halfWidth = (perspective ? Math.tan(THREE.MathUtils.degToRad(19)) * depth : preset.span * scale) * aspect;
-        const shift = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0)
-            .multiplyScalar((projected.x - (bounds.left + bounds.right) / 2) * halfWidth);
-        return { ...preset, target: target.add(shift).toArray(), position: camera.position.add(shift).toArray(), span: preset.span * scale };
+        const direction = camera.position.clone().sub(target);
+        if (!direction.lengthSq()) direction.copy(this.framingDirection(mode));
+        return frameBounds(box, direction, aspect, {
+            distance: camera.position.distanceTo(target), span: preset.span, perspective,
+            horizontal: (bounds.right - bounds.left) / 2, vertical: (bounds.top - bounds.bottom) / 2
+        });
     }
     focus(onlyWhenHidden = false) {
         const exhibit = this.data.exhibits.find(e => e.id === this.selected);
@@ -606,6 +665,7 @@ export class MapView {
         this.renderer.domElement.dataset.view = mode;
         this.renderer.domElement.dataset.projection = this.camera.isOrthographicCamera ? 'orthographic' : 'perspective';
         this.transform.camera = this.camera;
+        this.updateCameraLimits(nextDistance);
         this.resize();
         this.controls.update();
         this.onMode(mode);
@@ -617,7 +677,10 @@ export class MapView {
         if (!Number.isFinite(heading)) return;
         cancelAnimationFrame(this.cameraFrame);
         const state = this.navigationState();
-        this.camera.position.copy(this.controls.target).add(new THREE.Vector3(...orbitOffset(state.distance, heading, state.elevation)));
+        const offset = this.camera.position.clone().sub(this.controls.target)
+            .applyAxisAngle(new THREE.Vector3(0, 1, 0), -(heading - state.heading) * Math.PI / 180);
+        this.camera.position.copy(this.controls.target).add(offset);
+        this.controlAngles(this.camera.position);
         this.controls.update();
         this.requestRender();
     }
@@ -649,7 +712,7 @@ export class MapView {
                 this.camera.updateProjectionMatrix();
             } else {
                 const v = this.camera.position.clone().sub(this.controls.target).multiplyScalar(factor);
-                v.clampLength(2, 450);
+                v.clampLength(this.controls.minDistance, this.controls.maxDistance);
                 this.camera.position.copy(this.controls.target).add(v);
             }
         }

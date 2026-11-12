@@ -410,3 +410,19 @@ test('returning to the installed layout cancels a pending model replacement', as
     assert.equal(imported.geometryDisposals(), 1);
     view.destroy();
 });
+
+test('hardware and whole-exhibit selection use distinct targets and highlights', async () => {
+    const { view } = makeView();
+    const data = dataset();
+    await view.setData(data, 'floor', 'first', true, { selection: ['first', 'second'],
+        hardwareSelection: [{ exhibitId: 'first', instanceIndex: 1 }, { exhibitId: 'second', instanceIndex: 0 }] });
+    assert.equal(view.transformEntries().length, 2);
+    assert.ok(view.transformEntries().every(entry => Number.isInteger(entry.instanceIndex)));
+    assert.equal(meshes(view.objects.get('first').children[1])[0].material, view.materials.editSelection);
+    assert.equal(meshes(view.objects.get('first').children[0])[0].material, view.materials.retired);
+    await view.setData(data, 'floor', 'first', true, { selection: ['first', 'second'] });
+    assert.ok(view.transformEntries().every(entry => entry.instanceIndex === undefined));
+    assert.equal(view.transformEntries().length, 2);
+    assert.ok(meshes(view.objects.get('first')).every(mesh => mesh.material === view.materials.selection));
+    view.destroy();
+});

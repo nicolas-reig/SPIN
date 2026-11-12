@@ -239,7 +239,7 @@ final class Store
             }
             foreach ($vector as $number) {
                 if ((!is_int($number) && !is_float($number)) || !is_finite($number) || abs($number) > 100000 ||
-                    ($key === 'scale' && ((float)$number < .001 || (float)$number > 1000))) {
+                    ($key === 'scale' && abs((float)$number) > 1000)) {
                     throw new ApiError('invalidTransform');
                 }
             }

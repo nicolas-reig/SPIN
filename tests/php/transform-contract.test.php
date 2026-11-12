@@ -53,9 +53,8 @@ try {
         'null component' => $transform('[null,2,3]'),
         'position upper bound' => $transform('[100000.001,2,3]'),
         'rotation lower bound' => $transform('[1,2,3]', '[0,-100000.001,0]'),
-        'scale lower bound' => $transform('[1,2,3]', '[0,0,0]', '[0.0009,1,1]'),
+        'scale lower bound' => $transform('[1,2,3]', '[0,0,0]', '[-1000.001,1,1]'),
         'scale upper bound' => $transform('[1,2,3]', '[0,0,0]', '[1000.001,1,1]'),
-        'negative scale' => $transform('[1,2,3]', '[0,0,0]', '[-1,1,1]'),
         'missing array' => '{"position":[1,2,3],"rotation":[0,0,0]}'
     ];
     foreach ($invalid as $case => $json) {
@@ -88,6 +87,16 @@ try {
     testCheck($record['transform'] == $boundary && $record['models'][0]['transform'] == $boundary && $record['floorId'] === '-7', 'Inclusive numeric boundaries and negative floor assignments must round-trip through signed saves');
     $stored = json_decode(file_get_contents($metaPath), true, 128, JSON_THROW_ON_ERROR);
     testCheck($stored['floor'] === -7 && $stored['lastEditedBy'] === 'Synthetic Tester', 'Saves must retain the documented integer floor representation and signature');
+    foreach ([[-1, 0, 1], [0, 0, 0], [-1000, .00001, 1000]] as $index => $scale) {
+        $signed = ['position' => [1, 2, 3], 'rotation' => [0, 45, 0], 'scale' => $scale];
+        $saved = testStructure($store, [
+            'id' => $id, 'name' => $id, 'floorId' => '4', 'transform' => $signed,
+            'models' => [['model' => $model, 'transform' => $signed]]
+        ], 'signed_zero_scale_' . $index);
+        $record = testExhibit($store->snapshot(), $id);
+        testCheck($record['transform'] == $signed && $record['models'][0]['transform'] == $signed,
+            'Signed, zero and small scale components must survive signed save and reload');
+    }
     testWrite($metaPath, 'null');
     testError(fn() => $store->snapshot(), 'invalidMetadata', 503);
     echo "Transform, JSON shape and floor contracts passed\n";

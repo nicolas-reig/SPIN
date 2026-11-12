@@ -8,14 +8,17 @@ export function editHelp(key) {
     return `title="${text}" aria-description="${text}"`;
 }
 
+export const transformNumber = value => Number(value.toPrecision(12));
+
 export function vectorFields(transform, attributes = '', scope = 'group') {
     return ['position', 'rotation', 'scale'].map(key => {
         const help = editHelp(key + (scope === 'group' ? 'GroupHint' : 'InstanceHint'));
         return `
-        <div class="vector"><h3 ${help}>${esc(t(key))}</h3><div class="grid3">
+        <div class="vector"><h3 ${help}>${esc(t(key))}</h3><div class="axis-values">
             ${['X', 'Y', 'Z'].map((axis, index) => {
                 const id = `transform-${scope}-${key}-${index}`;
-                return `<div><label for="${id}">${axis}</label><input id="${id}" aria-label="${esc(t(key) + ' · ' + axis)}" ${help} type="number" step="any" min="${key === 'scale' ? '.001' : '-100000'}" max="${key === 'scale' ? '1000' : '100000'}" data-vector="${key}" data-axis="${index}" ${attributes} value="${Number(transform[key][index].toFixed(4))}"></div>`;
+                const value = transform[key][index];
+                return `<div class="axis-value"><label data-number-drag for="${id}" title="${esc(t('dragValueHint'))}">${axis}</label><input id="${id}" aria-label="${esc(t(key) + ' · ' + axis)}" ${help} type="number" step="any" min="${key === 'scale' ? '-1000' : '-100000'}" max="${key === 'scale' ? '1000' : '100000'}" data-vector="${key}" data-axis="${index}" ${attributes} placeholder="${esc(t('mixedValues'))}" value="${value == null ? '' : transformNumber(value)}"></div>`;
             }).join('')}
         </div></div>`;
     }).join('');

@@ -16,7 +16,7 @@ export function selectionCenter(entries) {
     return entries.length ? center.divideScalar(entries.length) : center;
 }
 
-function decompose(matrix, reference) {
+export function decomposeTransform(matrix, reference = new Quaternion()) {
     const position = new Vector3().setFromMatrixPosition(matrix);
     const quaternion = new Quaternion();
     const scale = new Vector3();
@@ -66,7 +66,7 @@ export class TransformTransaction {
     apply(delta) {
         const next = this.entries.map(entry => {
             if (entry.parent.determinant() === 0) throw Error('transformCollapsedParent');
-            return decompose(entry.inverse.clone().multiply(delta).multiply(entry.world), entry.quaternion);
+            return decomposeTransform(entry.inverse.clone().multiply(delta).multiply(entry.world), entry.quaternion);
         });
         next.forEach((value, index) => {
             const object = this.entries[index].object;

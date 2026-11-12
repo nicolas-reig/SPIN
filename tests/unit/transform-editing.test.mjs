@@ -77,13 +77,16 @@ test('unrepresentable shear rejects the whole preview before any selected object
     transaction.entries.forEach(({ object }, index) => assert.deepEqual(object.matrix.elements, before[index]));
 });
 
-test('field previews retain the existing saved-transform validation', () => {
+test('field previews support signed and zero scale and reject out-of-range values', () => {
     const { holder, entry } = fixture();
     const transaction = new TransformTransaction([entry]);
     transaction.localField('position', 0, 12.5);
     assert.equal(holder.position.x, 12.5);
-    assert.throws(() => transaction.localField('scale', 0, -1), /invalidTransform/);
-    assert.equal(holder.position.x, 12.5);
+    transaction.localField('scale', 0, -1);
+    assert.equal(holder.scale.x, -1);
+    transaction.localField('scale', 1, 0);
+    assert.equal(holder.scale.y, 0);
+    assert.throws(() => transaction.localField('scale', 0, -1000.01), /invalidTransform/);
     transaction.restore();
     assert.equal(holder.position.x, 2);
 });

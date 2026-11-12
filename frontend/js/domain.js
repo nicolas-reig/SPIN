@@ -27,7 +27,7 @@ const finite = number => typeof number === 'number' && Number.isFinite(number);
 export function validTransform(transform) {
     return ['position', 'rotation', 'scale'].every(key => Array.isArray(transform?.[key]) &&
         transform[key].length === 3 && transform[key].every(value => finite(value) &&
-            Math.abs(value) <= 100000 && (key !== 'scale' || value >= .001 && value <= 1000)));
+            Math.abs(value) <= (key === 'scale' ? 1000 : 100000)));
 }
 
 export class MapPlacement {
@@ -38,7 +38,7 @@ export class MapPlacement {
             }
             this[key] = [...data[key]];
         }
-        if (this.scale.some(value => value <= 0)) throw Error('invalidTransform');
+        if (!validTransform(this)) throw Error('invalidTransform');
     }
 
     toJSON() {

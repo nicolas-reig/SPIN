@@ -120,7 +120,7 @@ Place reusable hardware models directly inside **`Assets/HardwareModels/`**, for
 
 Use self-contained **binary glTF 2.0 (`.glb`)** files containing meshes. External buffers, external textures and required glTF extensions are rejected. `.gltf` and `.blend` files are not loaded; you may keep source files alongside the exported models.
 
-Export at the intended size, with one world unit representing one metre and Y as the vertical axis. The model's origin is its placement and rotation pivot. The app replaces imported mesh materials with its own floor, status and selection materials, so original model colors and textures do not control their appearance.
+Export at the intended size, with one world unit representing one metre and Y as the vertical axis. The model's origin defines its saved placement. Editing uses the geometry center as a temporary rotation and scale pivot, including models exported away from their origin. The source geometry is unchanged. The app replaces imported mesh materials with its own floor, status and selection materials, so original model colors and textures do not control their appearance.
 
 All floor and hardware GLBs have their surface normals recalculated on load with a **30° smoothing threshold**. Faces meeting below that angle shade smoothly together; sharper edges retain a visible crease. This overrides exported normals in the viewer and leaves the GLB files unchanged.
 
@@ -243,7 +243,21 @@ Every transform has the same three arrays, in **`[x, y, z]`** order:
 
 The exhibit's `transform` moves, rotates and scales the entire group. Each instance's transform is **local to that group**, not another world placement. In the full example, the Display is two metres along the group's local X axis; the group's 90° rotation also rotates that offset. The original transforms inside the GLB remain part of the model.
 
-When supplying a transform, include all three arrays, each with exactly three finite numbers. Position and rotation components must lie between `-100000` and `100000`; scale components must be between `0.001` and `1000`. A missing instance transform uses identity. An invalid shared transform falls back to identity when reading, but an invalid instance transform causes that instance to be skipped. Invalid transforms cannot be saved through the app.
+When supplying a transform, include all three arrays, each with exactly three finite numbers. Position and rotation components must lie between `-100000` and `100000`; scale components must be between `-1000` and `1000`, inclusive. Negative values mirror an axis; zero flattens it. Hardware inside a zero-scaled exhibit cannot be transformed in world space until its parent scale is restored through the numeric fields. Operations that would introduce shear are rejected without changing any selected object. A missing instance transform uses identity. An invalid shared transform falls back to identity when reading, but an invalid instance transform causes that instance to be skipped. Invalid transforms cannot be saved through the app.
+
+#### Transform controls in edit mode
+
+Select an exhibit in the list to edit its whole group (blue). Select hardware on the map or with its inspector button to edit that component (purple). Shift-click adds or removes components, including components belonging to different exhibits on the current floor. Joining remains an action for exhibits selected in the list.
+
+The existing toolbar offers Move, Rotate, Scale and a combined tool. Handles use the geometry center; several selected objects share a middle pivot. Choose Global or Local orientation in the toolbar options. Axis colors follow the active accessibility palette.
+
+Press **G**, **R** or **S** to start a modal preview, then move the pointer or type an amount. Use X/Y/Z for a global axis, repeat it for the local axis, and repeat again to release the constraint. Shift-X/Y/Z excludes that axis (a plane). Press R again during rotation for trackball rotation. Ctrl snaps movement to 1 metre, rotation to 15° and scale to 0.1; Shift gives finer mouse control. The toolbar Snap preference keeps snapping enabled.
+
+Type distances, angles in degrees or scale factors directly; Tab cycles numeric components. Minus toggles the sign and `/` toggles a reciprocal in simple input. `=` enables expressions such as `25cm+5mm` or `sqrt(9)`; Ctrl-= returns to simple input. Invalid or incomplete numbers cannot be confirmed. Enter or a left click confirms, while Esc or a right click restores the exact starting transforms. Cancel also occurs on pointer loss, window blur, selection/floor changes and camera replacement. Every confirmed selection transform is one Undo step.
+
+The existing inspector shows stacked X/Y/Z fields. Click to type, or drag horizontally on a value or its axis label; Shift gives precision and Ctrl snaps. A drag previews changes and creates one Undo step on release; Esc cancels it. Mixed selection values appear blank with “Mixed”; typing sets a common value, while dragging retains the differences between selected values. Hardware selection, orientation, axis and snapping preferences are retained with an unsaved edit draft. All changes remain local until the signed Save.
+
+An empty or invalid GLB is skipped with a map warning so the remaining floor and hardware stay usable. Its source file and metadata are preserved.
 
 #### Saved views: 2D and 3D
 

@@ -1941,7 +1941,7 @@ body.editing {
     button, .composer, .compact-status, .status-symbol {
         transition: background-color 160ms, color 160ms, box-shadow 160ms;
     }
-    .panel-content, .floor-selector, dialog[open] {
+    dialog[open] {
         animation: surface-in 180ms ease-out;
     }
     .composer-expanded, .signature-step, .tombstone {
@@ -2134,7 +2134,7 @@ html[data-color-mode]:not([data-color-mode=default]) {
 
 @media (prefers-reduced-motion: no-preference) {
     .status-menu {
-        transition: transform 140ms ease-out, opacity 140ms ease-out;
+        transition: transform 180ms cubic-bezier(.2, .85, .2, 1.1), opacity 120ms ease-out;
     }
 }
 
@@ -3216,5 +3216,51 @@ body.editing .exhibit-entry.active .icon-button.danger {
         width: 1px;
         height: 24px;
         margin: 0 3px;
+    }
+}
+
+[data-motion-group] {
+    position: relative;
+    isolation: isolate;
+}
+
+[data-motion-group] > button {
+    position: relative;
+    z-index: 1;
+}
+
+:is(.language, .tabs, .view-toggle, .floor-selector, .transform-tools)[data-motion-group] > button:is(.active, [aria-pressed=true], [aria-selected=true], [aria-current=true]) {
+    background: transparent;
+    box-shadow: none;
+}
+
+.selection-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    background: #fff;
+    box-shadow: 0 1px 4px #202b3318;
+}
+
+.transform-tools > .selection-indicator {
+    background: var(--accent-soft);
+    box-shadow: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .disclosure-icon {
+        transition: transform 180ms cubic-bezier(.2, .85, .2, 1.12);
+    }
+
+    .map-toolbar .icon-button > svg,
+    .sidebar-title .icon-button > svg {
+        transition: transform 180ms cubic-bezier(.2, .85, .2, 1.15);
+    }
+
+    .map-toolbar .icon-button:active > svg,
+    .sidebar-title .icon-button:active > svg {
+        transform: scale(.9);
+        transition-duration: 70ms;
     }
 }

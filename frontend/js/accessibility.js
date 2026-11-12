@@ -1,7 +1,10 @@
+import { installControlMotion } from './control-motion.js';
 import { COLOR_SCHEMES, colorMode, setColorMode, onColorModeChange } from './colors.js';
 import { t, lang, setLanguage } from './locale.js';
 import { icon } from './icons.js';
 import { escape as esc } from './html.js';
+
+installControlMotion();
 
 const main = document.querySelector('#accessibility-content');
 const keys = ['ok', 'problem', 'retired', 'selection', 'editSelection', 'floor'];

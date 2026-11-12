@@ -109,10 +109,12 @@ export class CameraControls {
         this.host.querySelectorAll('[data-camera-command]').forEach(button => {
             const command = button.dataset.cameraCommand;
             button.disabled = !view || (command === 'focus' && !this.canFocus());
-            if (['top', 'perspective'].includes(command)) button.setAttribute('aria-pressed', command === state.mode);
+            if (['top', 'perspective'].includes(command) && button.getAttribute('aria-pressed') !== String(command === state.mode)) {
+                button.setAttribute('aria-pressed', command === state.mode);
+            }
         });
         this.rose.style.transform = `rotate(${-state.heading}deg)`;
-        this.letter.textContent = direction;
+        if (this.letter.textContent !== direction) this.letter.textContent = direction;
         this.face.setAttribute('aria-label', t('facing') + ' ' + direction + ' · ' + t('northUp'));
         this.slider.disabled = !view;
         this.slider.value = degrees;

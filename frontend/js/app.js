@@ -1,3 +1,4 @@
+import { installControlMotion } from './control-motion.js';
 import {
     Api,
     uid
@@ -33,6 +34,7 @@ import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapsh
 import { rememberedSignature, rememberSignature } from './signature.js';
 let noteEditor = null;
 installSelects();
+installControlMotion();
 const $ = s => document.querySelector(s),
     api = new Api();
 const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#sidebar'), $('#editbar'));

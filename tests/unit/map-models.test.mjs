@@ -351,3 +351,27 @@ test('destroy invalidates a pending load and its late result is released without
     assert.equal(view.objects.size, 0);
     assert.deepEqual(states, ['mapLoading']);
 });
+
+test('preprocessing errors release the unattached imported scene and report mapUnavailable', async () => {
+    const { view, calls, states } = makeView();
+    const raw = sourceScene();
+    raw.geometry.toNonIndexed = () => { throw new Error('synthetic geometry preprocessing failure'); };
+    view.loader.loadAsync = async url => {
+        calls.push(url);
+        return { scene: raw.scene };
+    };
+
+    await view.setData(dataset(), 'floor', null);
+
+    assert.deepEqual(calls, ['/hardware.glb']);
+    assert.equal(raw.geometryDisposals(), 1);
+    assert.equal(raw.materialDisposals(), 1);
+    assert.equal(raw.scene.parent, null);
+    assert.equal(view.root.children.length, 0);
+    assert.equal(view.objects.size, 0);
+    assert.equal(view.floor, null);
+    assert.deepEqual(states, ['mapLoading', 'mapUnavailable']);
+    view.destroy();
+    assert.equal(raw.geometryDisposals(), 1);
+    assert.equal(raw.materialDisposals(), 1);
+});

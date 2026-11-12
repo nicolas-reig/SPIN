@@ -7,7 +7,7 @@ import {
     EditSession,
     identity,
     STATUSES,
-    normalizeStatus, validTransform
+    normalizeStatus, validTransform, normalizeTransform
 } from './domain.js';
 import {
     t,
@@ -135,6 +135,8 @@ function fieldTargets(input) {
 function commitTransforms(changes) {
     if (!edit || !changes.length) return;
     if (changes.some(change => !validTransform(change.transform))) { announce(t('invalidTransform')); return; }
+    changes = changes.map(change => ({ ...change, transform: normalizeTransform(change.transform) }));
+    map?.previewTransforms(changes);
     applyEdit(state => {
         for (const { exhibitId, instanceIndex, transform } of changes) {
             const record = state.exhibits.find(record => record.id === exhibitId);
@@ -1620,7 +1622,8 @@ function applyEditorField(input) {
     }
     if (input.dataset.vector) {
         map?.cancelTransform();
-        const value = Number(input.value);
+        const value = transformNumber(Number(input.value));
+        input.value = value;
         const changes = fieldTargets(input).map(entry => {
             const transform = structuredClone(entry.transform);
             transform[input.dataset.vector][Number(input.dataset.axis)] = value;
@@ -2055,9 +2058,9 @@ function conflictValue(value) {
         t('modelInstances') + ': ' + record.models.length + ' · ' + t('notes') + ': ' + record.notes.length + ' · ' + t('documentation') + ': ' + record.links.length).join('\n\n');
     if (Array.isArray(value)) return value.map(instance =>
         (data().assets.find(asset => asset.id === instance.model)?.name || instance.model) + '\n' +
-        ['position', 'rotation', 'scale'].map(key => t(key) + ': ' + instance.transform[key].join(', ')).join('\n')
+        ['position', 'rotation', 'scale'].map(key => t(key) + ': ' + instance.transform[key].map(transformNumber).join(', ')).join('\n')
     ).join('\n\n');
-    if (value.position && value.rotation && value.scale) return ['position', 'rotation', 'scale'].map(key => t(key) + ': ' + value[key].join(', ')).join('\n');
+    if (value.position && value.rotation && value.scale) return ['position', 'rotation', 'scale'].map(key => t(key) + ': ' + value[key].map(transformNumber).join(', ')).join('\n');
     if (value.position && value.target) return t('savedView');
     return value.name || value.id || t('savedView');
 }

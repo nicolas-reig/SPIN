@@ -1,4 +1,4 @@
-import { normalizeViews } from './domain.js';
+import { normalizePlacement } from './domain.js';
 
 const text = value => typeof value === 'string' && value.trim();
 export const hasNoteDraft = draft => Boolean(text(draft?.body) || draft?.images?.length ||
@@ -39,13 +39,13 @@ export class DraftStore {
 
 export function editSnapshot(value) {
     const { floors, assets, ...editable } = value;
-    return { ...editable, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) };
+    return { ...editable, exhibits: value.exhibits.map(({ notes, links, ...record }) => normalizePlacement(record, false)) };
 }
 
 export function restoreEditSnapshot(value, live) {
     return { ...value, floors: structuredClone(live.floors), assets: live.assets, exhibits: value.exhibits.map(record => {
         const current = live.exhibits.find(item => item.id === record.id);
         const members = [current, ...(record.joinedFrom || []).map(id => live.exhibits.find(item => item.id === id))].filter(Boolean);
-        return { ...record, views: normalizeViews(record.views), notes: members.flatMap(item => item.notes), links: members.flatMap(item => item.links) };
+        return normalizePlacement({ ...record, notes: members.flatMap(item => item.notes), links: members.flatMap(item => item.links) });
     }) };
 }

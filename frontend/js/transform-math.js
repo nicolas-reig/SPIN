@@ -1,5 +1,5 @@
 import { Box3, Euler, Matrix4, Quaternion, Vector3, MathUtils } from 'three';
-import { validTransform } from './domain.js';
+import { validTransform, normalizeTransform } from './domain.js';
 
 export const transformKey = ({ exhibitId, instanceIndex }) => JSON.stringify([exhibitId, instanceIndex ?? null]);
 export const axisVector = axis => new Vector3(...({ X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[axis]));
@@ -48,7 +48,7 @@ export function decomposeTransform(matrix, reference = new Quaternion()) {
     const rotation = new Euler().setFromQuaternion(quaternion, 'XYZ');
     const transform = { position: position.toArray(), rotation: [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg), scale: scale.toArray() };
     if (!validTransform(transform)) throw Error('invalidTransform');
-    return { position, quaternion, scale, transform };
+    return { position, quaternion, scale, transform: normalizeTransform(transform) };
 }
 
 export class TransformTransaction {
@@ -98,7 +98,7 @@ export class TransformTransaction {
 
     changes() {
         return this.entries.map(({ exhibitId, instanceIndex, object }) => ({ exhibitId, instanceIndex,
-            transform: { position: object.position.toArray(), rotation: [object.rotation.x, object.rotation.y, object.rotation.z].map(MathUtils.radToDeg), scale: object.scale.toArray() } }));
+            transform: normalizeTransform({ position: object.position.toArray(), rotation: [object.rotation.x, object.rotation.y, object.rotation.z].map(MathUtils.radToDeg), scale: object.scale.toArray() }) }));
     }
 
     restore() {

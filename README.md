@@ -245,6 +245,8 @@ The exhibit's `transform` moves, rotates and scales the entire group. Each insta
 
 When supplying a transform, include all three arrays, each with exactly three finite numbers. Position and rotation components must lie between `-100000` and `100000`; scale components must be between `-1000` and `1000`, inclusive. Negative values mirror an axis; zero flattens it. Hardware inside a zero-scaled exhibit cannot be transformed in world space until its parent scale is restored through the numeric fields. Operations that would introduce shear are rejected without changing any selected object. A missing instance transform uses identity. An invalid shared transform falls back to identity when reading, but an invalid instance transform causes that instance to be skipped. Invalid transforms cannot be saved through the app.
 
+Transform components and saved-camera positions, targets and spans use **at most six decimal places** throughout inspector values, edit history, drafts, API responses and saved metadata. Values are rounded to the nearest millionth, with exact halves rounded away from zero. Unneeded trailing zeros and negative zero are omitted. The limit applies to whole exhibits and individual hardware. A saved camera must still have distinct position and target after rounding and a span of at least `0.000001`.
+
 #### Transform controls in edit mode
 
 Select an exhibit in the list to edit its whole group (blue). Select hardware on the map or with its inspector button to edit that component (purple). Shift-click adds or removes components, including components belonging to different exhibits on the current floor. Joining remains an action for exhibits selected in the list.

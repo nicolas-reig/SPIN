@@ -7,6 +7,7 @@ import {
 } from 'three/addons/controls/OrbitControls.js';
 import { TransformController } from './transform-controller.js';
 import { transformKey } from './transform-math.js';
+import { coordinateNumber, coordinateVector } from './domain.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -213,7 +214,7 @@ export class MapView {
                 if (this.boundsDirty || this.cameraLimitsDirty) this.updateCameraLimits();
                 this.transform?.update();
                 const offset = this.camera.position.clone().sub(this.controls.target);
-                this.renderer.domElement.dataset.cameraOffset = offset.toArray().join(',');
+                this.renderer.domElement.dataset.cameraOffset = coordinateVector(offset.toArray()).join(',');
                 this.onCamera(this.navigationState());
                 const building = this.root.children.find(object => object.userData.floor);
                 if (this.mode === 'top' && building && this.topStyle !== 'shaded' && !this.topViewFailed && TopView.supported(this.renderer)) {
@@ -560,9 +561,9 @@ export class MapView {
         const top = mode === 'top';
         const offset = orbitOffset(distance, this.navigationState().heading, top ? 90 : 35);
         return {
-            position: (top && this.mode !== 'top') || (!top && this.mode === 'top') ? target.map((value, index) => value + offset[index]) : this.camera.position.toArray(),
-            target,
-            span: this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3 * Math.min(1, boundsScale(this.sceneBounds()) / 10), distance * .36)
+            position: coordinateVector((top && this.mode !== 'top') || (!top && this.mode === 'top') ? target.map((value, index) => value + offset[index]) : this.camera.position.toArray()),
+            target: coordinateVector(target),
+            span: coordinateNumber(this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3 * Math.min(1, boundsScale(this.sceneBounds()) / 10), distance * .36))
         };
     }
     fallbackView(ids, mode = this.mode) {

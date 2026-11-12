@@ -1,4 +1,4 @@
-import { identity, structural, EditSession, VIEW_KEYS } from './domain.js';
+import { identity, structural, EditSession, VIEW_KEYS, coordinateNumber } from './domain.js';
 import { escape as esc } from './markdown.js';
 import { t } from './locale.js';
 import { icon } from './icons.js';
@@ -8,7 +8,7 @@ export function editHelp(key) {
     return `title="${text}" aria-description="${text}"`;
 }
 
-export const transformNumber = value => Number(value.toPrecision(12));
+export const transformNumber = coordinateNumber;
 
 export function vectorFields(transform, attributes = '', scope = 'group') {
     return ['position', 'rotation', 'scale'].map(key => {

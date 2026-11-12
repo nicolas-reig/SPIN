@@ -2,15 +2,36 @@ export const STATUSES = ['ok', 'problem', 'retired'];
 export const normalizeStatus = status => status == null || status === '' || status === 'unset' ? 'ok' : status;
 export const VIEW_KEYS = ['2D', '3D'];
 
+// Match PHP: six decimal places, halves away from zero, and no negative zero.
+export function coordinateNumber(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return value;
+    const rounded = Math.sign(value) * Math.round(Math.abs(value) * 1e6) / 1e6;
+    return rounded === 0 ? 0 : rounded;
+}
+export const coordinateVector = vector => Array.isArray(vector) ? vector.map(coordinateNumber) : vector;
+export const normalizeTransform = transform => transform && Object.fromEntries(
+    Object.entries(transform).map(([key, value]) => [key, ['position', 'rotation', 'scale'].includes(key) ? coordinateVector(value) : value])
+);
+
+export function normalizePlacement(record, canonicalViewKeys = true) {
+    if (record.transform) record.transform = normalizeTransform(record.transform);
+    if (Array.isArray(record.models)) record.models = record.models.map(instance => ({ ...instance, transform: normalizeTransform(instance.transform) }));
+    record.views = canonicalViewKeys ? normalizeViews(record.views) : Object.fromEntries(
+        Object.entries(record.views || {}).map(([key, preset]) => [key, preset && { ...preset,
+            position: coordinateVector(preset.position), target: coordinateVector(preset.target), span: coordinateNumber(preset.span) }])
+    );
+    return record;
+}
+
 export function normalizeViews(views = {}) {
     const result = {};
     for (const [key, legacy] of [['2D', 'top'], ['3D', 'three']]) {
         const preset = Object.hasOwn(views ?? {}, key) ? views[key] : views?.[legacy];
         if (!preset) continue;
         result[key] = {
-            position: preset.position,
-            target: preset.target,
-            span: preset.span
+            position: coordinateVector(preset.position),
+            target: coordinateVector(preset.target),
+            span: coordinateNumber(preset.span)
         };
     }
     return result;
@@ -39,6 +60,7 @@ export class MapPlacement {
             this[key] = [...data[key]];
         }
         if (!validTransform(this)) throw Error('invalidTransform');
+        for (const key of ['position', 'rotation', 'scale']) this[key] = coordinateVector(this[key]);
     }
 
     toJSON() {
@@ -62,11 +84,11 @@ export class Exhibit extends Record {
         super(data);
         this.status = normalizeStatus(this.status);
         if (!STATUSES.includes(this.status)) throw Error('invalidStatus');
-        new MapPlacement(this.transform);
+        this.transform = new MapPlacement(this.transform).toJSON();
         if (!Array.isArray(this.models)) throw Error('invalidModel');
-        this.models.forEach(instance => {
+        this.models = this.models.map(instance => {
             if (!instance.model) throw Error('invalidModel');
-            new MapPlacement(instance.transform);
+            return { ...instance, transform: new MapPlacement(instance.transform).toJSON() };
         });
     }
 }
@@ -163,6 +185,7 @@ export function validateViews(views = {}) {
             vector.every(finite)) || !finite(view.span) || view.span <= 0) {
             throw Error('invalidView');
         }
+        if (view.position.every((value, index) => value === view.target[index])) throw Error('invalidView');
     }
 }
 
@@ -174,7 +197,10 @@ export function validateSnapshot(snapshot) {
     });
     snapshot.exhibits.forEach(record => {
         record.views = normalizeViews(record.views);
-        record.status = new Exhibit(record).status;
+        const normalized = new Exhibit(record);
+        record.status = normalized.status;
+        record.transform = normalized.transform;
+        record.models = normalized.models;
         validateViews(record.views);
         record.notes.forEach(note => new Note(note));
         record.links.forEach(link => new NasDocumentLink(link));
@@ -185,7 +211,7 @@ export function validateSnapshot(snapshot) {
 
 export function structural(record) {
     const keys = ['id', 'name', 'floorId', 'status', 'transform', 'models', 'views'];
-    return Object.fromEntries(keys.map(key => [key, structuredClone(record[key] ?? null)]));
+    return normalizePlacement(Object.fromEntries(keys.map(key => [key, structuredClone(record[key] ?? null)])), false);
 }
 
 export class EditSession {
@@ -205,7 +231,7 @@ export class EditSession {
         copy.floors = floors;
         copy.assets = assets;
         copy.exhibits.forEach((record, index) => {
-            record.views = normalizeViews(record.views);
+            normalizePlacement(record);
             record.notes = value.exhibits[index].notes;
             record.links = value.exhibits[index].links;
         });
@@ -216,13 +242,14 @@ export class EditSession {
         const originals = new Map(this.base.exhibits.map(record => [record.id, record]));
         this.value = { ...value, floors: this.value.floors, assets: this.value.assets, exhibits: value.exhibits.map(record => {
             const members = [record.id, ...(record.joinedFrom || [])].map(id => originals.get(id)).filter(Boolean);
-            return { ...record, views: normalizeViews(record.views), notes: members.flatMap(item => item.notes), links: members.flatMap(item => item.links) };
+            return normalizePlacement({ ...record, notes: members.flatMap(item => item.notes), links: members.flatMap(item => item.links) });
         }) };
     }
 
     change(change) {
         const next = this.copy(this.value);
         change(next);
+        next.exhibits.forEach(record => normalizePlacement(record, false));
         next.floors = this.value.floors;
         next.assets = this.value.assets;
         const content = (key, value) => ['notes', 'links'].includes(key) ? undefined : value;

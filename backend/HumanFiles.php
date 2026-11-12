@@ -87,6 +87,12 @@ final class HumanFiles
         return 'p' . substr(hash('sha256', $folder . '/' . $name), 0, 40);
     }
 
+    private static function modifiedAt(string $path): string
+    {
+        $mtime = filemtime($path);
+        return gmdate('Y-m-d\TH:i:s\Z', $mtime === false ? time() : $mtime);
+    }
+
     public static function datedFilename(string $name): ?array
     {
         if (!preg_match('/^(.+) (\d{2}_\d{2}_\d{4}|\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})(?: (\d{2}\.\d{2}(?:\.\d{2})?|\d{2}-\d{2}-\d{2}))?(?: \[[a-f0-9]{12}\]| \(\d+\))?\.(md|jpe?g|png|webp)$/iu', $name, $parts)) {
@@ -181,16 +187,17 @@ final class HumanFiles
                 $note['body'] = trim(substr($note['body'], 0, -strlen($edited[0])));
                 $note['corrections'][] = [
                     'signature' => trim($edited[1]),
-                    'at' => gmdate('Y-m-d\TH:i:s\Z', filemtime($path) ?: time())
+                    'at' => self::modifiedAt($path)
                 ];
             }
             if (preg_match('/^deleted by (.+)$/iu', $note['body'], $deleted)) {
                 $note['deleted'] = [
                     'signature' => trim($deleted[1]),
-                    'at' => gmdate('Y-m-d\TH:i:s\Z', filemtime($path) ?: time())
+                    'at' => self::modifiedAt($path)
                 ];
             }
-            $fingerprints[] = $name . ':' . $note['fileHash'];
+            $attributionAt = $note['deleted']['at'] ?? ($note['corrections'][0]['at'] ?? null);
+            $fingerprints[] = $name . ':' . $note['fileHash'] . ($attributionAt === null ? '' : ':' . $attributionAt);
             $notes[] = $note;
         }
         usort($notes, fn($a, $b) => strcmp($b['at'], $a['at']) ?: strcmp($b['id'], $a['id']));

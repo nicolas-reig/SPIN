@@ -33,7 +33,7 @@ import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
 import { hardwareKey, normalizeHardwareSelection, commonTransform } from './transform-selection.js';
 import { hardwareParameters, exhibitParameters } from './placement-inspector.js';
-import { installNumberDrag } from './number-drag.js';
+import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 let noteEditor = null;
 installSelects();
@@ -1720,6 +1720,7 @@ function updateTransformFields(preview = null) {
         const value = commonTransform(entries)[input.dataset.vector][Number(input.dataset.axis)];
         input.value = value == null ? '' : transformNumber(value);
     });
+    updateNumberFills($('#inspector'));
 }
 
 numberDrag = installNumberDrag($('#inspector'), {
@@ -2464,7 +2465,9 @@ document.addEventListener('keydown', event => {
             applyEditorField(input);
             if (!input.checkValidity() || !input.value.trim()) return;
         }
-        input.blur(); return;
+        input.blur();
+        updateNumberFills($('#inspector'));
+        return;
     }
     if (!typing && edit && map?.transformKey(event)) { event.preventDefault(); return; }
     if (event.key === 'Escape') {

@@ -190,7 +190,9 @@ export function structural(record) {
 
 export class EditSession {
     constructor(snapshot) {
-        this.base = this.copy(snapshot);
+        const collections = structuredClone({ floors: snapshot.floors, assets: snapshot.assets });
+        collections.floors.forEach(record => { record.views = normalizeViews(record.views); });
+        this.base = this.copy({ ...snapshot, ...collections });
         this.base.exhibits.forEach(record => { record.status = normalizeStatus(record.status); });
         this.value = this.copy(this.base);
         this.undoStack = [];
@@ -198,8 +200,10 @@ export class EditSession {
     }
 
     copy(value) {
-        const copy = structuredClone({ ...value, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) });
-        copy.floors.forEach(record => { record.views = normalizeViews(record.views); });
+        const { floors, assets, ...editable } = value;
+        const copy = structuredClone({ ...editable, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) });
+        copy.floors = floors;
+        copy.assets = assets;
         copy.exhibits.forEach((record, index) => {
             record.views = normalizeViews(record.views);
             record.notes = value.exhibits[index].notes;
@@ -245,9 +249,11 @@ export class EditSession {
 
     changes() {
         const changes = [];
+        const originals = new Map(this.base.exhibits.map(record => [record.id, record]));
+        const currentIds = new Set(this.value.exhibits.map(record => record.id));
         const joined = new Set(this.value.exhibits.flatMap(record => record.joinedFrom || []));
         for (const record of this.value.exhibits) {
-            const old = this.base.exhibits.find(item => item.id === record.id);
+            const old = originals.get(record.id);
             if (!old || record.joinedFrom?.length || JSON.stringify(structural(record)) !== JSON.stringify(structural(old))) {
                 const change = {
                     kind: 'exhibits',
@@ -256,7 +262,7 @@ export class EditSession {
                     record: structural(record),
                     baseRevision: old?.revision
                 };
-                const sources = (record.joinedFrom || []).map(id => this.base.exhibits.find(item => item.id === id)).filter(Boolean);
+                const sources = (record.joinedFrom || []).map(id => originals.get(id)).filter(Boolean);
                 if (sources.length) {
                     change.joins = sources.map(source => ({ id: source.id, baseRevision: source.revision, contentTag: source.contentTag }));
                     change.contentTag = old?.contentTag;
@@ -265,7 +271,7 @@ export class EditSession {
             }
         }
         for (const old of this.base.exhibits) {
-            if (!joined.has(old.id) && !this.value.exhibits.some(item => item.id === old.id)) {
+            if (!joined.has(old.id) && !currentIds.has(old.id)) {
                 changes.push({ kind: 'exhibits', op: 'delete', id: old.id, baseRevision: old.revision, contentTag: old.contentTag });
             }
         }

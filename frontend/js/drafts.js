@@ -38,7 +38,8 @@ export class DraftStore {
 }
 
 export function editSnapshot(value) {
-    return { ...value, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) };
+    const { floors, assets, ...editable } = value;
+    return { ...editable, exhibits: value.exhibits.map(({ notes, links, ...record }) => record) };
 }
 
 export function restoreEditSnapshot(value, live) {

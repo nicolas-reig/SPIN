@@ -421,6 +421,7 @@ function renderList() {
     const records = data().exhibits.filter(e => {
         const matchesFloor = !floorFilter || (floorFilter === 'unplaced' ? !e.placed : e.floorId === floorFilter);
         if (!matchesFloor || appliedStatusFilter && e.status !== appliedStatusFilter) return false;
+        if (!q) return true;
         const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name;
         return text.toLocaleLowerCase(lang()).includes(q);
     });
@@ -1985,14 +1986,25 @@ async function refresh() {
     }
 }
 
+let fileRefreshInFlight = false;
+function canRefreshFromFiles() {
+    return !document.hidden && !edit && !statusSaving && !$('#dialog').open &&
+        !document.activeElement?.closest('#note-form, #link-form, #link-search');
+}
+
 async function refreshFromFiles() {
-    if (document.hidden || edit || statusSaving || $('#dialog').open || document.activeElement?.closest('#note-form, #link-form, #link-search')) return;
+    if (fileRefreshInFlight || !canRefreshFromFiles()) return;
+    fileRefreshInFlight = true;
+    const previous = snapshot;
     try {
         const current = await api.load();
+        if (!canRefreshFromFiles() || snapshot !== previous) return;
         const stamp = value => JSON.stringify([value.revision, value.structureRevision, value.exhibits.map(item => [item.id, item.revision, item.contentTag])]);
         if (!snapshot || stamp(current) !== stamp(snapshot)) acceptSnapshot(current);
     } catch {
         // A later refresh can read the files after an external editor finishes saving.
+    } finally {
+        fileRefreshInFlight = false;
     }
 }
 

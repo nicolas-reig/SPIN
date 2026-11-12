@@ -32,6 +32,7 @@ import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
 import { hardwareKey, normalizeHardwareSelection, commonTransform } from './transform-selection.js';
+import { hardwareParameters, exhibitParameters } from './placement-inspector.js';
 import { installNumberDrag } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 let noteEditor = null;
@@ -124,8 +125,8 @@ function selectionTransforms() {
 }
 
 function fieldTargets(input) {
-    if (input.hasAttribute('data-selection-vector')) return selectionTransforms();
-    const record = exhibit();
+    if (input.hasAttribute('data-selection-delta')) return selectionTransforms();
+    const record = data().exhibits.find(record => record.id === (input.dataset.exhibit || selected));
     if (!record) return [];
     const instanceIndex = input.hasAttribute('data-group-vector') ? undefined : Number(input.dataset.instance);
     const transform = instanceIndex == null ? record.transform : record.models[instanceIndex]?.transform;
@@ -149,19 +150,48 @@ function commitTransforms(changes) {
 
 function selectionFields() {
     const entries = selectionTransforms();
-    return entries.length > 1 ? `<form id="structure-form" novalidate>${vectorFields(commonTransform(entries), 'data-selection-vector', 'selection')}<div class="error" id="structure-error" role="alert" hidden></div></form>` : '';
+    if (entries.length < 2) return `<p class="small muted placement-context">${esc(t('selectionDifferentFloors'))}</p>`;
+    return `<section class="selection-transform"><div class="row between"><h2>${esc(t('transformTogether'))}</h2><div class="selection-orientation"><label class="sr-only" for="selection-space">${esc(t('transformOrientation'))}</label><select id="selection-space">${options([['world', t('globalOrientation')], ['local', t('localOrientation')]], transformSpace)}</select></div></div>
+        <p class="small muted placement-context">${esc(t('selectionTransformHint'))}</p>
+        ${vectorFields(identity(), 'data-selection-delta', 'selection', { labels: { position: 'moveBy', rotation: 'rotateBy', scale: 'scaleFactor' }, hints: { position: 'selectionMoveHint', rotation: 'selectionRotateHint' }, keys: ['position', 'rotation'] })}
+        <div class="vector"><h3 ${editHelp('selectionScaleHint')}>${esc(t('scaleFactor'))}</h3><div class="axis-values"><div class="axis-value"><label data-number-drag for="transform-selection-scale-all" ${editHelp('selectionScaleHint')}>${icon('link')}</label><input id="transform-selection-scale-all" type="number" min="-1000" max="1000" step="any" data-selection-delta data-vector="scale" data-axis="all" value="1" aria-label="${esc(t('scaleFactor'))}" ${editHelp('selectionScaleHint')}></div></div></div></section>`;
 }
 
 function bindSelectionFields() {
-    $('#structure-form')?.addEventListener('change', event => applyEditorField(event.target));
+    $('#structure-form')?.addEventListener('change', event => { if (event.target.dataset.vector) applyEditorField(event.target); });
     $('#structure-form')?.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
+    $('#selection-space')?.addEventListener('change', event => {
+        numberDrag?.cancel(); transformSpace = event.target.value; syncEditTools(); renderTransformToolbar(); persistEdit();
+    });
 }
 
-function renderMultiTransformInspector() {
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${hardwareSelection.length} ${esc(t('hardwareComponents'))}</h1></div><div class="panel-content" id="structure-panel"><p class="small muted">${esc(t('hardwareMultiHint'))}</p>${selectionFields()}</div>`;
+function renderMultiTransformInspector() { renderSelectionInspector(true); }
+
+function renderSelectionInspector(hardware) {
+    const records = selectedExhibits();
+    const title = hardware ? `${hardwareSelection.length} ${t('hardwareComponents')}` : `${records.length} ${t('exhibits')}`;
+    const members = hardware ? records.map((record, groupIndex) => `<section class="selection-owner"><div class="row between selection-owner-heading"><h3>${esc(record.name)}</h3><button type="button" class="quiet" data-select-parent="${esc(record.id)}">${esc(t('wholeExhibit'))}</button></div>
+        ${hardwareSelection.filter(entry => entry.exhibitId === record.id).map(entry => hardwareParameters(record, entry.instanceIndex, data().assets, `member-${groupIndex}-${entry.instanceIndex}`)).join('')}</section>`).join('') : records.map((record, index) => exhibitParameters(record, `exhibit-${index}`, { active: true, showName: true, hardware: true, assets: data().assets })).join('');
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(title)}</h1></div><div class="panel-content" id="structure-panel">
+        <div class="selection-scope"><span class="small muted">${esc(t(hardware ? 'hardwareSelectionScope' : 'exhibitSelectionScope'))}</span>${hardware ? `<button type="button" class="quiet" data-select-parent-exhibits>${esc(t('selectOwningExhibits'))}</button>` : ''}</div>
+        <form id="structure-form" novalidate>${selectionFields()}<details class="selection-members" open><summary>${esc(t(hardware ? 'individualHardware' : 'individualExhibits'))}</summary>${members}</details><div class="error" id="structure-error" role="alert" hidden></div></form>
+        ${hardware ? '' : joinInspectorHTML(records)}</div>`;
     bindSelectionFields();
+    if (!hardware) bindJoinInspector();
     syncEditTools();
 }
+
+function selectParentExhibits(ids) {
+    if (!edit || editSave?.saving) return;
+    map?.cancelTransform(); numberDrag?.cancel(); joinGeneration++;
+    const records = data().exhibits.filter(record => ids.includes(record.id));
+    hardwareSelection = []; activeInstance = 0; editSelection = new Set(records.map(record => record.id));
+    selected = editSelection.has(selected) ? selected : records[0]?.id || null;
+    creationOpen = false;
+    if (editConflict) editConflict.open = false;
+    renderList(); renderInspector(); renderMapUI(); updateMap(); syncEditTools(); persistEdit(); syncUrl();
+}
+
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
 onColorModeChange(() => { if (snapshot) renderList(); });
 const statusHTML = status => `<span class="status-badge"><span class="status-symbol ${status}" aria-hidden="true"></span>${esc(t(status))}</span>`;
@@ -545,7 +575,7 @@ function renderTransformToolbar() {
     toolbar.innerHTML = available ? `<div class="transform-tools">${[['translate', 'move', 'move', 'moveHardwareHint', 'G'], ['rotate', 'rotate', 'rotate-cw', 'rotateHardwareHint', 'R'], ['scale', 'scaleTool', 'scaling', 'scaleHardwareHint', 'S'], ['combined', 'combinedTransform', 'move-3d', 'combinedTransformHint', '']].map(([tool, label, name, help, shortcut]) => `<button type="button" class="icon-button" data-tool="${tool}" aria-label="${esc(t(label))}" ${editHelp(help)} aria-pressed="${gizmo === tool}">${icon(name)}${shortcut ? `<small class="tool-shortcut" aria-hidden="true">${shortcut}</small>` : ''}</button>`).join('')}</div><span class="toolbar-divider" aria-hidden="true"></span><details class="transform-options"><summary class="icon-button" aria-label="${esc(t('placementOptions'))}" ${editHelp('placementOptionsHint')}>${icon('sliders-horizontal')}</summary><div class="popover"><label class="check" ${editHelp('snapHint')}><input type="checkbox" id="snap" ${snap ? 'checked' : ''}>${esc(t('snap'))}</label><label for="transform-space">${esc(t('transformOrientation'))}</label><select id="transform-space">${options([['world', t('globalOrientation')], ['local', t('localOrientation')]], transformSpace)}</select><label for="axis">${esc(t('axis'))}</label><select id="axis" ${editHelp('axisHint')}>${options([['', t('allAxes')], ['X', 'X'], ['Y', 'Y'], ['Z', 'Z']], axisConstraint)}</select></div></details>` : '';
     $('#snap')?.addEventListener('change', event => { snap = event.target.checked; syncEditTools(); persistEdit(); });
     $('#axis')?.addEventListener('change', event => { axisConstraint = event.target.value; syncEditTools(); persistEdit(); });
-    $('#transform-space')?.addEventListener('change', event => { transformSpace = event.target.value; syncEditTools(); persistEdit(); });
+    $('#transform-space')?.addEventListener('change', event => { transformSpace = event.target.value; syncEditTools(); persistEdit(); if ($('#selection-space') && $('#selection-space').value !== transformSpace) { $('#selection-space').value = transformSpace; $('#selection-space').dispatchEvent(new Event('change', { bubbles: true })); } });
 }
 
 async function ensureMap() {
@@ -643,6 +673,11 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false) {
     if (edit) persistEdit();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
     if (!extend && matchMedia('(max-width:860px)').matches) setView('detail');
+    if (edit && hardware && hardwareSelection.some(entry => entry.exhibitId === id && entry.instanceIndex === instanceIndex)) {
+        const target = hardwareSelection.length > 1 ? $('#inspector .selection-transform') :
+            [...$('#inspector').querySelectorAll('[data-hardware-card]')].find(card => card.dataset.exhibit === id && Number(card.dataset.hardwareCard) === instanceIndex);
+        target?.scrollIntoView({ block: 'nearest' });
+    }
     if (focused && !focused.isConnected && document.activeElement === document.body) {
         [...document.querySelectorAll('#exhibit-list [data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
     }
@@ -717,7 +752,8 @@ function renderInspector() {
         Boolean(edit),
         creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit',
         creationOpen ? null : exhibit()?.name,
-        creationOpen ? [] : edit && editSelection.size > 1 ? [...editSelection].sort() : [selected]
+        creationOpen ? [] : edit && editSelection.size > 1 ? [...editSelection].sort() : [selected],
+        hardwareSelection.map(hardwareKey).sort()
     ]);
     if (panelMotion.update(context)) {
         const title = $('#inspector h1')?.textContent;
@@ -1276,18 +1312,21 @@ function joinProblem(records) {
     return '';
 }
 
-function renderJoinInspector() {
-    const records = selectedExhibits(), problem = joinProblem(records);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${records.length} ${esc(t('exhibits'))}</h1></div>
-        <div class="panel-content"><form id="join-form" novalidate>
+function renderJoinInspector() { renderSelectionInspector(false); }
+
+function joinInspectorHTML(records) {
+    const problem = joinProblem(records);
+    return `<details class="join-selection"><summary>${esc(t('joinSelectedExhibits'))}</summary><form id="join-form" novalidate>
             <div class="field"><label for="join-target">${esc(t('joinInto'))}</label>
                 <select id="join-target" ${editHelp('joinTargetHint')}>${options(records.map(record => [record.id, record.name]), selected)}</select>
             </div>
             <p class="small muted">${esc(t('joinHint'))}</p>
             <div class="error" id="join-error" role="alert" ${problem ? '' : 'hidden'}>${esc(problem ? t(problem) : '')}</div>
-            <div class="creation-actions">${button('cancel', 'cancelJoin', 'quiet')}<button type="submit" class="primary" ${problem ? 'disabled' : ''}>${esc(t('join'))}</button></div>
-        </form><div id="structure-panel">${selectionFields()}</div></div>`;
-    bindSelectionFields();
+            <div class="creation-actions"><button type="submit" class="primary" ${problem ? 'disabled' : ''}>${esc(t('join'))}</button></div>
+        </form></details>`;
+}
+
+function bindJoinInspector() {
     $('#join-target').addEventListener('change', event => {
         if (!editSelection.has(event.target.value)) return;
         joinGeneration++;
@@ -1368,18 +1407,20 @@ function renderEditInspector() {
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
+    const wholePlacement = record.models.length ? exhibitParameters(record, 'group', { active: !hardwareSelection.length }) : '';
     const content = `
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId" ${editHelp('floorAssignmentHint')}>${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div>
+        ${!hardwareSelection.length ? wholePlacement : ''}
         <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div></details></div>
         <div id="instance-list">${record.models.map((instance, index) => {
             const asset = hardware.find(item => item.id === instance.model);
-            return `<article class="model-instance ${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index) ? 'active' : ''}">
+            return `<article data-hardware-card="${index}" data-exhibit="${esc(record.id)}" class="model-instance ${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index) ? 'active' : ''}">
                 <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${index}" aria-pressed="${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index)}" ${editHelp('selectHardwareHint')}>${esc(asset?.name || instance.model)}${record.models.filter(item => item.model === instance.model).length > 1 ? `<small>${index + 1}</small>` : ''}</button>
                     <div class="item-actions"><button type="button" class="icon-button" data-duplicate-instance="${index}" aria-label="${esc(t('duplicate') + ': ' + (asset?.name || instance.model))}" ${editHelp('duplicateHardwareHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-remove-instance="${index}" aria-label="${esc(t('remove') + ': ' + (asset?.name || instance.model))}" ${editHelp('removeHardwareHint')}>${icon('trash')}</button></div></div>
-                <details class="instance-placement"><summary ${editHelp('instancePlacementHint')}>${esc(t('placement'))}</summary><label class="sr-only" for="instance-model-${index}">${esc(t('model'))}</label><select id="instance-model-${index}" data-instance-model="${index}" ${editHelp('replaceHardwareHint')}>${options(hardware.map(item => [item.id, item.name]), instance.model)}</select>${vectorFields(instance.transform, `data-instance="${index}"`, index)}</details>
+                <details class="instance-placement" data-hardware-placement="${index}" data-exhibit="${esc(record.id)}" ${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index) ? 'open' : ''}><summary ${editHelp('instancePlacementHint')}>${esc(t('placement'))}</summary><p class="small muted placement-context">${esc(t('relativeToExhibit'))} ${esc(record.name)}</p><label class="sr-only" for="instance-model-${index}">${esc(t('model'))}</label><select id="instance-model-${index}" data-instance-model="${index}" ${editHelp('replaceHardwareHint')}>${options(hardware.map(item => [item.id, item.name]), instance.model)}</select>${vectorFields(instance.transform, `data-instance="${index}"`, index)}</details>
             </article>`;
         }).join('')}</div>
-        ${record.models.length ? `<details class="exhibit-transform"><summary ${editHelp('groupTransformHint')}>${esc(t('exhibitTransform'))}</summary>${vectorFields(record.transform, 'data-group-vector')}</details>` : ''}
+        ${hardwareSelection.length ? wholePlacement : ''}
         ${viewPresets(record)}`;
     $('#structure-slot').innerHTML = `<form id="structure-form" novalidate>${content}<div class="error" id="structure-error" role="alert" hidden></div></form>`;
     const form = $('#structure-form');
@@ -1605,7 +1646,7 @@ function structureError(key, input = null) {
 }
 
 function validEditorFields() {
-    const inputs = [...($('#structure-form')?.querySelectorAll('input') || [])].filter(input => !(input.hasAttribute('data-selection-vector') && !input.value));
+    const inputs = [...($('#structure-form')?.querySelectorAll('input') || [])];
     const invalid = inputs.find(input => !input.checkValidity() || input.type === 'number' && !input.value.trim());
     if (!invalid) return true;
     structureError(invalid.type === 'number' ? 'invalidTransform' : 'invalidInput', invalid);
@@ -1614,10 +1655,28 @@ function validEditorFields() {
 
 function applyEditorField(input) {
     if (!edit || editSave?.saving) return;
-    const record = exhibit();
+    const record = data().exhibits.find(record => record.id === (input.dataset.exhibit || selected));
     if (!record) return;
     if (!input.checkValidity() || input.type === 'number' && !input.value.trim()) {
         structureError('invalidTransform', input);
+        return;
+    }
+    if (input.hasAttribute('data-selection-delta')) {
+        const value = transformNumber(Number(input.value));
+        const neutral = input.dataset.vector === 'scale' ? 1 : 0;
+        if (value === neutral) { input.value = neutral; return; }
+        let preview;
+        try {
+            if (!map) throw Error('mapUnavailable');
+            preview = map.beginSelectionField();
+            const changes = map.previewSelectionField(preview, input.dataset.vector, input.dataset.axis === 'all' ? 'all' : Number(input.dataset.axis), value);
+            commitTransforms(changes);
+            if ($('#structure-error')) $('#structure-error').hidden = true;
+        } catch (error) {
+            if (preview) map.restoreSelectionField(preview);
+            structureError(error.message, input);
+        }
+        input.value = input.dataset.vector === 'scale' ? 1 : 0;
         return;
     }
     if (input.dataset.vector) {
@@ -1651,6 +1710,10 @@ function applyEditorField(input) {
 
 function updateTransformFields(preview = null) {
     $('#structure-form')?.querySelectorAll('[data-vector]').forEach(input => {
+        if (input.hasAttribute('data-selection-delta')) {
+            if (!preview) input.value = input.dataset.vector === 'scale' ? 1 : 0;
+            return;
+        }
         if (input === document.activeElement) return;
         const entries = fieldTargets(input).map(entry => preview?.find(change => change.exhibitId === entry.exhibitId && change.instanceIndex === entry.instanceIndex) || entry);
         if (!entries.length) return;
@@ -1663,13 +1726,42 @@ numberDrag = installNumberDrag($('#inspector'), {
     start(drag) {
         if (!edit || editSave?.saving) return false;
         map?.cancelTransform();
+        if (drag.input.hasAttribute('data-selection-delta')) {
+            try {
+                if (!map) throw Error('mapUnavailable');
+                drag.selectionPreview = map.beginSelectionField();
+                return true;
+            } catch (error) { structureError(error.message, drag.input); return false; }
+        }
         drag.entries = fieldTargets(drag.input).map(entry => ({ ...entry, transform: structuredClone(entry.transform) }));
         return drag.entries.length > 0;
     },
     preview(drag, event) {
-        const key = drag.input.dataset.vector, axis = Number(drag.input.dataset.axis);
+        const key = drag.input.dataset.vector, axis = drag.input.dataset.axis === 'all' ? 'all' : Number(drag.input.dataset.axis);
         const step = key === 'position' ? 1 : key === 'rotation' ? 15 : .1;
         const limit = key === 'scale' ? 1000 : 100000;
+        if (drag.selectionPreview) {
+            let value = (key === 'scale' ? 1 : 0) + drag.delta;
+            if (snap || event.ctrlKey) value = Math.round(value / step) * step;
+            value = Math.max(-limit, Math.min(limit, value));
+            drag.input.value = transformNumber(value);
+            if (transformNumber(value) === (key === 'scale' ? 1 : 0)) {
+                map.restoreSelectionField(drag.selectionPreview);
+                drag.changes = null; drag.error = null;
+                return;
+            }
+            try {
+                drag.changes = map.previewSelectionField(drag.selectionPreview, key, axis, value);
+                drag.error = null;
+                if ($('#structure-error')) $('#structure-error').hidden = true;
+            } catch (error) {
+                drag.error = error.message; drag.changes = null;
+                map.restoreSelectionField(drag.selectionPreview);
+                const element = $('#structure-error');
+                if (element) { element.textContent = t(error.message); element.hidden = false; }
+            }
+            return;
+        }
         drag.changes = drag.entries.map(entry => {
             const transform = structuredClone(entry.transform);
             let value = entry.transform[key][axis] + drag.delta;
@@ -1679,8 +1771,16 @@ numberDrag = installNumberDrag($('#inspector'), {
         });
         map?.previewTransforms(drag.changes); updateTransformFields(drag.changes);
     },
-    commit(drag) { if (drag.changes) commitTransforms(drag.changes); },
-    cancel(drag) { map?.previewTransforms(drag.entries); updateTransformFields(); }
+    commit(drag) {
+        if (drag.error) { map.restoreSelectionField(drag.selectionPreview); structureError(drag.error, drag.input); }
+        else if (drag.changes) commitTransforms(drag.changes);
+        updateTransformFields();
+    },
+    cancel(drag) {
+        if (drag.selectionPreview) map?.restoreSelectionField(drag.selectionPreview);
+        else map?.previewTransforms(drag.entries);
+        updateTransformFields();
+    }
 });
 
 function openExhibitEditor(isNew = false) {
@@ -2247,6 +2347,15 @@ const actions = {
     }
 };
 
+$('#inspector').addEventListener('toggle', event => {
+    const section = event.target;
+    if (!edit || editSave?.saving || !section.isConnected || !section.open) return;
+    if (section.dataset.hardwarePlacement !== undefined) {
+        const id = section.dataset.exhibit, index = Number(section.dataset.hardwarePlacement);
+        if (!hardwareSelection.some(entry => entry.exhibitId === id && entry.instanceIndex === index)) select(id, index, false, true);
+    } else if (section.dataset.exhibitPlacement && hardwareSelection.length) selectParentExhibits([section.dataset.exhibitPlacement]);
+}, true);
+
 document.addEventListener('click', async event => {
     const element = event.target.closest('button,[data-select]');
     if (!element) return;
@@ -2315,8 +2424,10 @@ document.addEventListener('click', async event => {
         if (element.dataset.tool) { setEditTool(element.dataset.tool); return; }
         if (element.dataset.duplicateExhibit) { duplicateSelected(element.dataset.duplicateExhibit); return; }
         if (element.dataset.addHardware) { addHardware(element.dataset.addHardware); return; }
+        if (element.hasAttribute('data-select-parent-exhibits')) { selectParentExhibits([...new Set(hardwareSelection.map(entry => entry.exhibitId))]); return; }
+        if (element.dataset.selectParent) { selectParentExhibits([element.dataset.selectParent]); return; }
         if (element.dataset.editInstance !== undefined) {
-            select(selected, Number(element.dataset.editInstance), event.shiftKey, true); return;
+            select(element.dataset.exhibit || selected, Number(element.dataset.editInstance), event.shiftKey, true); return;
         }
         if (element.dataset.removeInstance !== undefined) { removeHardware(Number(element.dataset.removeInstance)); return; }
         if (element.dataset.duplicateInstance !== undefined) { duplicateHardware(Number(element.dataset.duplicateInstance)); return; }
@@ -2347,7 +2458,7 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         const input = event.target;
         if (event.key === 'Escape') {
-            const value = commonTransform(fieldTargets(input))[input.dataset.vector][Number(input.dataset.axis)];
+            const value = input.hasAttribute('data-selection-delta') ? input.dataset.vector === 'scale' ? 1 : 0 : commonTransform(fieldTargets(input))[input.dataset.vector][Number(input.dataset.axis)];
             input.value = value == null ? '' : transformNumber(value);
         } else {
             applyEditorField(input);

@@ -91,3 +91,30 @@ that was preserved byte-for-byte during the original consolidation.
 Verification: 67 JavaScript tests and seven PHP suites pass. The live inspector
 shows six-decimal values, a typed nine-decimal coordinate rounds on Enter, and
 Undo restores its starting value. The browser test change was not signed/saved.
+
+## Selection inspector update — 12 November 2026
+
+Selecting hardware now opens its matching placement controls automatically. Single
+selections scroll to that component; multiple selections show the shared controls
+first and expand all selected component parameter cards underneath, grouped by
+owning exhibit. Component and whole-exhibit placement are distinct editing scopes.
+Opening the whole-exhibit section switches to parent selection; the multi-hardware
+inspector can select all owning exhibits together. Neutral hardware remains neutral
+when just some of its components are selected.
+
+Multi-selection fields now apply relative movement/rotation and uniform scale
+around the shared geometry center, using the gizmos’ Global/Local orientation.
+They use the existing atomic transform transactions, six-decimal commits, previews,
+cancellation and one-step Undo. Individual fields below remain explicitly scoped
+to their exhibit and component. Multiple-exhibit inspection prioritizes placement;
+joining is a separate collapsed action. Cross-floor selections expose individual
+placement without enabling a shared transform or an invalid join.
+
+Verification: 32 application JavaScript modules and seven PHP files pass syntax
+checks; 73 JavaScript tests and seven PHP suites pass. Browser checks in a
+disposable dataset exercised automatic expansion, three selected components across
+two differently rotated/scaled parents, typed and dragged relative movement,
+uniform scaling, neutral action-field reset, Undo, parent-scope switching, preserved
+child offsets, cross-floor handling, explicit joining and Undo. Desktop and mobile
+inspector layouts were checked; mobile had no horizontal document overflow. These
+UI checks did not save changes to the primary content folders.

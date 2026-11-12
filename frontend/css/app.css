@@ -2684,7 +2684,7 @@ body.editing .exhibit-entry.active .icon-button.danger {
 }
 
 .model-instance.active {
-    box-shadow: 0 1px 2px #23334104, 0 5px 15px #23334109;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--edit-accent) 28%, transparent), 0 5px 15px #23334109;
 }
 
 .instance-header {
@@ -2749,6 +2749,48 @@ body.editing .exhibit-entry.active .icon-button.danger {
 .exhibit-transform > .vector {
     padding-inline: 4px;
 }
+.selection-scope, .selection-owner-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.selection-scope .quiet, .selection-owner-heading .quiet {
+    padding: 4px 0;
+    min-height: 28px;
+    font-size: .75rem;
+}
+.selection-transform {
+    padding: 16px;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px #23334104, 0 5px 15px #23334109;
+    margin-bottom: 20px;
+}
+.selection-transform h2 { font-size: .875rem; margin: 0; }
+.selection-orientation { width: 100px; }
+.selection-orientation .select-button { min-height: 30px; font-size: .75rem; }
+.placement-context { font-size: .75rem; line-height: 1.5; margin: 8px 0 14px; }
+.selection-members > summary, .join-selection > summary {
+    padding: 10px 0;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: .8125rem;
+    font-weight: 500;
+}
+.selection-owner { margin-top: 14px; }
+.selection-owner-heading h3 { font-size: .8125rem; margin: 0; }
+.selection-members .exhibit-transform {
+    background: #fff;
+    border-radius: 8px;
+    padding: 4px 14px 12px;
+}
+.exhibit-hardware-choices { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 14px; }
+.exhibit-hardware-choices .quiet { font-size: .75rem; min-height: 28px; padding: 4px 8px; background: #f3f4f6; }
+.join-selection { border-top: 1px solid #23334112; margin-top: 18px; }
+.join-selection .creation-actions { margin-top: 12px; }
 
 .preset-row {
     display: flex;
@@ -2839,6 +2881,7 @@ body.editing .exhibit-entry.active .icon-button.danger {
     color: var(--muted);
     font-size: 11px;
 }
+.axis-value label svg { display: block; width: 12px; height: 12px; }
 #structure-panel .axis-value input {
     flex: 1;
     width: 0;

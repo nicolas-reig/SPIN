@@ -65,8 +65,15 @@ function sourceScene({ skinned = false, morph = false, instanced = false } = {})
     mesh.position.set(.4, .2, -.7);
     mesh.rotation.x = .2;
     if (skinned) {
+        const count = geometry.attributes.position.count;
+        geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Uint16Array(count * 4), 4));
+        const weights = new Float32Array(count * 4);
+        for (let index = 0; index < count; index++) weights[index * 4] = 1;
+        geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
         const bone = new THREE.Bone();
         scene.add(bone);
+        scene.add(mesh);
+        scene.updateMatrixWorld(true);
         mesh.bind(new THREE.Skeleton([bone]));
     }
     if (morph && !instanced) mesh.morphTargetInfluences[0] = .4;

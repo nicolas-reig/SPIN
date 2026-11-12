@@ -6,7 +6,7 @@ import {
     OrbitControls
 } from 'three/addons/controls/OrbitControls.js';
 import { TransformController } from './transform-controller.js';
-import { transformKey } from './transform-math.js';
+import { transformKey, TransformTransaction, selectionFieldDelta } from './transform-math.js';
 import { coordinateNumber, coordinateVector } from './domain.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -421,7 +421,7 @@ export class MapView {
         for (const [exhibitId, group] of this.objects) {
             for (const [instanceIndex, holder] of group.children.entries()) {
                 const material = hardware.has(transformKey({ exhibitId, instanceIndex })) ? this.materials.editSelection :
-                    this.exhibitMaterial(group.userData.status, this.selection.has(exhibitId));
+                    this.exhibitMaterial(group.userData.status, !this.hardwareSelection.length && this.selection.has(exhibitId));
                 holder.traverse(mesh => { if (mesh.isMesh) mesh.material = material; });
             }
         }
@@ -435,6 +435,26 @@ export class MapView {
     }
     beginTransform(mode) { cancelAnimationFrame(this.cameraFrame); return this.transform?.begin(mode) || false; }
     transformKey(event) { return this.transform?.key(event) || false; }
+    beginSelectionField() {
+        this.cancelTransform();
+        if (this.key !== this.installedKey) throw Error('mapLoading');
+        const entries = this.transformEntries();
+        if (entries.length < 2) throw Error('mapUnavailable');
+        return { transaction: new TransformTransaction(entries), orientation: this.transform.orientation() };
+    }
+    previewSelectionField(preview, key, axis, value) {
+        const changes = preview.transaction.apply(selectionFieldDelta(preview.transaction.center, key, axis, value, preview.orientation));
+        this.boundsDirty = true;
+        this.transform?.update(); this.requestRender();
+        this.onTransformPreview(changes);
+        return changes;
+    }
+    restoreSelectionField(preview) {
+        preview.transaction.restore();
+        this.boundsDirty = true;
+        this.transform?.update(); this.requestRender();
+        this.onTransformPreview(preview.transaction.changes());
+    }
     previewTransforms(changes) {
         for (const { exhibitId, instanceIndex, transform } of changes) {
             const group = this.objects.get(exhibitId);

@@ -115,3 +115,15 @@ export function transformDelta(center, { translation = new Vector3(), rotation =
         .multiply(new Matrix4().makeScale(...scale.toArray())).multiply(basis.clone().invert())
         .multiply(new Matrix4().makeTranslation(...center.clone().negate().toArray()));
 }
+
+export function selectionFieldDelta(center, key, axis, value, orientation = new Quaternion()) {
+    if (key === 'scale' && axis === 'all' && Number.isFinite(value)) return transformDelta(center, { scale: new Vector3().setScalar(value), orientation });
+    if (!['position', 'rotation', 'scale'].includes(key) || !Number.isInteger(axis) || axis < 0 || axis > 2 || !Number.isFinite(value)) throw Error('invalidTransform');
+    const direction = axisVector(['X', 'Y', 'Z'][axis]).applyQuaternion(orientation);
+    return transformDelta(center, {
+        translation: key === 'position' ? direction.multiplyScalar(value) : new Vector3(),
+        rotation: key === 'rotation' ? new Quaternion().setFromAxisAngle(direction, MathUtils.degToRad(value)) : new Quaternion(),
+        scale: key === 'scale' ? new Vector3(1, 1, 1).setComponent(axis, value) : new Vector3(1, 1, 1),
+        orientation
+    });
+}

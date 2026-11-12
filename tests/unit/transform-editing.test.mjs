@@ -9,7 +9,7 @@ registerHooks({
     }
 });
 const { BoxGeometry, Group, Mesh, MeshBasicMaterial, Quaternion, Vector3 } = await import('three');
-const { geometryCenter, selectionCenter, TransformTransaction, transformDelta } = await import('../../frontend/js/transform-math.js');
+const { geometryCenter, selectionCenter, TransformTransaction, transformDelta, selectionFieldDelta } = await import('../../frontend/js/transform-math.js');
 
 const near = (actual, expected) => actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-8, `${actual} != ${expected}`));
 function fixture() {
@@ -124,4 +124,42 @@ test('advanced numeric mode accepts expressions and can switch back to simple in
     input.key({ key: '=', ctrlKey: true });
     assert.equal(input.advanced, false);
     assert.equal(input.key({ key: 'q' }), false);
+});
+
+test('shared inspector movement respects different exhibit parents and preserves component spacing', () => {
+    const first = fixture(), second = fixture();
+    second.parent.position.set(-12, 4, 6); second.parent.rotation.y = -.8; second.parent.scale.setScalar(.5);
+    second.parent.updateMatrixWorld(true);
+    const parents = [first.parent, second.parent].map(object => object.matrix.toArray());
+    const transaction = new TransformTransaction([first.entry, { ...second.entry, exhibitId: 'Other' }]);
+    const before = [first.holder, second.holder].map(geometryCenter);
+    transaction.apply(selectionFieldDelta(transaction.center, 'position', 0, 2));
+    for (const [index, object] of [first.holder, second.holder].entries()) near(geometryCenter(object).toArray(), before[index].clone().add(new Vector3(2, 0, 0)).toArray());
+    assert.deepEqual([first.parent, second.parent].map(object => object.matrix.toArray()), parents);
+    transaction.restore();
+    [first.holder, second.holder].forEach((object, index) => near(geometryCenter(object).toArray(), before[index].toArray()));
+});
+
+test('whole-exhibit selection rotates parent groups and retains every local component placement', () => {
+    const first = fixture(), second = fixture(); second.parent.position.x += 20;
+    const locals = [first.holder, second.holder].map(object => object.position.toArray());
+    const transaction = new TransformTransaction([{ exhibitId: 'A', object: first.parent }, { exhibitId: 'B', object: second.parent }]);
+    const distance = geometryCenter(first.parent).distanceTo(geometryCenter(second.parent));
+    transaction.apply(selectionFieldDelta(transaction.center, 'rotation', 1, 45));
+    assert.deepEqual([first.holder, second.holder].map(object => object.position.toArray()), locals);
+    assert.ok(Math.abs(geometryCenter(first.parent).distanceTo(geometryCenter(second.parent)) - distance) < 1e-8);
+    assert.ok(transaction.changes().every(change => change.instanceIndex === undefined));
+    transaction.restore();
+});
+
+test('shared uniform scaling resizes differently rotated components around the same center', () => {
+    const first = fixture(), second = fixture();
+    second.parent.position.x += 20; second.parent.rotation.y = -.9; second.holder.rotation.y = .4;
+    const transaction = new TransformTransaction([first.entry, { ...second.entry, exhibitId: 'Other' }]);
+    const before = geometryCenter(first.holder).distanceTo(geometryCenter(second.holder));
+    transaction.apply(selectionFieldDelta(transaction.center, 'scale', 'all', 2));
+    assert.ok(Math.abs(geometryCenter(first.holder).distanceTo(geometryCenter(second.holder)) - before * 2) < 1e-8);
+    near(first.holder.scale.toArray(), [2, 2, 2]);
+    near(second.holder.scale.toArray(), [2, 2, 2]);
+    transaction.restore();
 });

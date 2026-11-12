@@ -33,14 +33,17 @@ export function disposeMaterials(materials, keepMaterials = new Set()) {
 
 export function replaceMaterials(object, material) {
     const originals = new Set();
-    object.traverse(mesh => {
-        if (!mesh.isMesh) return;
-        for (const original of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-            if (original && original !== material) originals.add(original);
+    const keptMaterials = new Set([material]);
+    object.traverse(node => {
+        for (const original of Array.isArray(node.material) ? node.material : [node.material]) {
+            if (!original) continue;
+            if (!node.isMesh) keptMaterials.add(original);
+            else if (original !== material) originals.add(original);
         }
-        mesh.material = material;
+        if (node.isMesh) node.material = material;
     });
-    disposeMaterials(originals, [material]);
+    // Supplemental Points and Lines retain their imported materials and sources.
+    disposeMaterials(originals, keptMaterials);
 }
 
 export function dispose(object, keepMaterials = new Set()) {

@@ -1,8 +1,31 @@
+export function updateNumberFill(input) {
+    const field = input.closest('.axis-value');
+    if (!field) return;
+    // Visual soft ranges keep ordinary placements legible without changing the
+    // existing editable limits. Zero sits in the middle for signed values.
+    const radius = input.dataset.vector === 'position' ? input.hasAttribute('data-selection-delta') ? 10 : 100 :
+        input.dataset.vector === 'rotation' ? 180 : 2;
+    const value = input.value === '' ? NaN : Number(input.value);
+    const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, (value + radius) / (2 * radius) * 100)) : 0;
+    const fill = Number(percent.toFixed(4)) + '%';
+    if (field.style.getPropertyValue('--number-fill') !== fill) field.style.setProperty('--number-fill', fill);
+}
+
+export function updateNumberFills(root) {
+    root?.querySelectorAll('input[data-vector]').forEach(updateNumberFill);
+}
+
 // Click to type as usual; a horizontal drag previews without changing history.
 export function installNumberDrag(root, { start, preview, commit, cancel }) {
     const abort = new AbortController();
     let pending = null, suppressClick = false;
     const listen = (target, type, callback) => target.addEventListener(type, callback, { signal: abort.signal });
+    const fills = new MutationObserver(() => updateNumberFills(root));
+    fills.observe(root, { childList: true, subtree: true });
+    updateNumberFills(root);
+    for (const type of ['input', 'change']) listen(root, type, event => {
+        if (event.target.matches('input[data-vector]')) updateNumberFill(event.target);
+    });
     const finish = accept => {
         if (!pending) return;
         const drag = pending; pending = null;
@@ -35,6 +58,7 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
         drag.delta += (event.clientX - drag.lastX) * step * (event.shiftKey ? .1 : 1);
         drag.lastX = event.clientX;
         preview(drag, event);
+        updateNumberFills(root);
     });
     listen(window, 'pointerup', event => { if (pending?.pointerId === event.pointerId) finish(true); });
     listen(window, 'pointercancel', () => finish(false));
@@ -47,7 +71,7 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
     root.addEventListener('click', event => {
         if (suppressClick) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, { capture: true, signal: abort.signal });
-    const dispose = () => { finish(false); abort.abort(); };
+    const dispose = () => { finish(false); abort.abort(); fills.disconnect(); };
     dispose.cancel = () => finish(false);
     return dispose;
 }

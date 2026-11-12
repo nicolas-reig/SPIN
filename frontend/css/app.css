@@ -2866,11 +2866,27 @@ body.editing .exhibit-entry.active .icon-button.danger {
 #structure-panel .vector h3 { margin: 0; padding-top: 8px; }
 .axis-values { display: grid; gap: 2px; min-width: 0; }
 .axis-value {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
     display: flex;
     align-items: center;
     background: #f3f4f6;
     border-radius: 4px;
     min-width: 0;
+}
+.axis-value::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--number-fill, 0%);
+    background: color-mix(in srgb, var(--edit-accent) 6%, #e0e3e8);
+    box-shadow: inset -1px 0 1px #23334118;
+    pointer-events: none;
+    z-index: -1;
+}
+.axis-value:hover::before {
+    background: color-mix(in srgb, var(--edit-accent) 10%, #dadee5);
 }
 .axis-value label {
     width: 29px;

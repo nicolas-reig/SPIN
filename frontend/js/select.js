@@ -60,6 +60,7 @@ function openPopover(details) {
     const top = beside ? Math.min(rect.top, innerHeight - height - 12) : above ? rect.top - height - 6 : rect.bottom + 6;
     menu.style.left = Math.max(12, Math.min(innerWidth - width - 12, left)) + 'px';
     menu.style.top = Math.max(12, top) + 'px';
+    menu.style.transformOrigin = beside ? (left > rect.left ? 'left top' : 'right top') : above ? 'right bottom' : 'right top';
     menu.style.bottom = 'auto';
     menu.style.right = 'auto';
     summary.setAttribute('aria-expanded', 'true');
@@ -134,6 +135,7 @@ function enhance(select) {
         const above = availableBelow < Math.min(menu.scrollHeight, 230) && rect.top > availableBelow;
         menu.style.maxHeight = Math.max(80, Math.min(320, above ? rect.top - 18 : availableBelow)) + 'px';
         menu.style.top = (above ? rect.top - Math.min(menu.scrollHeight, parseFloat(menu.style.maxHeight)) - 6 : rect.bottom + 6) + 'px';
+        menu.style.transformOrigin = above ? 'left bottom' : 'left top';
         options.find(item => item.getAttribute('aria-selected') === 'true')?.focus();
         let prefix = '', timer;
         menu.addEventListener('keydown', event => {

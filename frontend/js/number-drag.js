@@ -6,6 +6,9 @@ export function updateNumberFill(input) {
     const radius = input.dataset.vector === 'position' ? input.hasAttribute('data-selection-delta') ? 10 : 100 :
         input.dataset.vector === 'rotation' ? 180 : 2;
     const value = input.value === '' ? NaN : Number(input.value);
+    // An unfinished sign or decimal has no numeric value yet. Keep the last
+    // fill while typing rather than flashing the track back to empty.
+    if (!Number.isFinite(value) && input.matches(':focus')) return;
     const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, (value + radius) / (2 * radius) * 100)) : 0;
     const fill = Number(percent.toFixed(4)) + '%';
     if (field.style.getPropertyValue('--number-fill') !== fill) field.style.setProperty('--number-fill', fill);
@@ -36,6 +39,7 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
             setTimeout(() => { suppressClick = false; }, 0);
         }
         document.body.classList.remove('dragging-number');
+        updateNumberFills(root);
     };
     listen(root, 'pointerdown', event => {
         const input = event.target.closest('input[data-vector]') || event.target.closest('label[data-number-drag]')?.control;
@@ -47,11 +51,14 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
         if (!drag || event.pointerId !== drag.pointerId) return;
         if (!drag.started && Math.abs(event.clientX - drag.x) < 4) return;
         if (!drag.started) {
+            // Blur commits any typed edit before the drag captures its baseline.
+            drag.input.blur();
+            if (pending !== drag) return;
+            if (!drag.input.isConnected) { pending = null; return; }
             drag.started = true;
             if (start(drag) === false) { pending = null; return; }
             drag.input.setPointerCapture(event.pointerId);
             document.body.classList.add('dragging-number');
-            drag.input.blur();
         }
         event.preventDefault(); getSelection()?.removeAllRanges();
         const step = { position: .01, rotation: .5, scale: .01 }[drag.input.dataset.vector];

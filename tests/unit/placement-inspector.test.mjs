@@ -25,6 +25,30 @@ test('edit parameter menus keep help in tooltips without visible explanatory par
     assert.match(html, /aria-description=/);
 });
 
+test('a single-component exhibit goes directly to its component parameters without whole-exhibit controls', () => {
+    const solo = { ...record('Solo'), floorId: '1' }; solo.models = solo.models.slice(0, 1);
+    const data = { exhibits: [solo] }, entry = { exhibitId: 'Solo', instanceIndex: 0 };
+    assert.deepEqual(wholeHardwareSelection(new Set(['Solo']), [], data), [entry]);
+    const picked = pickHardwareSelection(new Set(), [], data, '1', { ...entry, viewport: true });
+    assert.deepEqual(picked.hardware, [entry]);
+    assert.equal(exhibitParameters(solo, 'group', { active: true }), '');
+    const html = hardwareParameters(solo, 0, assets, 'component', { editable: true });
+    assert.match(html, /data-hardware-placement="0" data-exhibit="Solo" open/);
+    assert.equal([...html.matchAll(/<input\b/g)].length, 9);
+    assert.doesNotMatch(html, /data-group-vector|data-exhibit-placement|data-selection-placement/);
+    const deselected = pickHardwareSelection(picked.exhibits, picked.hardware, data, '1', { ...entry, extend: true });
+    assert.equal(deselected.exhibits.size, 0); assert.deepEqual(deselected.hardware, []);
+});
+
+test('single-component simplification preserves whole-exhibit behavior for multiple owners', () => {
+    const solo = { ...record('Solo'), floorId: '1' }; solo.models = solo.models.slice(0, 1);
+    const many = { ...record('Many'), floorId: '1' }, data = { exhibits: [solo, many] };
+    const first = pickHardwareSelection(new Set(), [], data, '1', { exhibitId: 'Solo', instanceIndex: 0, viewport: true });
+    const multiple = pickHardwareSelection(first.exhibits, first.hardware, data, '1', { exhibitId: 'Many', instanceIndex: 1, viewport: true, extend: true });
+    assert.deepEqual([...multiple.exhibits], ['Solo', 'Many']); assert.deepEqual(multiple.hardware, []);
+    assert.match(exhibitParameters(many, 'group', { active: true }), /data-exhibit-placement="Many" open/);
+});
+
 test('selected component parameters expand and retain their owning exhibit across multiple selections', () => {
     const a = hardwareParameters(record('Alpha'), 1, assets, 'member-0-1');
     const b = hardwareParameters(record('Beta'), 1, assets, 'member-1-1');

@@ -10,6 +10,10 @@ export function expandExhibitSelection(exhibits, data, floorId) {
 }
 
 export function wholeHardwareSelection(exhibits, hardware, data) {
+    if (exhibits.size === 1) {
+        const record = data.exhibits.find(record => exhibits.has(record.id));
+        if (record?.models.length === 1) return [{ exhibitId: record.id, instanceIndex: 0 }];
+    }
     if (!hardware.length || !exhibits.size) return hardware;
     const keys = new Set(hardware.map(hardwareKey));
     return [...exhibits].every(id => {

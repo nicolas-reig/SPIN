@@ -26,6 +26,7 @@ export function hardwareParameters(record, instanceIndex, assets, scope, { selec
 }
 
 export function exhibitParameters(record, scope, { active = false, showName = false, hardware = false, assets = [], placement = record.transform, unavailableHint = 'mapLoading' } = {}) {
+    if (record.models.length < 2) return '';
     return `<details class="exhibit-transform ${active ? 'active' : ''}" data-exhibit-placement="${esc(record.id)}" ${active ? 'open' : ''}>
         <summary ${editHelp('wholeExhibitHint')}>${esc(showName ? record.name : t('exhibitTransform'))}</summary>
         ${!placement ? `<p class="small muted" data-placement-loading>${esc(t(unavailableHint))}</p>` : ''}

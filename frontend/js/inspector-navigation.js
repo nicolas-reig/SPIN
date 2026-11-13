@@ -45,7 +45,8 @@ export class InspectorNavigation {
             ? sections.find(section => section.hasAttribute('data-selection-placement'))
             : hardware.length === 1
                 ? sections.find(section => section.dataset.exhibit === hardware[0].exhibitId && section.dataset.hardwarePlacement === String(hardware[0].instanceIndex))
-                : sections.find(section => section.dataset.exhibitPlacement === [...exhibits][0]);
+                : sections.find(section => section.dataset.exhibitPlacement === [...exhibits][0]) ||
+                    sections.find(section => section.dataset.exhibit === [...exhibits][0] && section.dataset.hardwarePlacement === '0');
         this.pending = null;
         cancelAnimationFrame(this.frame);
         this.frame = null;

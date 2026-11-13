@@ -61,6 +61,13 @@ test('selecting hardware opens only its own sliders and scrolls its card within 
     paint(); assert.equal(panel.scrollTop, 546, 'the final alignment does not accumulate scroll');
 });
 
+test('an exhibit without a whole-placement menu opens its sole component directly', () => {
+    const { panel, menus, navigation } = setup();
+    delete menus.whole; delete menus.second;
+    navigation.update(new Set(['Alpha']), []); paint();
+    assert.deepEqual(openMenus(menus), ['first']); assert.equal(panel.scrollTop, 246);
+});
+
 test('multi-component and multi-exhibit selections open only the shared transform menu', () => {
     for (const [exhibits, entries] of [
         [new Set(['Alpha']), hardware(0, 1)],

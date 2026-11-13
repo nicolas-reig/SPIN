@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { matchesExhibitGroup } from '../../frontend/js/exhibit-groups.js';
 
 const source = await readFile(new URL('../../frontend/js/app.js', import.meta.url), 'utf8');
 const refreshSource = source.slice(source.indexOf('let fileRefreshInFlight = false;'), source.indexOf('\nsetInterval(refreshFromFiles'));
@@ -86,21 +87,24 @@ test('failed refreshes release the request gate and blocked states do not issue 
     assert.equal(h.accepted.length, 1);
 });
 
-test('empty searches keep floor and status filtering without reading post bodies', () => {
+test('empty searches combine floor, group and status filters without reading post bodies', () => {
     const start = source.indexOf('    const records = data().exhibits.filter(e => {', source.indexOf('function renderList()'));
     const end = source.indexOf('\n    const filtered =', start);
     const searchSource = source.slice(start, end);
-    const search = new Function('records', 'q', 'floorFilter', 'appliedStatusFilter', 'scope', `
+    const search = new Function('matchesExhibitGroup', 'records', 'q', 'floorFilter', 'appliedStatusFilter', 'scope', 'groupFilter = null', `
         const data = () => ({ exhibits: records });
         const lang = () => 'en';
         ${searchSource.replace('const records =', 'const result =')}
         return result;
-    `);
+    `).bind(null, matchesExhibitGroup);
     const records = [
-        { id: 'Alpha', floorId: '-7', placed: true, status: 'ok', get notes() { throw Error('unneeded post allocation'); } },
-        { id: 'Beta', floorId: '13', placed: true, status: 'problem' },
-        { id: 'Gamma', floorId: null, placed: false, status: 'ok' }
+        { id: 'Alpha', name: 'Pic-Alpha', floorId: '-7', placed: true, status: 'ok', get notes() { throw Error('unneeded post allocation'); } },
+        { id: 'Beta', name: 'Mini-Beta', floorId: '13', placed: true, status: 'problem' },
+        { id: 'Gamma', name: 'Gamma', floorId: null, placed: false, status: 'ok' }
     ];
     assert.deepEqual(search(records, '', '-7', 'ok', 'notes').map(record => record.id), ['Alpha']);
     assert.deepEqual(search(records, '', 'unplaced', '', 'notes').map(record => record.id), ['Gamma']);
+    assert.deepEqual(search(records, '', '-7', 'ok', 'notes', 'pic').map(record => record.id), ['Alpha']);
+    assert.deepEqual(search(records, '', '-7', 'ok', 'notes', 'mini'), []);
+    assert.deepEqual(search(records, '', '', 'ok', 'notes', '').map(record => record.id), ['Gamma']);
 });

@@ -36,6 +36,7 @@ import { hardwareParameters, exhibitParameters, selectionParameters } from './pl
 import { InspectorNavigation } from './inspector-navigation.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
+import { exhibitGroupKey, groupExhibits, matchesExhibitGroup, ExhibitGroupState } from './exhibit-groups.js';
 let noteEditor = null;
 installSelects();
 installControlMotion();
@@ -45,6 +46,7 @@ const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspecto
     sidebar: $('#sidebar'), editbar: $('#editbar'), underlays: $('#inspector-underlays')
 });
 const inspectorNavigation = new InspectorNavigation($('#inspector'));
+const exhibitGroupState = new ExhibitGroupState();
 let snapshot = null,
     selected = null,
     floorId = '0',
@@ -59,6 +61,7 @@ let snapshot = null,
     query = '',
     scope = 'name',
     floorFilter = '',
+    groupFilter = null,
     statusFilter = '',
     statusSaving = false,
     mapMode = 'top',
@@ -394,9 +397,23 @@ function renderHeader() {
     $('#header').innerHTML = '';
 }
 
+function renderGroupFilter(groups) {
+    const slot = $('#group-filter-slot');
+    if (!slot) return;
+    if (groupFilter !== null && !groups.some(group => group.key === groupFilter)) groupFilter = null;
+    const version = JSON.stringify([lang(), groups.map(group => [group.key, group.name])]);
+    if (slot.dataset.options === version) return;
+    slot.dataset.options = version;
+    slot.innerHTML = `<select id="group-filter">${options([['null', t('allGroups')], ...groups.map(group => [JSON.stringify(group.key), group.name || t('ungrouped')])], JSON.stringify(groupFilter))}</select>`;
+    $('#group-filter').addEventListener('change', event => {
+        try { groupFilter = JSON.parse(event.target.value); } catch { groupFilter = null; }
+        renderList();
+    });
+}
+
 function renderSidebar() {
     const appliedStatusFilter = edit ? '' : statusFilter;
-    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'name');
+    const filtered = Boolean(query || floorFilter || groupFilter !== null || appliedStatusFilter || scope !== 'name');
     const frows = [
         ['', t('allFloors')], ...data().floors.map(f => [f.id, f.names[lang()]]),
         ['unplaced', t('unplacedShort')]
@@ -416,6 +433,8 @@ function renderSidebar() {
                     <select id="scope">${options(['name', 'notes', 'documentation'].map(x => [x, t(x)]), scope)}</select>
                     <label for="floor-filter">${esc(t('floor'))}</label>
                     <select id="floor-filter">${options(frows, floorFilter)}</select>
+                    <label for="group-filter">${esc(t('exhibitGroup'))}</label>
+                    <div id="group-filter-slot"></div>
                     ${edit ? '' : `<label for="status-filter">${esc(t('status'))}</label>
                     <select id="status-filter">${options([['', t('allStatuses')], ...STATUSES.map(x => [x, t(x)])], statusFilter)}</select>`}
                     ${button('clear', 'clear', 'quiet')}
@@ -494,7 +513,8 @@ function fitSidebar() {
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
         // Reserve row padding, action or status space, and a scrollbar gutter.
-        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16);
+        const groupIndent = data().exhibits.some(record => exhibitGroupKey(record.name)) ? 16 : 0;
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16 + groupIndent);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }
@@ -503,20 +523,29 @@ window.addEventListener('resize', fitSidebar, { passive: true });
 document.fonts.ready.then(fitSidebar);
 
 function renderList() {
+    const groups = groupExhibits(data().exhibits, lang());
+    renderGroupFilter(groups);
     const q = query.trim().toLocaleLowerCase(lang());
     const appliedStatusFilter = edit ? '' : statusFilter;
     const records = data().exhibits.filter(e => {
         const matchesFloor = !floorFilter || (floorFilter === 'unplaced' ? !e.placed : e.floorId === floorFilter);
-        if (!matchesFloor || appliedStatusFilter && e.status !== appliedStatusFilter) return false;
+        if (!matchesFloor || !matchesExhibitGroup(e.name, groupFilter) || appliedStatusFilter && e.status !== appliedStatusFilter) return false;
         if (!q) return true;
         const text = scope === 'notes' ? e.notes.filter(n => !n.deleted).map(n => n.body).join(' ') : scope === 'documentation' ? e.links.map(l => l.title + ' ' + l.url).join(' ') : e.name;
         return text.toLocaleLowerCase(lang()).includes(q);
     });
-    const filtered = Boolean(query || floorFilter || appliedStatusFilter || scope !== 'name');
+    const filtered = Boolean(query || floorFilter || groupFilter !== null || appliedStatusFilter || scope !== 'name');
+    exhibitGroupState.setFilter(filtered ? JSON.stringify([q, scope, floorFilter, groupFilter, appliedStatusFilter]) : '');
+    exhibitGroupState.reveal(data().exhibits.filter(record => isSelected(record.id)));
     $('.active-filters').hidden = !filtered;
+    const filterButton = $('#sidebar .filter-menu > summary');
+    filterButton.classList.toggle('active', filtered);
+    if (filtered && !filterButton.querySelector('.filter-dot')) filterButton.insertAdjacentHTML('beforeend', '<i class="filter-dot"></i>');
+    if (!filtered) filterButton.querySelector('.filter-dot')?.remove();
     const floorDescription = floorFilter === 'unplaced' ? t('unplacedShort') : floorFilter ? titleFloor(floorFilter) : '';
-    $('#filter-description').textContent = [scope !== 'name' ? t(scope) : '', floorDescription, appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
-    $('#exhibit-list').innerHTML = records.length ? records.map(e => {
+    const groupDescription = groupFilter !== null ? groups.find(group => group.key === groupFilter)?.name || t('ungrouped') : '';
+    $('#filter-description').textContent = [scope !== 'name' ? t(scope) : '', floorDescription, groupDescription, appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
+    const row = e => {
         const details = [titleFloor(e.floorId)];
         if (!e.placed) details.push(t('unplaced'));
         else if (!edit) details.push(t(e.status));
@@ -531,6 +560,13 @@ function renderList() {
             <span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>
             ${exhibitLabel(e)}
         </button></div>`;
+    };
+    $('#exhibit-list').innerHTML = records.length ? groupExhibits(records, lang()).map(group => {
+        const members = group.records.map(row).join('');
+        if (!group.key) return members;
+        return `<details class="exhibit-group" data-exhibit-group="${esc(group.key)}" ${exhibitGroupState.isOpen(group.key) ? 'open' : ''}>
+            <summary data-group-toggle data-disclosure="true">${icon('chevron-right', 'disclosure-icon')}<span class="exhibit-group-label">${esc(group.name)}</span><span class="exhibit-group-count">${group.records.length}</span></summary>
+            <div class="exhibit-group-members">${members}</div></details>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
     fitSidebar();
 }
@@ -2356,6 +2392,7 @@ const actions = {
     clear: () => {
         query = '';
         floorFilter = '';
+        groupFilter = null;
         if (!edit) statusFilter = '';
         scope = 'name';
         renderSidebar();
@@ -2388,6 +2425,15 @@ $('#inspector').addEventListener('toggle', event => {
 }, true);
 
 document.addEventListener('click', async event => {
+    const groupHeading = event.target.closest('#exhibit-list summary[data-group-toggle]');
+    if (groupHeading) {
+        event.preventDefault();
+        if (editSave?.saving) return;
+        const section = groupHeading.parentElement;
+        section.open = !section.open;
+        exhibitGroupState.setOpen(section.dataset.exhibitGroup, section.open);
+        return;
+    }
     const element = event.target.closest('button,[data-select]');
     if (!element) return;
     const origin = element.closest('#sidebar, #editbar') ? 'sidebar' : element.closest('#inspector') ? 'inspector' : 'other';

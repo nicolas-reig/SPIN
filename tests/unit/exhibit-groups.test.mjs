@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { exhibitGroup, exhibitGroupKey, groupExhibits, ExhibitGroupState } from '../../frontend/js/exhibit-groups.js';
+import { exhibitGroup, exhibitGroupKey, groupExhibits, matchesExhibitGroup, ExhibitGroupState } from '../../frontend/js/exhibit-groups.js';
 
 const record = name => ({ id: name, name });
 
@@ -10,6 +10,15 @@ test('groups use the first hyphen while names without a complete prefix remain u
         assert.equal(exhibitGroup(name), expected);
     }
     assert.equal(exhibitGroupKey('PÍC-Station'), exhibitGroupKey('pi\u0301c-Other'));
+});
+
+test('group filters distinguish all groups, a named group and optional ungrouped exhibits', () => {
+    const records = ['Pic-Station 5', 'Mini-AR', 'Station 5'].map(record);
+    assert.equal(records.filter(record => matchesExhibitGroup(record.name, null)).length, 3);
+    assert.deepEqual(records.filter(record => matchesExhibitGroup(record.name, 'pic')).map(record => record.name), ['Pic-Station 5']);
+    assert.deepEqual(records.filter(record => matchesExhibitGroup(record.name, '')).map(record => record.name), ['Station 5']);
+    assert.equal(matchesExhibitGroup('PIC-Station 2', 'pic'), true);
+    assert.notEqual(JSON.stringify(null), JSON.stringify(''));
 });
 
 test('grouped sections keep full names, references and IDs intact, with natural ordering and ungrouped rows last', () => {
@@ -29,7 +38,14 @@ test('search can reveal matching groups temporarily without changing the collaps
     const state = new ExhibitGroupState();
     state.setOpen('pic', false);
     assert.equal(state.isOpen('pic'), false);
-    assert.equal(state.isOpen('pic', true), true);
+    state.setFilter('Pic');
+    assert.equal(state.isOpen('pic'), true);
+    state.setOpen('pic', false);
+    state.setFilter('Pic');
+    assert.equal(state.isOpen('pic'), false);
+    state.setFilter('Station');
+    assert.equal(state.isOpen('pic'), true);
+    state.setFilter('');
     assert.equal(state.isOpen('pic'), false);
     state.setOpen('pic', true); assert.equal(state.isOpen('pic'), true);
 });

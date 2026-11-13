@@ -114,3 +114,12 @@ test('a blur that rebuilds the inspector abandons the detached input before star
     assert.equal(starts, 0); assert.equal(f.input.hasPointerCapture(1), false);
     assert.equal(f.classes.has('dragging-number'), false); f.dispose();
 });
+
+test('disabled or read-only numeric controls cannot start a drag', () => {
+    for (const property of ['disabled', 'readOnly']) {
+        let starts = 0;
+        const f = setup({ start() { starts++; } }); f.input[property] = true;
+        f.pointer('pointerdown'); f.pointer('pointermove', 100); f.pointer('pointerup', 100);
+        assert.equal(starts, 0); assert.equal(f.classes.has('dragging-number'), false); f.dispose();
+    }
+});

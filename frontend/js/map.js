@@ -6,7 +6,7 @@ import {
     OrbitControls
 } from 'three/addons/controls/OrbitControls.js';
 import { TransformController } from './transform-controller.js';
-import { transformKey, TransformTransaction, selectionFieldDelta } from './transform-math.js';
+import { transformKey, geometryCenter, exhibitPlacement, ExhibitPlacementTransaction, TransformTransaction, selectionFieldDelta } from './transform-math.js';
 import { coordinateNumber, coordinateVector } from './domain.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -352,6 +352,7 @@ export class MapView {
                 if (!exhibit.models.length) continue;
                 const group = new THREE.Group();
                 group.userData.exhibitId = exhibit.id;
+                group.userData.exhibitPlacement = true;
                 group.userData.status = exhibit.status;
                 applyTransform(group, exhibit.transform);
                 next.add(group);
@@ -362,7 +363,10 @@ export class MapView {
                     applyTransform(holder, instance.transform);
                     group.add(holder);
                     const model = await loadModel(assets.get(instance.model), this.exhibitMaterial(exhibit.status));
-                    if (model) holder.add(model);
+                    if (model) {
+                        holder.userData.placementCenter = geometryCenter(model).toArray();
+                        holder.add(model);
+                    }
                     if (generation !== this.generation) {
                         dispose(next, this.sharedMaterials);
                         return;
@@ -438,6 +442,25 @@ export class MapView {
     }
     beginTransform(mode) { cancelAnimationFrame(this.cameraFrame); return this.transform?.begin(mode) || false; }
     transformKey(event) { return this.transform?.key(event) || false; }
+    exhibitPlacement(id) {
+        const group = this.objects.get(id);
+        return group?.children.length && this.key === this.installedKey ? exhibitPlacement(group) : null;
+    }
+    beginExhibitPlacement(id) {
+        this.cancelTransform();
+        if (this.key !== this.installedKey) throw Error('mapLoading');
+        const group = this.objects.get(id);
+        if (!group?.children.length) throw Error('mapUnavailable');
+        const transaction = new ExhibitPlacementTransaction(id, group);
+        return { transaction, placement: transaction.placement };
+    }
+    previewExhibitPlacement(preview, key, axis, value) {
+        const changes = preview.transaction.field(key, axis, value);
+        this.boundsDirty = true;
+        this.transform?.update(); this.requestRender();
+        this.onTransformPreview(changes);
+        return changes;
+    }
     beginSelectionField() {
         this.cancelTransform();
         if (this.key !== this.installedKey) throw Error('mapLoading');

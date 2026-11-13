@@ -43,7 +43,7 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
     };
     listen(root, 'pointerdown', event => {
         const input = event.target.closest('input[data-vector]') || event.target.closest('label[data-number-drag]')?.control;
-        if (!input || event.button !== 0) return;
+        if (!input || input.disabled || input.readOnly || event.button !== 0) return;
         pending = { input, x: event.clientX, lastX: event.clientX, delta: 0, pointerId: event.pointerId, started: false };
     });
     listen(window, 'pointermove', event => {

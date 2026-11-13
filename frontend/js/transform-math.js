@@ -6,8 +6,30 @@ export const axisVector = axis => new Vector3(...({ X: [1, 0, 0], Y: [0, 1, 0], 
 
 export function geometryCenter(object) {
     object.updateWorldMatrix(true, true);
+    if (object.userData.exhibitPlacement) return componentMedian(object).applyMatrix4(object.matrixWorld);
+    if (object.userData.placementCenter) return new Vector3(...object.userData.placementCenter).applyMatrix4(object.matrixWorld);
     const box = new Box3().setFromObject(object, true);
     return box.isEmpty() ? object.getWorldPosition(new Vector3()) : box.getCenter(new Vector3());
+}
+
+// Component centers have equal weight, as in Blender's median-point pivot.
+// Work in exhibit coordinates so zero/mirrored scales need no matrix inverse.
+export function componentMedian(group) {
+    const center = new Vector3();
+    for (const holder of group.children) {
+        holder.updateMatrix();
+        center.add(new Vector3(...(holder.userData.placementCenter || [0, 0, 0])).applyMatrix4(holder.matrix));
+    }
+    return group.children.length ? center.divideScalar(group.children.length) : center;
+}
+
+export function exhibitPlacement(group) {
+    group.updateMatrix();
+    return normalizeTransform({
+        position: componentMedian(group).applyMatrix4(group.matrix).toArray(),
+        rotation: [group.rotation.x, group.rotation.y, group.rotation.z].map(MathUtils.radToDeg),
+        scale: group.scale.toArray()
+    });
 }
 
 export function selectionCenter(entries) {
@@ -105,6 +127,32 @@ export class TransformTransaction {
         for (const { object, position, quaternion, scale } of this.entries) {
             object.position.copy(position); object.quaternion.copy(quaternion); object.scale.copy(scale); object.updateMatrixWorld(true);
         }
+    }
+}
+
+export class ExhibitPlacementTransaction extends TransformTransaction {
+    constructor(exhibitId, group) {
+        super([{ exhibitId, object: group }]);
+        this.pivot = componentMedian(group);
+        this.placement = exhibitPlacement(group);
+        this.anchor = new Vector3(...this.placement.position);
+    }
+
+    field(key, axis, value) {
+        if (!['position', 'rotation', 'scale'].includes(key) || !Number.isInteger(axis) || axis < 0 || axis > 2 || !Number.isFinite(value)) throw Error('invalidTransform');
+        const next = structuredClone(this.placement);
+        next.position = this.anchor.toArray();
+        next[key][axis] = value;
+        const quaternion = new Quaternion().setFromEuler(new Euler(...next.rotation.map(MathUtils.degToRad), 'XYZ'));
+        const offset = this.pivot.clone().multiply(new Vector3(...next.scale)).applyQuaternion(quaternion);
+        const transform = normalizeTransform({ ...next, position: new Vector3(...next.position).sub(offset).toArray() });
+        if (!validTransform(transform)) throw Error('invalidTransform');
+        const group = this.entries[0].object;
+        group.position.fromArray(transform.position);
+        group.rotation.set(...transform.rotation.map(MathUtils.degToRad));
+        group.scale.fromArray(transform.scale);
+        group.updateMatrixWorld(true);
+        return this.changes();
     }
 }
 

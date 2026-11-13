@@ -27,6 +27,17 @@ test('whole-exhibit fields are explicitly scoped and can expose hardware selecti
     assert.doesNotMatch(contextual, /data-exhibit-placement="Alpha" open/);
 });
 
+test('whole-placement menus display the derived center and wait for geometry instead of showing the parent origin', () => {
+    const original = record('Alpha'); original.transform.position = [80, 90, 100];
+    const placement = { ...identity(), position: [2, 3, 4] };
+    const ready = exhibitParameters(original, 'group', { placement });
+    assert.match(ready, /id="transform-group-position-0"[^>]*value="2"/);
+    assert.doesNotMatch(ready, /value="80"|data-placement-loading| disabled /);
+    const pending = exhibitParameters(original, 'group', { placement: null });
+    assert.match(pending, /data-placement-loading/);
+    assert.match(pending, /id="transform-group-position-0"[^>]*disabled[^>]*value=""/);
+});
+
 test('whole-exhibit selection marks every component selected while explicit component selection leaves its siblings unselected', () => {
     const exhibits = new Set(['Alpha']), hardware = [{ exhibitId: 'Alpha', instanceIndex: 1 }];
     assert.equal(hardwareSelected('Alpha', 0, exhibits, []), true);

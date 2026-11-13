@@ -21,6 +21,7 @@ globalThis.cancelAnimationFrame = () => {};
 
 const THREE = await import('three');
 const { MapView } = await import('../../frontend/js/map.js');
+const { geometryCenter } = await import('../../frontend/js/transform-math.js');
 
 function disposals(resource) {
     let count = 0;
@@ -149,6 +150,28 @@ test('actual setData loads and smooths a repeated unskinned asset once, with sep
     assert.equal(first.children[1].position.x, 2);
     assert.equal(second.children[0].position.x, 0);
     view.destroy();
+});
+
+test('whole placement derives from loaded component centers and follows component edits before moving all hardware together', async () => {
+    const { view } = makeView(); const data = dataset(6);
+    await view.setData(data, 'floor', 'first', true, { selection: ['first'] });
+    const group = view.objects.get('first');
+    const midpoint = () => group.children.reduce((sum, holder) => sum.add(geometryCenter(holder)), new THREE.Vector3()).divideScalar(group.children.length);
+    const near = (actual, expected) => actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-6));
+    near(view.exhibitPlacement('first').position, view.root.worldToLocal(midpoint()).toArray());
+    const before = view.exhibitPlacement('first').position;
+    const component = structuredClone(data.exhibits[0].models[0].transform); component.position[0] += 3;
+    view.previewTransforms([{ exhibitId: 'first', instanceIndex: 0, transform: component }]);
+    assert.equal(view.exhibitPlacement('first').position[0], before[0] + 1);
+    const centers = group.children.map(holder => view.root.worldToLocal(geometryCenter(holder)));
+    const preview = view.beginExhibitPlacement('first');
+    const changes = view.previewExhibitPlacement(preview, 'position', 0, preview.placement.position[0] + 2);
+    group.children.forEach((holder, index) => near(view.root.worldToLocal(geometryCenter(holder)).sub(centers[index]).toArray(), [2, 0, 0]));
+    assert.equal(changes.length, 1); assert.equal(changes[0].instanceIndex, undefined);
+    view.restoreSelectionField(preview); near(view.exhibitPlacement('first').position, preview.placement.position);
+    view.key = 'a pending model replacement';
+    assert.equal(view.exhibitPlacement('first'), null);
+    assert.throws(() => view.beginExhibitPlacement('first'), /mapLoading/);
 });
 
 test('64 repeated models retain one set of geometry buffers instead of 64', async t => {

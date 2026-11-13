@@ -249,6 +249,10 @@ test('Focus uses the selected components or exhibits together and preserves auth
         assert.ok(view.controls.target.x > 50, 'whole-exhibit selection includes its distant hardware');
         view.editing = false; view.selected = 'box'; view.focus();
         vectorNear(view.camera.position.toArray(), preset.position, 1e-8, 'authored preset takes priority');
+        parent.remove(unselected);
+        view.editing = true; view.selection = new Set(['box']); view.hardwareSelection = [{ exhibitId: 'box', instanceIndex: 0 }];
+        view.focus();
+        vectorNear(view.camera.position.toArray(), preset.position, 1e-8, 'a sole component retains the exhibit saved view');
         view.destroy();
     }
 });

@@ -184,6 +184,7 @@ function selectParentExhibits(ids) {
     map?.cancelTransform(); numberDrag?.cancel(); joinGeneration++;
     const records = data().exhibits.filter(record => ids.includes(record.id));
     hardwareSelection = []; activeInstance = 0; editSelection = new Set(records.map(record => record.id));
+    hardwareSelection = wholeHardwareSelection(editSelection, hardwareSelection, data());
     selected = editSelection.has(selected) ? selected : records[0]?.id || null;
     creationOpen = false;
     if (editConflict) editConflict.open = false;
@@ -628,7 +629,7 @@ async function updateMap(reset = false) {
 async function select(id, instanceIndex = 0, extend = false, hardware = false, origin = 'other') {
     if (editSave?.saving) return;
     if (!extend && id && selected === id && !creationOpen && !editConflict?.open && (!edit || editSelection.size === 1 && (
-        hardware ? hardwareSelection.length === 1 && hardwareSelection[0].instanceIndex === instanceIndex : !hardwareSelection.length
+        hardware ? hardwareSelection.length === 1 && hardwareSelection[0].instanceIndex === instanceIndex : !hardwareSelection.length || exhibit()?.models.length === 1
     ))) {
         map?.cancelTransform(); numberDrag?.cancel();
         if (matchMedia('(max-width:860px)').matches) { setView('detail'); panelMotion.settle(); }
@@ -662,6 +663,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
         selected = clicked?.id || null;
         editSelection = new Set(selected ? [selected] : []);
     }
+    if (edit) hardwareSelection = wholeHardwareSelection(editSelection, hardwareSelection, data());
     const e = data().exhibits.find(x => x.id === selected);
     if (!e) {
         selected = null;
@@ -1394,14 +1396,14 @@ function renderEditInspector() {
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
-    const wholePlacement = record.models.length ? exhibitParameters(record, 'group', { active: true, placement: map?.exhibitPlacement(record.id) || null }) : '';
+    const wholePlacement = record.models.length > 1 ? exhibitParameters(record, 'group', { active: !hardwareSelection.length, placement: map?.exhibitPlacement(record.id) || null }) : '';
     const content = `
         ${wholePlacement}
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId" ${editHelp('floorAssignmentHint')}>${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div>
         <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div></details></div>
         <div id="instance-list">${record.models.map((_, index) => hardwareParameters(record, index, data().assets, index, {
             selected: hardwareSelected(record.id, index, editSelection, hardwareSelection),
-            expanded: hardwareSelection.length === 1 && hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === index), editable: true
+            expanded: record.models.length === 1 || hardwareSelection.length === 1 && hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === index), editable: true
         })).join('')}</div>
         ${viewPresets(record)}`;
     $('#structure-slot').innerHTML = `<form id="structure-form" novalidate>${content}<div class="error" id="structure-error" role="alert" hidden></div></form>`;
@@ -1883,6 +1885,7 @@ function commitCreation() {
         creationOpen = false;
         selected = record.id;
         editSelection = new Set([record.id]);
+        hardwareSelection = [];
         if (record.floorId) floorId = record.floorId;
         activeInstance = 0;
         changed();

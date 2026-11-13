@@ -719,7 +719,10 @@ export class MapView {
         const objects = this.focusObjects();
         if (!objects.length || (onlyWhenHidden && objects.length === 1 && this.isVisible(this.selected))) return;
         this.cancelTransform();
-        const exhibit = this.data?.exhibits.find(record => this.objects.get(record.id) === objects[0]);
+        const exhibit = this.data?.exhibits.find(record => {
+            const group = this.objects.get(record.id);
+            return group === objects[0] || group?.children.length === 1 && group.children[0] === objects[0];
+        });
         const preset = objects.length === 1 ? exhibit?.views?.[viewKey(this.mode)] : null;
         if (preset) this.applyView(this.focusView(exhibit.id, preset));
         else this.applyView(this.automaticView(objects), this.mode, { orbit: true });

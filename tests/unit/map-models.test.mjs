@@ -420,13 +420,16 @@ test('hardware and whole-exhibit selection use purple selected material and mute
     assert.ok(view.transformEntries().every(entry => Number.isInteger(entry.instanceIndex)));
     assert.equal(meshes(view.objects.get('first').children[1])[0].material, view.materials.editSelection);
     assert.equal(meshes(view.objects.get('first').children[0])[0].material, view.materials.editContext);
+    await view.setData(data, 'floor', 'first', true, { selection: ['first'], hardwareSelection: [{ exhibitId: 'first', instanceIndex: 1 }] });
+    assert.equal(meshes(view.objects.get('first').children[0])[0].material, view.materials.editContext);
+    assert.ok(meshes(view.objects.get('second')).every(mesh => mesh.material === view.materials.retired), 'other exhibits retain their neutral edit appearance');
     await view.setData(data, 'floor', 'first', true, { selection: ['first', 'second'] });
     assert.ok(view.transformEntries().every(entry => entry.instanceIndex === undefined));
     assert.equal(view.transformEntries().length, 2);
     assert.ok(meshes(view.objects.get('first')).every(mesh => mesh.material === view.materials.editSelection));
     assert.notEqual(view.materials.editContext, view.materials.selection);
     await view.setData(data, 'floor', 'first', true, { selection: ['first'] });
-    assert.ok(meshes(view.objects.get('second')).every(mesh => mesh.material === view.materials.editContext));
+    assert.ok(meshes(view.objects.get('second')).every(mesh => mesh.material === view.materials.retired));
     await view.setData(data, 'floor', 'first', false, { selection: ['first'] });
     assert.ok(meshes(view.objects.get('first')).every(mesh => mesh.material === view.materials.selection));
     view.destroy();

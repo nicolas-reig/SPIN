@@ -2,7 +2,7 @@ export const COLOR_SCHEMES = {
     default: {
         materials: {
             ok: '#31975c', problem: '#d99a22', retired: '#65717d',
-            selection: '#1684ef', editSelection: '#8056cb', editContext: '#7c98b3', floor: '#afb7be'
+            selection: '#1684ef', editSelection: '#8056cb', editContext: '#3d6f9e', floor: '#afb7be'
         },
         accent: '#0872df', editAccent: '#8056cb', link: '#096ece',
         danger: '#b44c4d', north: '#cb514f'
@@ -10,7 +10,7 @@ export const COLOR_SCHEMES = {
     protanopia: {
         materials: {
             ok: '#56b4e9', problem: '#c39400', retired: '#494f55',
-            selection: '#074874', editSelection: '#cc79a7', editContext: '#7d9db3', floor: '#afb7be'
+            selection: '#074874', editSelection: '#cc79a7', editContext: '#3d6d91', floor: '#afb7be'
         },
         accent: '#074874', editAccent: '#7a3461', link: '#074874',
         danger: '#784800', north: '#784800'
@@ -18,7 +18,7 @@ export const COLOR_SCHEMES = {
     deuteranopia: {
         materials: {
             ok: '#3288bd', problem: '#c89200', retired: '#494f55',
-            selection: '#004569', editSelection: '#b26b8c', editContext: '#7899ae', floor: '#afb7be'
+            selection: '#004569', editSelection: '#b26b8c', editContext: '#396a96', floor: '#afb7be'
         },
         accent: '#004569', editAccent: '#964775', link: '#004569',
         danger: '#785000', north: '#785000'
@@ -26,7 +26,7 @@ export const COLOR_SCHEMES = {
     tritanopia: {
         materials: {
             ok: '#008e95', problem: '#ca4062', retired: '#646c74',
-            selection: '#00494e', editSelection: '#782d44', editContext: '#719c9e', floor: '#afb7be'
+            selection: '#00494e', editSelection: '#782d44', editContext: '#326d70', floor: '#afb7be'
         },
         accent: '#00494e', editAccent: '#782d44', link: '#00494e',
         danger: '#982d47', north: '#982d47'

@@ -17,11 +17,12 @@ export function hardwareParameters(record, instanceIndex, assets, scope, { selec
         </details></article>`;
 }
 
-export function exhibitParameters(record, scope, { active = false, showName = false, hardware = false, assets = [] } = {}) {
+export function exhibitParameters(record, scope, { active = false, showName = false, hardware = false, assets = [], placement = record.transform, unavailableHint = 'mapLoading' } = {}) {
     return `<details class="exhibit-transform ${active ? 'active' : ''}" data-exhibit-placement="${esc(record.id)}" ${active ? 'open' : ''}>
         <summary>${esc(showName ? record.name : t('exhibitTransform'))}</summary>
         <p class="small muted placement-context">${esc(t('wholeExhibitHint'))}</p>
-        ${vectorFields(record.transform, `data-group-vector data-exhibit="${esc(record.id)}"`, scope, { group: true })}
+        ${!placement ? `<p class="small muted" data-placement-loading>${esc(t(unavailableHint))}</p>` : ''}
+        ${vectorFields(placement || { ...record.transform, position: [null, null, null] }, `data-group-vector data-exhibit="${esc(record.id)}"`, scope, { group: true, disabled: !placement })}
         ${hardware && record.models.length ? `<div class="exhibit-hardware-choices"><span class="small muted">${esc(t('modelInstances'))}</span>${record.models.map((instance, index) => `<button type="button" class="quiet" data-edit-instance="${index}" data-exhibit="${esc(record.id)}" aria-pressed="false" ${editHelp('selectHardwareHint')}>${esc(assets.find(asset => asset.id === instance.model)?.name || instance.model)} ${index + 1}</button>`).join('')}</div>` : ''}
     </details>`;
 }

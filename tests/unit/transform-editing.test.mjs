@@ -9,7 +9,7 @@ registerHooks({
     }
 });
 const { BoxGeometry, Group, Mesh, MeshBasicMaterial, Quaternion, Vector3 } = await import('three');
-const { geometryCenter, selectionCenter, TransformTransaction, transformDelta, selectionFieldDelta } = await import('../../frontend/js/transform-math.js');
+const { geometryCenter, selectionCenter, exhibitPlacement, ExhibitPlacementTransaction, TransformTransaction, transformDelta, selectionFieldDelta } = await import('../../frontend/js/transform-math.js');
 
 const near = (actual, expected) => actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-8, `${actual} != ${expected}`));
 function fixture() {
@@ -162,4 +162,66 @@ test('shared uniform scaling resizes differently rotated components around the s
     near(first.holder.scale.toArray(), [2, 2, 2]);
     near(second.holder.scale.toArray(), [2, 2, 2]);
     transaction.restore();
+});
+
+function wholeFixture() {
+    const floor = new Group(); floor.position.set(40, -4, 20); floor.rotation.y = .6; floor.scale.set(2, 1, .5);
+    const group = new Group(); group.userData.exhibitPlacement = true;
+    group.position.set(5, 2, -3); group.rotation.set(.2, .4, -.1); group.scale.set(1.5, -2, .7); floor.add(group);
+    for (const [index, position] of [[0, [0, 1, 0]], [1, [2, 4, -2]], [2, [20, 0, 1]]]) {
+        const holder = new Group(); holder.position.fromArray(position); holder.rotation.y = index * .3;
+        const mesh = new Mesh(new BoxGeometry(index + 1, 2, 3), new MeshBasicMaterial()); mesh.position.set(10 - index * 3, 1, -4);
+        holder.userData.placementCenter = geometryCenter(mesh).toArray(); holder.add(mesh); group.add(holder);
+    }
+    floor.updateMatrixWorld(true);
+    return { floor, group };
+}
+const nearPlacement = (actual, expected) => actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-6, `${actual} != ${expected}`));
+
+test('whole-exhibit position is the equally weighted component median in floor coordinates, including displaced geometry', () => {
+    const { floor, group } = wholeFixture();
+    const centers = group.children.map(geometryCenter);
+    const world = centers.reduce((sum, center) => sum.add(center), new Vector3()).divideScalar(centers.length);
+    nearPlacement(geometryCenter(group).toArray(), world.toArray());
+    nearPlacement(exhibitPlacement(group).position, floor.worldToLocal(world.clone()).toArray());
+    assert.ok(new Vector3(...exhibitPlacement(group).position).distanceTo(group.position) > 5, 'the stored parent origin is not shown as the exhibit location');
+    const before = new Vector3(...exhibitPlacement(group).position);
+    group.children[2].position.x += 3;
+    const expected = new Vector3(1, 0, 0).multiply(group.scale).applyQuaternion(group.quaternion);
+    nearPlacement(new Vector3(...exhibitPlacement(group).position).sub(before).toArray(), expected.toArray());
+});
+
+test('absolute whole placement moves every component together and preserves component locals and geometry', () => {
+    const { floor, group } = wholeFixture();
+    const locals = group.children.map(holder => holder.matrix.toArray());
+    const vertices = group.children.map(holder => holder.children[0].geometry.attributes.position.array.slice());
+    const before = group.children.map(holder => floor.worldToLocal(geometryCenter(holder)));
+    const transaction = new ExhibitPlacementTransaction('A', group);
+    const original = group.position.toArray();
+    const target = transaction.placement.position[0] + 4;
+    const changes = transaction.field('position', 0, target);
+    nearPlacement(exhibitPlacement(group).position, [target, transaction.placement.position[1], transaction.placement.position[2]]);
+    group.children.forEach((holder, index) => {
+        nearPlacement(floor.worldToLocal(geometryCenter(holder)).sub(before[index]).toArray(), [4, 0, 0]);
+        assert.deepEqual(holder.matrix.toArray(), locals[index]);
+        assert.deepEqual(holder.children[0].geometry.attributes.position.array, vertices[index]);
+    });
+    assert.equal(changes.length, 1); assert.equal(changes[0].exhibitId, 'A'); assert.equal(changes[0].instanceIndex, undefined);
+    transaction.restore(); assert.deepEqual(group.position.toArray(), original);
+});
+
+test('whole-exhibit rotation and signed or collapsed scale keep the median fixed without inverting the exhibit transform', () => {
+    const { group } = wholeFixture();
+    const median = exhibitPlacement(group).position;
+    const local = group.children.map(holder => holder.position.toArray());
+    const transaction = new ExhibitPlacementTransaction('A', group);
+    transaction.field('rotation', 1, 90); assert.deepEqual(exhibitPlacement(group).position, median);
+    transaction.field('scale', 0, 0); nearPlacement(exhibitPlacement(group).position, median); assert.equal(group.scale.x, 0);
+    const collapsed = new ExhibitPlacementTransaction('A', group);
+    collapsed.field('scale', 0, -2); nearPlacement(exhibitPlacement(group).position, median); assert.equal(group.scale.x, -2);
+    assert.deepEqual(group.children.map(holder => holder.position.toArray()), local);
+    const state = group.matrix.toArray();
+    assert.throws(() => collapsed.field('scale', 0, 1001), /invalidTransform/);
+    assert.throws(() => collapsed.field('position', 3, 1), /invalidTransform/);
+    assert.deepEqual(group.matrix.toArray(), state, 'invalid edits are rejected before changing the exhibit');
 });

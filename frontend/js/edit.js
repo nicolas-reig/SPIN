@@ -10,7 +10,7 @@ export function editHelp(key) {
 
 export const transformNumber = coordinateNumber;
 
-export function vectorFields(transform, attributes = '', scope = 'group', { group = scope === 'group', labels = {}, hints = {}, keys = ['position', 'rotation', 'scale'] } = {}) {
+export function vectorFields(transform, attributes = '', scope = 'group', { group = scope === 'group', labels = {}, hints = {}, keys = ['position', 'rotation', 'scale'], disabled = false } = {}) {
     return keys.map(key => {
         const help = editHelp(hints[key] || key + (group ? 'GroupHint' : 'InstanceHint'));
         const label = t(labels[key] || key);
@@ -19,7 +19,7 @@ export function vectorFields(transform, attributes = '', scope = 'group', { grou
             ${['X', 'Y', 'Z'].map((axis, index) => {
                 const id = `transform-${scope}-${key}-${index}`;
                 const value = transform[key][index];
-                return `<div class="axis-value"><label data-number-drag for="${id}" title="${esc(t('dragValueHint'))}">${axis}</label><input id="${id}" aria-label="${esc(label + ' · ' + axis)}" ${help} type="number" step="any" min="${key === 'scale' ? '-1000' : '-100000'}" max="${key === 'scale' ? '1000' : '100000'}" data-vector="${key}" data-axis="${index}" ${attributes} placeholder="${esc(t('mixedValues'))}" value="${value == null ? '' : transformNumber(value)}"></div>`;
+                return `<div class="axis-value"><label data-number-drag for="${id}" title="${esc(t('dragValueHint'))}">${axis}</label><input id="${id}" aria-label="${esc(label + ' · ' + axis)}" ${help} type="number" step="any" min="${key === 'scale' ? '-1000' : '-100000'}" max="${key === 'scale' ? '1000' : '100000'}" data-vector="${key}" data-axis="${index}" ${attributes} ${disabled ? 'disabled' : ''} placeholder="${esc(t('mixedValues'))}" value="${value == null ? '' : transformNumber(value)}"></div>`;
             }).join('')}
         </div></div>`;
     }).join('');

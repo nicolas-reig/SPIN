@@ -137,6 +137,12 @@ function fieldTargets(input) {
     return transform ? [{ exhibitId: record.id, instanceIndex, transform }] : [];
 }
 
+function inspectorFieldTransform(input, preview = null) {
+    if (input.hasAttribute('data-group-vector')) return map?.exhibitPlacement(input.dataset.exhibit || selected) || null;
+    const entries = fieldTargets(input).map(entry => preview?.find(change => change.exhibitId === entry.exhibitId && change.instanceIndex === entry.instanceIndex) || entry);
+    return entries.length ? commonTransform(entries) : null;
+}
+
 function commitTransforms(changes) {
     if (!edit || !changes.length) return;
     if (changes.some(change => !validTransform(change.transform))) { announce(t('invalidTransform')); return; }
@@ -173,7 +179,8 @@ function renderSelectionInspector(hardware) {
     const records = selectedExhibits();
     const title = `${records.length} ${t('exhibits')}`;
     const members = records.map((record, groupIndex) => `<section class="selection-owner"><div class="row between selection-owner-heading"><h3>${esc(record.name)}</h3><button type="button" class="quiet" data-select-parent="${esc(record.id)}">${esc(t('wholeExhibit'))}</button></div>
-        ${exhibitParameters(record, `exhibit-${groupIndex}`, { active: false })}
+        ${exhibitParameters(record, `exhibit-${groupIndex}`, { active: false, placement: map?.exhibitPlacement(record.id) || null,
+            unavailableHint: record.floorId !== floorId ? 'wholePlacementFloorHint' : 'mapLoading' })}
         ${record.models.map((_, instanceIndex) => hardwareParameters(record, instanceIndex, data().assets, `member-${groupIndex}-${instanceIndex}`, {
             selected: hardwareSelected(record.id, instanceIndex, editSelection, hardwareSelection), expanded: hardwareSelection.length === 1 && hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === instanceIndex)
         })).join('')}</section>`).join('');
@@ -604,6 +611,7 @@ async function initializeMap() {
                 mapState = key;
                 $('#map-canvas').classList.toggle('floor-loading', key === 'mapLoading');
                 $('#map-message').textContent = key === 'mapReady' ? '' : t(key);
+                if (map === instance) updateTransformFields(null, { groupsOnly: true });
             },
             onTransform: commitTransforms,
             onTransformPreview: changes => updateTransformFields(changes),
@@ -626,6 +634,7 @@ async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
         reset, selection: edit ? [...editSelection] : selected ? [selected] : [], hardwareSelection: edit ? hardwareSelection : []
     });
+    updateTransformFields(null, { groupsOnly: true });
 }
 
 async function select(id, instanceIndex = 0, extend = false, hardware = false, origin = 'other') {
@@ -1413,7 +1422,7 @@ function renderEditInspector() {
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
-    const wholePlacement = record.models.length ? hardwareSelection.length > 1 ? selectionFields(record.id) : exhibitParameters(record, 'group', { active: true }) : '';
+    const wholePlacement = record.models.length ? hardwareSelection.length > 1 ? selectionFields(record.id) : exhibitParameters(record, 'group', { active: true, placement: map?.exhibitPlacement(record.id) || null }) : '';
     const content = `
         ${wholePlacement}
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId" ${editHelp('floorAssignmentHint')}>${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div>
@@ -1648,7 +1657,7 @@ function structureError(key, input = null) {
 
 function validEditorFields() {
     const inputs = [...($('#structure-form')?.querySelectorAll('input') || [])];
-    const invalid = inputs.find(input => !input.checkValidity() || input.type === 'number' && !input.value.trim());
+    const invalid = inputs.find(input => !input.disabled && (!input.checkValidity() || input.type === 'number' && !input.value.trim()));
     if (!invalid) return true;
     structureError(invalid.type === 'number' ? 'invalidTransform' : 'invalidInput', invalid);
     return false;
@@ -1680,6 +1689,23 @@ function applyEditorField(input) {
         input.value = input.dataset.vector === 'scale' ? 1 : 0;
         return;
     }
+    if (input.hasAttribute('data-group-vector')) {
+        let preview;
+        try {
+            if (!map) throw Error('mapUnavailable');
+            const value = transformNumber(Number(input.value));
+            input.value = value;
+            preview = map.beginExhibitPlacement(record.id);
+            const changes = map.previewExhibitPlacement(preview, input.dataset.vector, Number(input.dataset.axis), value);
+            commitTransforms(changes);
+            input.value = map.exhibitPlacement(record.id)?.[input.dataset.vector][Number(input.dataset.axis)] ?? value;
+            if ($('#structure-error')) $('#structure-error').hidden = true;
+        } catch (error) {
+            if (preview) map.restoreSelectionField(preview);
+            structureError(error.message, input);
+        }
+        return;
+    }
     if (input.dataset.vector) {
         map?.cancelTransform();
         const value = transformNumber(Number(input.value));
@@ -1709,16 +1735,20 @@ function applyEditorField(input) {
     } catch (error) { floorId = previousFloor; structureError(error.key || error.message, input); }
 }
 
-function updateTransformFields(preview = null) {
+function updateTransformFields(preview = null, { groupsOnly = false } = {}) {
     $('#structure-form')?.querySelectorAll('[data-vector]').forEach(input => {
+        if (groupsOnly && !input.hasAttribute('data-group-vector')) return;
         if (input.hasAttribute('data-selection-delta')) {
             if (!preview) input.value = input.dataset.vector === 'scale' ? 1 : 0;
             return;
         }
+        const placement = inspectorFieldTransform(input, preview);
+        if (input.hasAttribute('data-group-vector')) {
+            input.disabled = !placement;
+            if (placement) input.closest('[data-exhibit-placement]')?.querySelector('[data-placement-loading]')?.remove();
+        }
         if (input === document.activeElement) return;
-        const entries = fieldTargets(input).map(entry => preview?.find(change => change.exhibitId === entry.exhibitId && change.instanceIndex === entry.instanceIndex) || entry);
-        if (!entries.length) return;
-        const value = commonTransform(entries)[input.dataset.vector][Number(input.dataset.axis)];
+        const value = placement?.[input.dataset.vector][Number(input.dataset.axis)];
         input.value = value == null ? '' : transformNumber(value);
     });
     updateNumberFills($('#inspector'));
@@ -1735,6 +1765,13 @@ numberDrag = installNumberDrag($('#inspector'), {
                 return true;
             } catch (error) { structureError(error.message, drag.input); return false; }
         }
+        if (drag.input.hasAttribute('data-group-vector')) {
+            try {
+                if (!map) throw Error('mapUnavailable');
+                drag.exhibitPreview = map.beginExhibitPlacement(drag.input.dataset.exhibit || selected);
+                return true;
+            } catch (error) { structureError(error.message, drag.input); return false; }
+        }
         drag.entries = fieldTargets(drag.input).map(entry => ({ ...entry, transform: structuredClone(entry.transform) }));
         return drag.entries.length > 0;
     },
@@ -1742,6 +1779,22 @@ numberDrag = installNumberDrag($('#inspector'), {
         const key = drag.input.dataset.vector, axis = drag.input.dataset.axis === 'all' ? 'all' : Number(drag.input.dataset.axis);
         const step = key === 'position' ? 1 : key === 'rotation' ? 15 : .1;
         const limit = key === 'scale' ? 1000 : 100000;
+        if (drag.exhibitPreview) {
+            let value = drag.exhibitPreview.placement[key][axis] + drag.delta;
+            if (snap || event.ctrlKey) value = Math.round(value / step) * step;
+            value = Math.max(-limit, Math.min(limit, value));
+            try {
+                drag.changes = map.previewExhibitPlacement(drag.exhibitPreview, key, axis, value);
+                drag.error = null;
+                if ($('#structure-error')) $('#structure-error').hidden = true;
+            } catch (error) {
+                drag.error = error.message; drag.changes = null;
+                map.restoreSelectionField(drag.exhibitPreview);
+                const element = $('#structure-error');
+                if (element) { element.textContent = t(error.message); element.hidden = false; }
+            }
+            return;
+        }
         if (drag.selectionPreview) {
             let value = (key === 'scale' ? 1 : 0) + drag.delta;
             if (snap || event.ctrlKey) value = Math.round(value / step) * step;
@@ -1774,12 +1827,12 @@ numberDrag = installNumberDrag($('#inspector'), {
         map?.previewTransforms(drag.changes); updateTransformFields(drag.changes);
     },
     commit(drag) {
-        if (drag.error) { map.restoreSelectionField(drag.selectionPreview); structureError(drag.error, drag.input); }
+        if (drag.error) { map.restoreSelectionField(drag.selectionPreview || drag.exhibitPreview); structureError(drag.error, drag.input); }
         else if (drag.changes) commitTransforms(drag.changes);
         updateTransformFields();
     },
     cancel(drag) {
-        if (drag.selectionPreview) map?.restoreSelectionField(drag.selectionPreview);
+        if (drag.selectionPreview || drag.exhibitPreview) map?.restoreSelectionField(drag.selectionPreview || drag.exhibitPreview);
         else map?.previewTransforms(drag.entries);
         updateTransformFields();
     }
@@ -2462,7 +2515,7 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         const input = event.target;
         if (event.key === 'Escape') {
-            const value = input.hasAttribute('data-selection-delta') ? input.dataset.vector === 'scale' ? 1 : 0 : commonTransform(fieldTargets(input))[input.dataset.vector][Number(input.dataset.axis)];
+            const value = input.hasAttribute('data-selection-delta') ? input.dataset.vector === 'scale' ? 1 : 0 : inspectorFieldTransform(input)?.[input.dataset.vector][Number(input.dataset.axis)];
             input.value = value == null ? '' : transformNumber(value);
         } else {
             applyEditorField(input);

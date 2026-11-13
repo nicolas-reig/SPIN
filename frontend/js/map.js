@@ -630,8 +630,8 @@ export class MapView {
         const rect = this.renderer?.domElement.getBoundingClientRect() || { width: 0, height: 0 };
         const panel = this.container.closest?.('#map-panel');
         const workspace = panel?.closest('#workspace');
-        const overlays = workspace ? [...workspace.querySelectorAll('#sidebar, #inspector, #map-heading, #map-controls, #transform-toolbar')]
-            .filter(element => !element.hidden && element.getAttribute('aria-hidden') !== 'true' && getComputedStyle(element).visibility !== 'hidden')
+        const overlays = workspace ? [...workspace.querySelectorAll('#sidebar, #inspector, #inspector-stack, #map-heading, #map-controls, #transform-toolbar')]
+            .filter(element => !element.hidden && (element.id === 'inspector-stack' || element.getAttribute('aria-hidden') !== 'true') && getComputedStyle(element).visibility !== 'hidden')
             .map(element => {
                 // Panel springs animate transforms. Frame against their settled
                 // layout, including when Focus is clicked during panel entry.

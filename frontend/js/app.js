@@ -24,7 +24,7 @@ import { createNoteEditor } from './editor.js';
 import { installSelects, closeMenus } from './select.js';
 import { cameraMode, viewMode } from './camera.js';
 import { CameraControls } from './camera-controls.js';
-import { PanelMotion } from './panel-motion.js';
+import { PanelMotion, inspectorContext } from './panel-motion.js';
 import { editHelp, vectorFields, transformNumber, viewPresets, exhibitName, newExhibit, duplicateExhibit, rebaseEdit, editWasSaved } from './edit.js';
 import { icon } from './icons.js';
 import { colorMode, onColorModeChange } from './colors.js';
@@ -40,7 +40,7 @@ installSelects();
 installControlMotion();
 const $ = s => document.querySelector(s),
     api = new Api();
-const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#sidebar'), $('#editbar'));
+const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspector-stack'));
 let snapshot = null,
     selected = null,
     floorId = '0',
@@ -625,6 +625,13 @@ async function updateMap(reset = false) {
 
 async function select(id, instanceIndex = 0, extend = false, hardware = false) {
     if (editSave?.saving) return;
+    if (!extend && id && selected === id && !creationOpen && !editConflict?.open && (!edit || editSelection.size === 1 && (
+        hardware ? hardwareSelection.length === 1 && hardwareSelection[0].instanceIndex === instanceIndex : !hardwareSelection.length
+    ))) {
+        map?.cancelTransform(); numberDrag?.cancel();
+        if (matchMedia('(max-width:860px)').matches) { setView('detail'); panelMotion.settle(); }
+        return;
+    }
     joinGeneration++;
     map?.cancelTransform();
     numberDrag?.cancel();
@@ -644,8 +651,8 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false) {
         editSelection = new Set(hardwareSelection.map(item => item.exhibitId));
         selected = editSelection.has(id) ? id : [...editSelection][0] || null;
     } else if (edit && extend) {
-        hardwareSelection = [];
         if (!clicked) return;
+        hardwareSelection = [];
         if (editSelection.has(id)) editSelection.delete(id);
         else editSelection.add(id);
         selected = editSelection.has(selected) ? selected : [...editSelection][0] || null;
@@ -743,20 +750,21 @@ function renderInspector() {
     $('#resizer').inert = !visible;
     $('#resizer').setAttribute('aria-hidden', String(!visible));
     if (!visible) {
-        panelMotion.update(null);
+        panelMotion.update(null, []);
         if (view === 'detail') setView('map');
         renderMobile();
         return;
     }
+    const records = creationOpen || editConflict?.open ? [] : edit ? selectedExhibits() : [exhibit()];
+    const context = inspectorContext(records, creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
+    const sameContext = context === panelMotion.context;
+    const scroll = sameContext ? $('#structure-panel')?.scrollTop : null;
+    const placementOpen = new Map(sameContext ? [...$('#inspector').querySelectorAll('[data-exhibit-placement]')].map(section => [section.dataset.exhibitPlacement, section.open]) : []);
     renderInspectorContent();
-    const context = JSON.stringify([
-        Boolean(edit),
-        creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit',
-        creationOpen ? null : exhibit()?.name,
-        creationOpen ? [] : edit && editSelection.size > 1 ? [...editSelection].sort() : [selected],
-        hardwareSelection.map(hardwareKey).sort()
-    ]);
-    if (panelMotion.update(context)) {
+    for (const section of $('#inspector').querySelectorAll('[data-exhibit-placement]')) if (placementOpen.has(section.dataset.exhibitPlacement)) section.open = placementOpen.get(section.dataset.exhibitPlacement);
+    if (scroll != null && $('#structure-panel')) $('#structure-panel').scrollTop = scroll;
+    const ids = edit ? [...editSelection] : records.map(record => record.id);
+    if (panelMotion.update(context, creationOpen || editConflict?.open ? [] : ids)) {
         const title = $('#inspector h1')?.textContent;
         if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
     }

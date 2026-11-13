@@ -323,6 +323,10 @@ test('focus framing uses the settled panel layout while its entry spring is stil
         near(bounds.right, 1222 / 1600 * 2 - 1);
         view.selected = 'box'; view.data = { exhibits: [{ id: 'box' }] };
         view.focus(); framed(view);
+        const stack = { ...inspector, id: 'inspector-stack', offsetLeft: 1210, offsetWidth: 390, getAttribute: () => 'true' };
+        workspace.querySelectorAll = () => [sidebar, inspector, stack];
+        near(view.viewportBounds().right, 1198 / 1600 * 2 - 1, 1e-8, 'decorative backing cards still reserve visible map space');
+        workspace.querySelectorAll = () => [sidebar, inspector];
         inspector.getAttribute = () => 'true';
         assert.ok(view.viewportBounds().right > bounds.right, 'closing panels no longer reserve map space');
     } finally { globalThis.getComputedStyle = previousStyle; view.destroy(); }

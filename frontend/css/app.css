@@ -809,7 +809,7 @@ summary {
     background: #9fa8b2;
 }
 
-#inspector {
+:is(#inspector, .inspector-outgoing) {
     grid-column: 4;
     grid-row: 1;
     position: relative;
@@ -827,10 +827,27 @@ summary {
     position: absolute;
     inset: 0 0 0 auto;
     width: calc(var(--inspector-width, var(--reader)) + var(--stack-extent, 0px));
-    z-index: 3;
+    z-index: 2;
     pointer-events: none;
 }
 #inspector-stack[hidden] { display: none; }
+#inspector-underlays {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: var(--inspector-width, var(--reader));
+    z-index: 3;
+    pointer-events: none;
+}
+#inspector-underlays[hidden] { display: none; }
+#inspector-underlays.withdrawing { z-index: 5; }
+.inspector-outgoing {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: auto !important;
+}
+.inspector-outgoing, .inspector-outgoing * { pointer-events: none !important; }
 .inspector-stack-card {
     position: absolute;
     top: var(--stack-inset);
@@ -1513,7 +1530,7 @@ dialog::backdrop {
 
     #sidebar,
     #map-panel,
-    #inspector {
+    :is(#inspector, .inspector-outgoing) {
         width: 100%;
         height: 100%;
         display: none;
@@ -1529,7 +1546,7 @@ dialog::backdrop {
         display: flex;
     }
 
-    body[data-view=detail] #inspector {
+    body[data-view=detail] :is(#inspector, .inspector-outgoing) {
         display: flex;
     }
 
@@ -1924,7 +1941,7 @@ body.editing {
 
 
 
-#structure-panel {
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) {
     padding-top: 14px;
 }
 
@@ -1942,15 +1959,15 @@ body.editing {
     gap: 8px;
 }
 
-#structure-form .vector input {
+:is(#structure-form, [data-snapshot-id="structure-form"]) .vector input {
     padding: 8px;
 }
 
-#structure-form .grid3 {
+:is(#structure-form, [data-snapshot-id="structure-form"]) .grid3 {
     gap: 6px;
 }
 
-#structure-form .dialog-footer {
+:is(#structure-form, [data-snapshot-id="structure-form"]) .dialog-footer {
     position: sticky;
     bottom: -28px;
     padding: 12px 0;
@@ -2164,16 +2181,16 @@ html[data-color-mode]:not([data-color-mode=default]) {
 }
 
 /* Keep headers, tabs and cards on the same reading edge. */
-#inspector {
+:is(#inspector, .inspector-outgoing) {
     --inspector-inset: 24px;
 }
 .inspector-header {
     padding-inline: var(--inspector-inset);
 }
-#inspector .tabs {
+:is(#inspector, .inspector-outgoing) .tabs {
     margin-inline: var(--inspector-inset);
 }
-#inspector .panel-content {
+:is(#inspector, .inspector-outgoing) .panel-content {
     scrollbar-gutter: stable both-edges;
     padding-inline: calc(var(--inspector-inset) - var(--scroll-inset, 0px));
 }
@@ -2364,7 +2381,7 @@ html[data-color-mode]:not([data-color-mode=default]) {
     #map-stage {
         margin: 0;
     }
-    #inspector {
+    :is(#inspector, .inspector-outgoing) {
         position: absolute;
         inset: 0 0 0 auto;
         width: var(--inspector-width);
@@ -2394,7 +2411,7 @@ html[data-color-mode]:not([data-color-mode=default]) {
         left: calc(var(--list) + 36px);
         right: calc(var(--inspector-overlay) + 36px);
     }
-    body.inspector-hidden #inspector {
+    body.inspector-hidden :is(#inspector, .inspector-outgoing) {
         transform: translateX(calc(100% + 40px));
         pointer-events: none;
     }
@@ -2428,13 +2445,13 @@ html[data-color-mode]:not([data-color-mode=default]) {
     #map-message {
         bottom: calc(153px + env(safe-area-inset-bottom));
     }
-    body.inspector-hidden #inspector { display: none; }
+    body.inspector-hidden :is(#inspector, .inspector-outgoing) { display: none; }
     .composer-tools .toolbar { width: 100%; justify-content: space-between; }
     .composer-tools .icon-button { width: 40px; min-width: 0; height: 44px; min-height: 44px; }
 }
 @media (min-width: 861px) {
-    #inspector { visibility: visible; }
-    body.inspector-hidden #inspector:not(.inspector-moving) { visibility: hidden; }
+    :is(#inspector, .inspector-outgoing) { visibility: visible; }
+    body.inspector-hidden :is(#inspector, .inspector-outgoing):not(.inspector-moving) { visibility: hidden; }
 }
 
 /* Editing uses the same panels and reading edges as the service view. */
@@ -2756,16 +2773,16 @@ body.editing .exhibit-entry.active .icon-button.danger {
 .model-instance .vector {
     margin-block: 14px;
 }
-#structure-panel .vector h3 {
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .vector h3 {
     font-size: .8125rem;
     margin-bottom: 8px;
 }
-#structure-panel .vector input {
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .vector input {
     padding: 8px;
     min-height: 38px;
     font-variant-numeric: tabular-nums;
 }
-#structure-panel .vector .grid3 {
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .vector .grid3 {
     gap: 8px;
 }
 .exhibit-transform, .view-presets {
@@ -2787,14 +2804,14 @@ body.editing .exhibit-entry.active .icon-button.danger {
     min-height: 28px;
     font-size: .75rem;
 }
-#structure-form > .exhibit-transform {
+:is(#structure-form, [data-snapshot-id="structure-form"]) > .exhibit-transform {
     padding: 16px;
     border-radius: 8px;
     background: #fff;
     box-shadow: 0 1px 2px #23334104, 0 5px 15px #23334109;
     margin-bottom: 20px;
 }
-#structure-form > .exhibit-transform > summary { color: var(--accent); padding-top: 0; }
+:is(#structure-form, [data-snapshot-id="structure-form"]) > .exhibit-transform > summary { color: var(--accent); padding-top: 0; }
 .selection-orientation { width: 100px; }
 .selection-orientation .select-button { min-height: 30px; font-size: .75rem; }
 .placement-context { font-size: .75rem; line-height: 1.5; margin: 8px 0 14px; }
@@ -2882,13 +2899,13 @@ body.editing .exhibit-entry.active .icon-button.danger {
     font-weight: 500;
     pointer-events: none;
 }
-#structure-panel .vector {
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .vector {
     display: grid;
     grid-template-columns: minmax(66px, .8fr) minmax(0, 1fr);
     align-items: start;
     column-gap: 12px;
 }
-#structure-panel .vector h3 { margin: 0; padding-top: 8px; }
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .vector h3 { margin: 0; padding-top: 8px; }
 .axis-values { display: grid; gap: 2px; min-width: 0; }
 .axis-value {
     position: relative;
@@ -2923,7 +2940,7 @@ body.editing .exhibit-entry.active .icon-button.danger {
     font-size: 11px;
 }
 .axis-value label svg { display: block; width: 12px; height: 12px; }
-#structure-panel .axis-value input {
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .axis-value input {
     flex: 1;
     width: 0;
     min-width: 0;
@@ -2936,7 +2953,7 @@ body.editing .exhibit-entry.active .icon-button.danger {
     cursor: ew-resize;
     appearance: textfield;
 }
-#structure-panel .axis-value input:focus { cursor: text; }
+:is(#structure-panel, [data-snapshot-id="structure-panel"]) .axis-value input:focus { cursor: text; }
 .axis-value input::-webkit-inner-spin-button { -webkit-appearance: none; }
 .dragging-number, .dragging-number * { cursor: ew-resize !important; user-select: none !important; }
 .transform-tools .icon-button[aria-pressed=true] {

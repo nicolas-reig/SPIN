@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { identity } from '../../frontend/js/domain.js';
 import { hardwareParameters, exhibitParameters } from '../../frontend/js/placement-inspector.js';
+import { hardwareSelected, expandExhibitSelection } from '../../frontend/js/transform-selection.js';
 
 const record = id => ({ id, name: id, transform: identity(), models: [{ model: 'Display', transform: identity() }, { model: 'Display', transform: identity() }] });
 const assets = [{ id: 'Display', name: 'Display' }];
@@ -24,4 +25,28 @@ test('whole-exhibit fields are explicitly scoped and can expose hardware selecti
     assert.match(selected, /Display 2/);
     const contextual = exhibitParameters(record('Alpha'), 'group');
     assert.doesNotMatch(contextual, /data-exhibit-placement="Alpha" open/);
+});
+
+test('whole-exhibit selection marks every component selected while explicit component selection leaves its siblings unselected', () => {
+    const exhibits = new Set(['Alpha']), hardware = [{ exhibitId: 'Alpha', instanceIndex: 1 }];
+    assert.equal(hardwareSelected('Alpha', 0, exhibits, []), true);
+    assert.equal(hardwareSelected('Beta', 0, exhibits, []), false);
+    assert.equal(hardwareSelected('Alpha', 0, exhibits, hardware), false);
+    assert.equal(hardwareSelected('Alpha', 1, exhibits, hardware), true);
+    const unselected = hardwareParameters(record('Alpha'), 0, assets, 'component', { selected: false });
+    assert.match(unselected, /aria-pressed="false"/);
+    assert.doesNotMatch(unselected, /data-hardware-placement="0" data-exhibit="Alpha" open/);
+    assert.match(unselected, /data-instance="0" data-exhibit="Alpha"/);
+    const wholeSelected = hardwareParameters(record('Alpha'), 0, assets, 'component', { expanded: false });
+    assert.match(wholeSelected, /aria-pressed="true"/);
+    assert.doesNotMatch(wholeSelected, /data-hardware-placement="0" data-exhibit="Alpha" open/);
+});
+
+test('extending an implicit whole-exhibit selection starts with all current-floor components so one can be removed', () => {
+    const a = { ...record('Alpha'), floorId: '1' }, b = { ...record('Beta'), floorId: '2' };
+    const expanded = expandExhibitSelection(new Set(['Alpha', 'Beta']), { exhibits: [a, b] }, '1');
+    assert.deepEqual(expanded, [{ exhibitId: 'Alpha', instanceIndex: 0 }, { exhibitId: 'Alpha', instanceIndex: 1 }]);
+    const remaining = expanded.filter(entry => entry.instanceIndex !== 0);
+    assert.equal(hardwareSelected('Alpha', 0, new Set(['Alpha']), remaining), false);
+    assert.equal(hardwareSelected('Alpha', 1, new Set(['Alpha']), remaining), true);
 });

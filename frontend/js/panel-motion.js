@@ -107,6 +107,7 @@ export class PanelMotion {
         if (!['enter', 'remove', 'replace'].includes(transition) || !this.underlays || !this.displayed || !this.canAnimate || !this.inspector.getClientRects().length) return;
         const snapshot = inspectorSnapshot(this.inspector, ++this.snapshotSerial);
         snapshot.exiting = transition === 'remove';
+        if (transition === 'enter' && exhibits.length > 1) snapshot.node.classList.add('inspector-under-stack');
         if (transition === 'replace') {
             snapshot.surface = document.createElement('div');
             snapshot.surface.className = 'inspector-retracting';
@@ -150,6 +151,7 @@ export class PanelMotion {
     updateStack(exhibits, animate = this.canAnimate && this.desktop.matches) {
         if (!this.stack) return;
         const backing = exhibits.slice(0, -1).reverse();
+        this.inspector.classList.toggle('inspector-stacked', backing.length > 0);
         const wanted = new Set(backing);
         this.stack.hidden = !backing.length && !this.layers.size;
         const extent = backing.length ? 30 * (1 - Math.exp(-backing.length / 5)) : 0;

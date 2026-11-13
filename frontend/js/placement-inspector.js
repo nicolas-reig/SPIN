@@ -2,6 +2,15 @@ import { escape as esc } from './markdown.js';
 import { t } from './locale.js';
 import { vectorFields, editHelp } from './edit.js';
 import { icon } from './icons.js';
+import { identity } from './domain.js';
+
+export function selectionParameters({ owner = null, available = true } = {}) {
+    const content = available ? `${vectorFields(identity(), 'data-selection-delta', 'selection', {
+        labels: { position: 'moveBy', rotation: 'rotateBy' }, hints: { position: 'selectionMoveHint', rotation: 'selectionRotateHint' }, keys: ['position', 'rotation']
+    })}<div class="vector"><h3 ${editHelp('selectionScaleHint')}>${esc(t('scaleFactor'))}</h3><div class="axis-values"><div class="axis-value"><label data-number-drag for="transform-selection-scale-all" ${editHelp('selectionScaleHint')}>${icon('link')}</label><input id="transform-selection-scale-all" type="number" min="-1000" max="1000" step="any" data-selection-delta data-vector="scale" data-axis="all" value="1" aria-label="${esc(t('scaleFactor'))}" ${editHelp('selectionScaleHint')}></div></div></div>`
+        : `<p class="small muted">${esc(t('selectionDifferentFloors'))}</p>`;
+    return `<details class="exhibit-transform selection-transform" data-selection-placement ${owner ? `data-exhibit-placement="${esc(owner)}"` : ''} open><summary ${editHelp('selectionTransformHint')}>${esc(t('transformTogether'))}</summary>${content}</details>`;
+}
 
 export function hardwareParameters(record, instanceIndex, assets, scope, { selected = true, expanded = selected, editable = false } = {}) {
     const instance = record.models[instanceIndex];
@@ -11,7 +20,6 @@ export function hardwareParameters(record, instanceIndex, assets, scope, { selec
         <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${instanceIndex}" data-exhibit="${esc(record.id)}" aria-pressed="${selected}" ${editHelp('selectHardwareHint')}>${esc(label)}</button>
         ${editable ? `<div class="item-actions"><button type="button" class="icon-button" data-duplicate-instance="${instanceIndex}" aria-label="${esc(t('duplicate') + ': ' + label)}" ${editHelp('duplicateHardwareHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-remove-instance="${instanceIndex}" aria-label="${esc(t('remove') + ': ' + label)}" ${editHelp('removeHardwareHint')}>${icon('trash')}</button></div>` : ''}</div>
         <details class="instance-placement" data-hardware-placement="${instanceIndex}" data-exhibit="${esc(record.id)}" ${expanded ? 'open' : ''}><summary ${editHelp('instancePlacementHint')}>${esc(t('hardwarePlacement'))}</summary>
-            <p class="small muted placement-context">${esc(t('relativeToExhibit'))} ${esc(record.name)}</p>
             ${editable ? `<label class="sr-only" for="instance-model-${instanceIndex}">${esc(t('model'))}</label><select id="instance-model-${instanceIndex}" data-instance-model="${instanceIndex}" ${editHelp('replaceHardwareHint')}>${assets.filter(item => item.kind === 'hardware').map(item => `<option value="${esc(item.id)}" ${item.id === instance.model ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select>` : ''}
             ${vectorFields(instance.transform, `data-instance="${instanceIndex}" data-exhibit="${esc(record.id)}"`, scope)}
         </details></article>`;
@@ -19,8 +27,7 @@ export function hardwareParameters(record, instanceIndex, assets, scope, { selec
 
 export function exhibitParameters(record, scope, { active = false, showName = false, hardware = false, assets = [], placement = record.transform, unavailableHint = 'mapLoading' } = {}) {
     return `<details class="exhibit-transform ${active ? 'active' : ''}" data-exhibit-placement="${esc(record.id)}" ${active ? 'open' : ''}>
-        <summary>${esc(showName ? record.name : t('exhibitTransform'))}</summary>
-        <p class="small muted placement-context">${esc(t('wholeExhibitHint'))}</p>
+        <summary ${editHelp('wholeExhibitHint')}>${esc(showName ? record.name : t('exhibitTransform'))}</summary>
         ${!placement ? `<p class="small muted" data-placement-loading>${esc(t(unavailableHint))}</p>` : ''}
         ${vectorFields(placement || { ...record.transform, position: [null, null, null] }, `data-group-vector data-exhibit="${esc(record.id)}"`, scope, { group: true, disabled: !placement })}
         ${hardware && record.models.length ? `<div class="exhibit-hardware-choices"><span class="small muted">${esc(t('modelInstances'))}</span>${record.models.map((instance, index) => `<button type="button" class="quiet" data-edit-instance="${index}" data-exhibit="${esc(record.id)}" aria-pressed="false" ${editHelp('selectHardwareHint')}>${esc(assets.find(asset => asset.id === instance.model)?.name || instance.model)} ${index + 1}</button>`).join('')}</div>` : ''}

@@ -9,6 +9,30 @@ export function expandExhibitSelection(exhibits, data, floorId) {
         .flatMap(record => record.models.map((_, instanceIndex) => ({ exhibitId: record.id, instanceIndex })));
 }
 
+export function wholeHardwareSelection(exhibits, hardware, data) {
+    if (!hardware.length || !exhibits.size) return hardware;
+    const keys = new Set(hardware.map(hardwareKey));
+    return [...exhibits].every(id => {
+        const record = data.exhibits.find(record => record.id === id);
+        return record?.models.length && record.models.every((_, instanceIndex) => keys.has(hardwareKey({ exhibitId: id, instanceIndex })));
+    }) ? [] : hardware;
+}
+
+export function pickHardwareSelection(exhibits, hardware, data, floorId, { exhibitId, instanceIndex, extend = false, viewport = false }) {
+    const record = data.exhibits.find(record => record.id === exhibitId);
+    if (!record?.models[instanceIndex]) return null;
+    const whole = viewport && !exhibits.has(exhibitId);
+    const canExtend = extend && record.floorId === floorId;
+    let entries = canExtend ? hardware.length ? [...hardware] : expandExhibitSelection(exhibits, data, floorId) : [];
+    const entry = { exhibitId, instanceIndex };
+    if (whole) entries.push(...record.models.map((_, instanceIndex) => ({ exhibitId, instanceIndex })));
+    else if (!canExtend) entries = [entry];
+    else if (entries.some(item => hardwareKey(item) === hardwareKey(entry))) entries = entries.filter(item => hardwareKey(item) !== hardwareKey(entry));
+    else entries.push(entry);
+    const owners = new Set(entries.map(entry => entry.exhibitId));
+    return { exhibits: owners, hardware: wholeHardwareSelection(owners, entries, data) };
+}
+
 export function normalizeHardwareSelection(selection, data, floorId) {
     const seen = new Set();
     return (Array.isArray(selection) ? selection : []).filter(entry => {

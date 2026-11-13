@@ -36,7 +36,7 @@ import { hardwareParameters, exhibitParameters, selectionParameters } from './pl
 import { InspectorNavigation } from './inspector-navigation.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
-import { exhibitGroupKey, groupExhibits, matchesExhibitGroup, ExhibitGroupState } from './exhibit-groups.js';
+import { groupExhibits, matchesExhibitGroup, ExhibitGroupState } from './exhibit-groups.js';
 let noteEditor = null;
 installSelects();
 installControlMotion();
@@ -513,8 +513,7 @@ function fitSidebar() {
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
         // Reserve row padding, action or status space, and a scrollbar gutter.
-        const groupIndent = data().exhibits.some(record => exhibitGroupKey(record.name)) ? 16 : 0;
-        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16 + groupIndent);
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }

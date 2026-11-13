@@ -34,6 +34,7 @@ globalThis.innerWidth = 1600;
 globalThis.matchMedia = query => ({ get matches() { return query.includes('reduced-motion') ? reduced : true; }, addEventListener() {} });
 globalThis.addEventListener = () => {};
 globalThis.document = { hidden: false, timeline: { currentTime: 0 }, addEventListener() {}, createElement: () => new Element() };
+globalThis.getComputedStyle = element => ({ transform: element.style.transform || 'matrix(1, 0, 0, 1, -12, 0)', opacity: '.8', top: '8px', bottom: '8px' });
 function setup() {
     reduced = false;
     const inspector = new Element(), resizer = new Element(), stack = new Element(), sidebar = new Element(), editbar = new Element(), underlays = new Element();
@@ -41,7 +42,7 @@ function setup() {
     const motion = new PanelMotion(inspector, resizer, stack, { sidebar, editbar, underlays });
     const update = (ids, options = {}) => {
         const context = inspectorContext(ids.map(id => ({ id, name: id })));
-        motion.prepare(context, ids); inspector.textContent = ids.join(',');
+        motion.prepare(context, ids, options); inspector.textContent = ids.join(',');
         return motion.update(context, ids, options);
     };
     return { inspector, resizer, stack, sidebar, editbar, underlays, motion, update };
@@ -124,6 +125,79 @@ test('incoming panels have their new content while the previous inspector remain
     assert.equal(motion.snapshots.length, 0); assert.equal(underlays.hidden, true);
 });
 
+test('changing a single selection retracts the old populated panel beneath a fresh incoming spring', () => {
+    const { inspector, underlays, motion, update } = setup();
+    update(['A']); motion.settle(); inspector.scrollTop = 240;
+    update(['B'], { origin: 'viewport' });
+    const outgoing = motion.preparedSnapshot;
+    assert.equal(inspector.textContent, 'B'); assert.equal(outgoing.node.textContent, 'A');
+    assert.equal(outgoing.node.scrollTop, 240); assert.equal(outgoing.exiting, false);
+    assert.equal(outgoing.motion.name, 'inspector-retract-spring');
+    assert.equal(outgoing.motion.stiffness, motion.right.stiffness); assert.equal(outgoing.motion.decay, motion.right.decay);
+    assert.equal(outgoing.motion.curve.target, motion.distance);
+    assert.equal(outgoing.motion.sample(0).position, 0);
+    assert.equal(motion.right.sample(0).position, motion.distance);
+    assert.ok(outgoing.motion.sample(.08).position > 0, 'the old panel swipes toward the right edge');
+    assert.ok(motion.right.sample(.08).position < motion.distance, 'the new panel simultaneously slides over it');
+    assert.equal(outgoing.surface.calls[0].startTime, inspector.calls.at(-1).startTime);
+    inspector.calls.at(-1).finish();
+    assert.equal(outgoing.node.parent, null); assert.equal(underlays.hidden, true);
+});
+
+test('starting a fresh selection retracts the previous stack borders together with its populated inspector', () => {
+    const { inspector, stack, underlays, motion, update } = setup();
+    update(['A', 'B', 'C']); motion.settle();
+    const oldLayers = [...motion.layers.values()].map(layer => layer.node);
+    update(['D']);
+    const outgoing = motion.preparedSnapshot;
+    assert.equal(outgoing.node.textContent, 'A,B,C'); assert.equal(inspector.textContent, 'D');
+    assert.equal(outgoing.stack.children.length, 2); assert.equal(outgoing.stack.id, '');
+    assert.equal(outgoing.stack.children[0].style.transform, 'matrix(1, 0, 0, 1, -12, 0)');
+    assert.equal(outgoing.stack.children[0].style.opacity, '.8'); assert.equal(outgoing.stack.children[0].style.transition, 'none');
+    assert.deepEqual(outgoing.surface.children, [outgoing.stack, outgoing.node]);
+    assert.deepEqual(outgoing.motion.elements, [outgoing.surface]);
+    assert.equal(outgoing.surface.calls[0].startTime, inspector.calls.at(-1).startTime);
+    assert.equal(stack.children.length, 0); assert.equal(motion.layers.size, 0);
+    assert.ok(oldLayers.every(node => !node.parent), 'old canonical borders yield to the single retracting copy');
+    assert.equal(inspector.inert, false, 'the incoming view stays above the outgoing stack');
+    motion.settle();
+    assert.equal(outgoing.stack.parent, null); assert.equal(underlays.children.length, 0);
+});
+
+test('selecting one existing stack member afresh differs from removing another member with Shift', () => {
+    const { inspector, motion, update } = setup();
+    update(['A', 'B', 'C']); motion.settle();
+    let count = inspector.calls.length;
+    update(['A', 'B']);
+    assert.equal(inspector.calls.length, count, 'ordinary deselection preserves the existing top-withdrawal behavior');
+    assert.equal(motion.preparedSnapshot.exiting, true);
+    motion.settle();
+    update(['B'], { replace: true });
+    assert.equal(inspector.calls.length, count + 1, 'a fresh selection gets a new full incoming slide even for the same front owner');
+    assert.equal(motion.preparedSnapshot.exiting, false); assert.ok(motion.preparedSnapshot.stack);
+    assert.equal(motion.right.sample(0).position, motion.distance);
+    motion.settle(); update(['A', 'B', 'C']); motion.settle(); count = inspector.calls.length;
+    update(['A'], { replace: true });
+    assert.equal(inspector.calls.length, count + 1, 'isolating a backing member also replaces the whole previous stack');
+    assert.equal(motion.preparedSnapshot.motion.name, 'inspector-retract-spring');
+    motion.settle();
+});
+
+test('rapid fresh selections preserve the interrupted panel position and velocity beneath a fully new incoming panel', () => {
+    const { inspector, motion, update } = setup();
+    update(['A']); motion.settle(); update(['B']);
+    const a = motion.preparedSnapshot;
+    inspector.calls.at(-1).currentTime = 90;
+    const interrupted = motion.right.state();
+    update(['C']); const b = motion.preparedSnapshot;
+    assert.deepEqual(motion.snapshots.map(snapshot => snapshot.node.textContent), ['A', 'B']);
+    assert.equal(b.motion.sample(0).position + b.arrival.sample(0).position, interrupted.position);
+    assert.ok(Math.abs(b.arrival.sample(0).velocity - interrupted.velocity) < 1e-9);
+    assert.equal(motion.right.sample(0).position, motion.distance);
+    assert.equal(a.motion.active, true, 'the first retracting view continues without a jump');
+    inspector.calls.at(-1).finish(); assert.equal(motion.snapshots.length, 0);
+});
+
 test('outgoing inspector copies live form values and scroll offsets without duplicate IDs or focusable controls', () => {
     const root = new Element(), field = new Element(), label = new Element(); root.id = 'inspector'; field.id = 'position';
     field.value = '6.123456'; field.defaultValue = '0'; field.checked = true; field.setAttribute('autofocus', ''); label.setAttribute('for', 'position');
@@ -174,6 +248,7 @@ test('hidden inspectors wait until visible, and reduced motion settles panels an
     update(['A', 'B', 'C']); assert.equal(inspector.calls.length, 1);
     assert.equal(stack.children.length, 2); assert.ok(stack.children.every(node => !node.calls.length));
     update(['A']); assert.equal(stack.children.length, 0); assert.equal(stack.hidden, true);
+    update(['D']); assert.equal(inspector.calls.length, 1); assert.equal(motion.snapshots.length, 0);
     motion.update(null, []); assert.equal(motion.right.active, false);
     reduced = false;
 });

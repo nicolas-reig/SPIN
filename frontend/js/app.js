@@ -193,7 +193,7 @@ function selectParentExhibits(ids) {
     selected = editSelection.has(selected) ? selected : records[0]?.id || null;
     creationOpen = false;
     if (editConflict) editConflict.open = false;
-    renderList(); renderInspector({ focusSelection: true }); renderMapUI(); updateMap(); syncEditTools(); persistEdit(); syncUrl();
+    renderList(); renderInspector({ focusSelection: true, replaceSelection: true }); renderMapUI(); updateMap(); syncEditTools(); persistEdit(); syncUrl();
 }
 
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
@@ -678,7 +678,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
     if (e.floorId) floorId = e.floorId;
     renderList();
-    renderInspector({ origin, focusSelection: true });
+    renderInspector({ origin, focusSelection: true, replaceSelection: !extend });
     renderMapUI();
     await updateMap(changed);
     syncEditTools();
@@ -743,7 +743,7 @@ function noteHTML(n) {
         </article>`;
 }
 
-function renderInspector({ origin = 'other', focusSelection = false } = {}) {
+function renderInspector({ origin = 'other', focusSelection = false, replaceSelection = false } = {}) {
     const visible = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     document.body.classList.toggle('inspector-hidden', !visible);
     $('#inspector').inert = !visible || Boolean(editSave?.saving);
@@ -762,11 +762,11 @@ function renderInspector({ origin = 'other', focusSelection = false } = {}) {
     const sameContext = context === panelMotion.context;
     const navigation = sameContext ? inspectorNavigation.capture() : null;
     const ids = creationOpen || editConflict?.open ? [] : edit ? [...editSelection] : records.map(record => record.id);
-    panelMotion.prepare(context, ids);
+    panelMotion.prepare(context, ids, { replace: replaceSelection });
     renderInspectorContent();
     if (edit && !creationOpen && !editConflict?.open) inspectorNavigation.update(editSelection, hardwareSelection, { previous: navigation, focus: focusSelection });
     else inspectorNavigation.reset();
-    if (panelMotion.update(context, ids, { origin })) {
+    if (panelMotion.update(context, ids, { origin, replace: replaceSelection })) {
         const title = $('#inspector h1')?.textContent;
         if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
     }

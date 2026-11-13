@@ -31,7 +31,7 @@ import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
-import { hardwareKey, normalizeHardwareSelection, commonTransform } from './transform-selection.js';
+import { hardwareKey, normalizeHardwareSelection, commonTransform, hardwareSelected, expandExhibitSelection } from './transform-selection.js';
 import { hardwareParameters, exhibitParameters } from './placement-inspector.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
@@ -148,32 +148,32 @@ function commitTransforms(changes) {
     updateTransformFields();
 }
 
-function selectionFields() {
+function selectionFields(owner = null) {
     const entries = selectionTransforms();
-    if (entries.length < 2) return `<p class="small muted placement-context">${esc(t('selectionDifferentFloors'))}</p>`;
-    return `<section class="selection-transform"><div class="row between"><h2>${esc(t('transformTogether'))}</h2><div class="selection-orientation"><label class="sr-only" for="selection-space">${esc(t('transformOrientation'))}</label><select id="selection-space">${options([['world', t('globalOrientation')], ['local', t('localOrientation')]], transformSpace)}</select></div></div>
+    const content = entries.length < 2 ? `<p class="small muted placement-context">${esc(t('selectionDifferentFloors'))}</p>` : `<div class="row between"><span class="small muted">${esc(t(hardwareSelection.length ? 'hardwareSelectionScope' : 'exhibitSelectionScope'))}</span><div class="selection-orientation"><label class="sr-only" for="selection-space">${esc(t('transformOrientation'))}</label><select id="selection-space">${options([['world', t('globalOrientation')], ['local', t('localOrientation')]], transformSpace)}</select></div></div>
         <p class="small muted placement-context">${esc(t('selectionTransformHint'))}</p>
         ${vectorFields(identity(), 'data-selection-delta', 'selection', { labels: { position: 'moveBy', rotation: 'rotateBy', scale: 'scaleFactor' }, hints: { position: 'selectionMoveHint', rotation: 'selectionRotateHint' }, keys: ['position', 'rotation'] })}
-        <div class="vector"><h3 ${editHelp('selectionScaleHint')}>${esc(t('scaleFactor'))}</h3><div class="axis-values"><div class="axis-value"><label data-number-drag for="transform-selection-scale-all" ${editHelp('selectionScaleHint')}>${icon('link')}</label><input id="transform-selection-scale-all" type="number" min="-1000" max="1000" step="any" data-selection-delta data-vector="scale" data-axis="all" value="1" aria-label="${esc(t('scaleFactor'))}" ${editHelp('selectionScaleHint')}></div></div></div></section>`;
+        <div class="vector"><h3 ${editHelp('selectionScaleHint')}>${esc(t('scaleFactor'))}</h3><div class="axis-values"><div class="axis-value"><label data-number-drag for="transform-selection-scale-all" ${editHelp('selectionScaleHint')}>${icon('link')}</label><input id="transform-selection-scale-all" type="number" min="-1000" max="1000" step="any" data-selection-delta data-vector="scale" data-axis="all" value="1" aria-label="${esc(t('scaleFactor'))}" ${editHelp('selectionScaleHint')}></div></div></div>`;
+    return `<details class="exhibit-transform selection-transform" data-selection-placement ${owner ? `data-exhibit-placement="${esc(owner)}"` : ''} open><summary>${esc(t('transformTogether'))}</summary>${content}</details>`;
 }
 
 function bindSelectionFields() {
-    $('#structure-form')?.addEventListener('change', event => { if (event.target.dataset.vector) applyEditorField(event.target); });
+    $('#structure-form')?.addEventListener('change', event => { if (event.target.id !== 'selection-space') applyEditorField(event.target); });
     $('#structure-form')?.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
     $('#selection-space')?.addEventListener('change', event => {
         numberDrag?.cancel(); transformSpace = event.target.value; syncEditTools(); renderTransformToolbar(); persistEdit();
     });
 }
 
-function renderMultiTransformInspector() { renderSelectionInspector(true); }
-
 function renderSelectionInspector(hardware) {
     const records = selectedExhibits();
-    const title = hardware ? `${hardwareSelection.length} ${t('hardwareComponents')}` : `${records.length} ${t('exhibits')}`;
-    const members = hardware ? records.map((record, groupIndex) => `<section class="selection-owner"><div class="row between selection-owner-heading"><h3>${esc(record.name)}</h3><button type="button" class="quiet" data-select-parent="${esc(record.id)}">${esc(t('wholeExhibit'))}</button></div>
-        ${hardwareSelection.filter(entry => entry.exhibitId === record.id).map(entry => hardwareParameters(record, entry.instanceIndex, data().assets, `member-${groupIndex}-${entry.instanceIndex}`)).join('')}</section>`).join('') : records.map((record, index) => exhibitParameters(record, `exhibit-${index}`, { active: true, showName: true, hardware: true, assets: data().assets })).join('');
+    const title = `${records.length} ${t('exhibits')}`;
+    const members = records.map((record, groupIndex) => `<section class="selection-owner"><div class="row between selection-owner-heading"><h3>${esc(record.name)}</h3><button type="button" class="quiet" data-select-parent="${esc(record.id)}">${esc(t('wholeExhibit'))}</button></div>
+        ${exhibitParameters(record, `exhibit-${groupIndex}`, { active: false })}
+        ${record.models.map((_, instanceIndex) => hardwareParameters(record, instanceIndex, data().assets, `member-${groupIndex}-${instanceIndex}`, {
+            selected: hardwareSelected(record.id, instanceIndex, editSelection, hardwareSelection), expanded: hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === instanceIndex)
+        })).join('')}</section>`).join('');
     $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(title)}</h1></div><div class="panel-content" id="structure-panel">
-        <div class="selection-scope"><span class="small muted">${esc(t(hardware ? 'hardwareSelectionScope' : 'exhibitSelectionScope'))}</span>${hardware ? `<button type="button" class="quiet" data-select-parent-exhibits>${esc(t('selectOwningExhibits'))}</button>` : ''}</div>
         <form id="structure-form" novalidate>${selectionFields()}<details class="selection-members" open><summary>${esc(t(hardware ? 'individualHardware' : 'individualExhibits'))}</summary>${members}</details><div class="error" id="structure-error" role="alert" hidden></div></form>
         ${hardware ? '' : joinInspectorHTML(records)}</div>`;
     bindSelectionFields();
@@ -637,10 +637,11 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false) {
     if (edit && hardware && clicked?.models[instanceIndex]) {
         const entry = { exhibitId: id, instanceIndex };
         const key = hardwareKey(entry);
+        if (extend && clicked.floorId === floorId && !hardwareSelection.length) hardwareSelection = expandExhibitSelection(editSelection, data(), floorId);
         if (!extend || clicked.floorId !== floorId) hardwareSelection = [entry];
         else if (hardwareSelection.some(item => hardwareKey(item) === key)) hardwareSelection = hardwareSelection.filter(item => hardwareKey(item) !== key);
         else hardwareSelection.push(entry);
-        editSelection = new Set(hardwareSelection.length ? hardwareSelection.map(item => item.exhibitId) : [id]);
+        editSelection = new Set(hardwareSelection.map(item => item.exhibitId));
         selected = editSelection.has(id) ? id : [...editSelection][0] || null;
     } else if (edit && extend) {
         hardwareSelection = [];
@@ -1312,8 +1313,6 @@ function joinProblem(records) {
     return '';
 }
 
-function renderJoinInspector() { renderSelectionInspector(false); }
-
 function joinInspectorHTML(records) {
     const problem = joinProblem(records);
     return `<details class="join-selection"><summary>${esc(t('joinSelectedExhibits'))}</summary><form id="join-form" novalidate>
@@ -1399,33 +1398,26 @@ function editHistory(direction) {
 function renderEditInspector() {
     numberDrag?.cancel();
     if (editConflict?.open) { renderEditConflict(); return; }
-    if (!creationOpen && hardwareSelection.length > 1) { renderMultiTransformInspector(); return; }
-    if (!creationOpen && editSelection.size > 1) { renderJoinInspector(); return; }
+    if (!creationOpen && editSelection.size > 1) { renderSelectionInspector(Boolean(hardwareSelection.length)); return; }
     const record = exhibit();
     const title = creationOpen ? t('newExhibit') : displayName(record);
     $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
-    const wholePlacement = record.models.length ? exhibitParameters(record, 'group', { active: !hardwareSelection.length }) : '';
+    const wholePlacement = record.models.length ? hardwareSelection.length > 1 ? selectionFields(record.id) : exhibitParameters(record, 'group', { active: true }) : '';
     const content = `
+        ${wholePlacement}
         <div class="field"><label for="ex-floor">${esc(t('floor'))}</label><select id="ex-floor" name="floorId" ${editHelp('floorAssignmentHint')}>${options([['', t('noFloor')], ...data().floors.map(item => [item.id, item.names[lang()]])], record.floorId || '')}</select></div>
-        ${!hardwareSelection.length ? wholePlacement : ''}
         <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div></details></div>
-        <div id="instance-list">${record.models.map((instance, index) => {
-            const asset = hardware.find(item => item.id === instance.model);
-            return `<article data-hardware-card="${index}" data-exhibit="${esc(record.id)}" class="model-instance ${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index) ? 'active' : ''}">
-                <div class="instance-header"><button type="button" class="quiet instance-name" data-edit-instance="${index}" aria-pressed="${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index)}" ${editHelp('selectHardwareHint')}>${esc(asset?.name || instance.model)}${record.models.filter(item => item.model === instance.model).length > 1 ? `<small>${index + 1}</small>` : ''}</button>
-                    <div class="item-actions"><button type="button" class="icon-button" data-duplicate-instance="${index}" aria-label="${esc(t('duplicate') + ': ' + (asset?.name || instance.model))}" ${editHelp('duplicateHardwareHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-remove-instance="${index}" aria-label="${esc(t('remove') + ': ' + (asset?.name || instance.model))}" ${editHelp('removeHardwareHint')}>${icon('trash')}</button></div></div>
-                <details class="instance-placement" data-hardware-placement="${index}" data-exhibit="${esc(record.id)}" ${hardwareSelection.some(item => item.exhibitId === record.id && item.instanceIndex === index) ? 'open' : ''}><summary ${editHelp('instancePlacementHint')}>${esc(t('placement'))}</summary><p class="small muted placement-context">${esc(t('relativeToExhibit'))} ${esc(record.name)}</p><label class="sr-only" for="instance-model-${index}">${esc(t('model'))}</label><select id="instance-model-${index}" data-instance-model="${index}" ${editHelp('replaceHardwareHint')}>${options(hardware.map(item => [item.id, item.name]), instance.model)}</select>${vectorFields(instance.transform, `data-instance="${index}"`, index)}</details>
-            </article>`;
-        }).join('')}</div>
-        ${hardwareSelection.length ? wholePlacement : ''}
+        <div id="instance-list">${record.models.map((_, index) => hardwareParameters(record, index, data().assets, index, {
+            selected: hardwareSelected(record.id, index, editSelection, hardwareSelection),
+            expanded: hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === index), editable: true
+        })).join('')}</div>
         ${viewPresets(record)}`;
     $('#structure-slot').innerHTML = `<form id="structure-form" novalidate>${content}<div class="error" id="structure-error" role="alert" hidden></div></form>`;
     const form = $('#structure-form');
-    form.addEventListener('submit', event => { event.preventDefault(); saveExit(); });
-    form.addEventListener('change', event => applyEditorField(event.target));
+    bindSelectionFields();
     if (record.models.length) form.querySelector('#ex-floor option[value=""]').disabled = true;
     syncEditTools();
 }
@@ -2353,8 +2345,8 @@ $('#inspector').addEventListener('toggle', event => {
     if (!edit || editSave?.saving || !section.isConnected || !section.open) return;
     if (section.dataset.hardwarePlacement !== undefined) {
         const id = section.dataset.exhibit, index = Number(section.dataset.hardwarePlacement);
-        if (!hardwareSelection.some(entry => entry.exhibitId === id && entry.instanceIndex === index)) select(id, index, false, true);
-    } else if (section.dataset.exhibitPlacement && hardwareSelection.length) selectParentExhibits([section.dataset.exhibitPlacement]);
+        if (!hardwareSelected(id, index, editSelection, hardwareSelection)) select(id, index, false, true);
+    }
 }, true);
 
 document.addEventListener('click', async event => {

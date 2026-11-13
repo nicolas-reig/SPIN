@@ -1,5 +1,14 @@
 export const hardwareKey = ({ exhibitId, instanceIndex }) => JSON.stringify([exhibitId, instanceIndex]);
 
+export function hardwareSelected(exhibitId, instanceIndex, exhibits, hardware) {
+    return hardware.length ? hardware.some(entry => entry.exhibitId === exhibitId && entry.instanceIndex === instanceIndex) : exhibits.has(exhibitId);
+}
+
+export function expandExhibitSelection(exhibits, data, floorId) {
+    return data.exhibits.filter(record => exhibits.has(record.id) && record.floorId === floorId)
+        .flatMap(record => record.models.map((_, instanceIndex) => ({ exhibitId: record.id, instanceIndex })));
+}
+
 export function normalizeHardwareSelection(selection, data, floorId) {
     const seen = new Set();
     return (Array.isArray(selection) ? selection : []).filter(entry => {

@@ -404,7 +404,7 @@ export class MapView {
     }
     exhibitMaterial(status, selected = false) {
         if (selected) return this.materials.selection;
-        return this.editing ? this.materials.retired : this.materials[status] || this.materials.ok;
+        return this.editing ? this.materials.editContext : this.materials[status] || this.materials.ok;
     }
     transformEntries() {
         if (!this.editing) return [];
@@ -422,8 +422,9 @@ export class MapView {
         const hardware = new Set(this.hardwareSelection.map(transformKey));
         for (const [exhibitId, group] of this.objects) {
             for (const [instanceIndex, holder] of group.children.entries()) {
-                const material = hardware.has(transformKey({ exhibitId, instanceIndex })) ? this.materials.editSelection :
-                    this.exhibitMaterial(group.userData.status, !this.hardwareSelection.length && this.selection.has(exhibitId));
+                const chosen = this.hardwareSelection.length ? hardware.has(transformKey({ exhibitId, instanceIndex })) : this.selection.has(exhibitId);
+                const material = this.editing ? chosen ? this.materials.editSelection : this.materials.editContext :
+                    this.exhibitMaterial(group.userData.status, chosen);
                 holder.traverse(mesh => { if (mesh.isMesh) mesh.material = material; });
             }
         }

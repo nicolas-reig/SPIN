@@ -40,7 +40,9 @@ installSelects();
 installControlMotion();
 const $ = s => document.querySelector(s),
     api = new Api();
-const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspector-stack'));
+const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspector-stack'), {
+    sidebar: $('#sidebar'), editbar: $('#editbar'), underlays: $('#inspector-underlays')
+});
 let snapshot = null,
     selected = null,
     floorId = '0',
@@ -355,14 +357,14 @@ function collapseEmptyDraft() {
     }
 }
 
-function removeExhibit(id) {
+function removeExhibit(id, origin = 'other') {
     if (!edit || editSave?.saving) return;
     const record = data().exhibits.find(item => item.id === id);
     if (!record) return;
     const remove = () => {
         closeDialog();
         map?.cancelTransform();
-        applyEdit(state => { state.exhibits = state.exhibits.filter(item => item.id !== id); }, { rebuild: true });
+        applyEdit(state => { state.exhibits = state.exhibits.filter(item => item.id !== id); }, { rebuild: true, origin });
         announce(t('exhibitRemoved'), 'undo');
     };
     const createdAt = Date.parse(record.createdAt);
@@ -592,7 +594,7 @@ async function initializeMap() {
             MapView
         } = await import('./map.js');
         instance = new MapView($('#map-canvas'), {
-            onSelect: select,
+            onSelect: (id, index, extend, hardware) => select(id, index, extend, hardware, 'viewport'),
             onMode: mode => { mapMode = mode; syncUrl(); mapControls?.update(); },
             onCamera: () => mapControls?.update(),
             onState: key => {
@@ -623,7 +625,7 @@ async function updateMap(reset = false) {
     });
 }
 
-async function select(id, instanceIndex = 0, extend = false, hardware = false) {
+async function select(id, instanceIndex = 0, extend = false, hardware = false, origin = 'other') {
     if (editSave?.saving) return;
     if (!extend && id && selected === id && !creationOpen && !editConflict?.open && (!edit || editSelection.size === 1 && (
         hardware ? hardwareSelection.length === 1 && hardwareSelection[0].instanceIndex === instanceIndex : !hardwareSelection.length
@@ -664,7 +666,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false) {
     const e = data().exhibits.find(x => x.id === selected);
     if (!e) {
         selected = null;
-        renderList(); renderInspector(); renderMapUI(); updateMap(); syncUrl();
+        renderList(); renderInspector({ origin }); renderMapUI(); updateMap(); syncUrl();
         syncEditTools();
         return;
     }
@@ -672,7 +674,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false) {
     activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
     if (e.floorId) floorId = e.floorId;
     renderList();
-    renderInspector();
+    renderInspector({ origin });
     renderMapUI();
     await updateMap(changed);
     syncEditTools();
@@ -742,7 +744,7 @@ function noteHTML(n) {
         </article>`;
 }
 
-function renderInspector() {
+function renderInspector({ origin = 'other' } = {}) {
     const visible = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     document.body.classList.toggle('inspector-hidden', !visible);
     $('#inspector').inert = !visible || Boolean(editSave?.saving);
@@ -750,7 +752,7 @@ function renderInspector() {
     $('#resizer').inert = !visible;
     $('#resizer').setAttribute('aria-hidden', String(!visible));
     if (!visible) {
-        panelMotion.update(null, []);
+        panelMotion.update(null, [], { origin });
         if (view === 'detail') setView('map');
         renderMobile();
         return;
@@ -760,11 +762,12 @@ function renderInspector() {
     const sameContext = context === panelMotion.context;
     const scroll = sameContext ? $('#structure-panel')?.scrollTop : null;
     const placementOpen = new Map(sameContext ? [...$('#inspector').querySelectorAll('[data-exhibit-placement]')].map(section => [section.dataset.exhibitPlacement, section.open]) : []);
+    const ids = creationOpen || editConflict?.open ? [] : edit ? [...editSelection] : records.map(record => record.id);
+    panelMotion.prepare(context, ids);
     renderInspectorContent();
     for (const section of $('#inspector').querySelectorAll('[data-exhibit-placement]')) if (placementOpen.has(section.dataset.exhibitPlacement)) section.open = placementOpen.get(section.dataset.exhibitPlacement);
     if (scroll != null && $('#structure-panel')) $('#structure-panel').scrollTop = scroll;
-    const ids = edit ? [...editSelection] : records.map(record => record.id);
-    if (panelMotion.update(context, creationOpen || editConflict?.open ? [] : ids)) {
+    if (panelMotion.update(context, ids, { origin })) {
         const title = $('#inspector h1')?.textContent;
         if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
     }
@@ -1382,7 +1385,7 @@ async function joinSelection() {
     }
 }
 
-function editHistory(direction) {
+function editHistory(direction, origin = 'other') {
     if (!edit || editSave?.saving) return;
     map?.cancelTransform();
     numberDrag?.cancel();
@@ -1400,7 +1403,7 @@ function editHistory(direction) {
         editSave.error = null;
         if (!edit.changes().length) editSave.signing = false;
     }
-    changed();
+    changed(origin);
 }
 
 function renderEditInspector() {
@@ -1430,7 +1433,7 @@ function renderEditInspector() {
     syncEditTools();
 }
 
-function render() {
+function render({ origin = 'other' } = {}) {
     document.title = t('exhibits') + ' · ' + t('hub');
     document.body.classList.toggle('editing', Boolean(edit));
     $('#sidebar').inert = Boolean(editSave?.saving);
@@ -1444,7 +1447,7 @@ function render() {
     hardwareSelection = edit ? normalizeHardwareSelection(hardwareSelection, data(), floorId) : [];
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
-    renderInspector();
+    renderInspector({ origin });
     renderMapUI();
     renderEditBar();
     renderMobile();
@@ -1605,15 +1608,15 @@ function syncEditTools() {
     map?.setTool(available ? gizmo : '', snap, transformSpace, axisConstraint);
 }
 
-function changed() {
+function changed(origin = 'other') {
     if (!edit) return;
     persistEdit();
-    render();
+    render({ origin });
     syncEditTools();
     syncUrl();
 }
 
-function applyEdit(change, { rebuild = false, reset = false } = {}) {
+function applyEdit(change, { rebuild = false, reset = false, origin = 'other' } = {}) {
     if (!edit || editSave?.saving) return false;
     const didChange = edit.change(state => {
         change(state);
@@ -1628,7 +1631,7 @@ function applyEdit(change, { rebuild = false, reset = false } = {}) {
     persistEdit();
     renderList();
     renderEditBar();
-    if (rebuild) renderInspector();
+    if (rebuild) renderInspector({ origin });
     renderMapUI();
     updateMap(reset);
     syncEditTools();
@@ -1784,7 +1787,7 @@ numberDrag = installNumberDrag($('#inspector'), {
     }
 });
 
-function openExhibitEditor(isNew = false) {
+function openExhibitEditor(isNew = false, origin = 'other') {
     if (!edit || editSave?.saving) return;
     joinGeneration++;
     map?.cancelTransform();
@@ -1803,7 +1806,7 @@ function openExhibitEditor(isNew = false) {
     if (editConflict) editConflict.open = false;
     persistEdit();
     renderEditBar();
-    renderInspector();
+    renderInspector({ origin });
     renderList();
     renderMapUI();
     updateMap();
@@ -1813,7 +1816,7 @@ function openExhibitEditor(isNew = false) {
     if (creationOpen) $('#creation-form input')?.focus({ preventScroll: true });
 }
 
-function renameExhibit(id = selected) {
+function renameExhibit(id = selected, origin = 'other') {
     const record = data()?.exhibits.find(item => item.id === id);
     if (!edit || !record || editSave?.saving) return;
     showDialog('renameExhibit', `<div class="field"><label for="exhibit-name">${esc(t('name'))}</label><input id="exhibit-name" name="name" value="${esc(record.name)}" maxlength="160" required autocomplete="off"></div>${footer('apply')}`, form => {
@@ -1822,7 +1825,7 @@ function renameExhibit(id = selected) {
             throw Error('duplicateName');
         }
         closeDialog();
-        applyEdit(state => { state.exhibits.find(item => item.id === record.id).name = name; }, { rebuild: true });
+        applyEdit(state => { state.exhibits.find(item => item.id === record.id).name = name; }, { rebuild: true, origin });
     }, 'renameExhibit:' + record.id);
     $('#exhibit-name').focus();
     $('#exhibit-name').select();
@@ -2260,7 +2263,7 @@ function recoverEdit() {
     announce(t('editsRestored'));
 }
 
-function duplicateSelected(id = selected) {
+function duplicateSelected(id = selected, origin = 'other') {
     if (!edit || editSave?.saving) return;
     const record = data().exhibits.find(item => item.id === id);
     if (!record) return;
@@ -2270,7 +2273,7 @@ function duplicateSelected(id = selected) {
     hardwareSelection = [];
     editSelection = new Set([copy.id]);
     creationOpen = false;
-    applyEdit(state => state.exhibits.push(copy), { rebuild: true });
+    applyEdit(state => state.exhibits.push(copy), { rebuild: true, origin });
     if (matchMedia('(max-width:860px)').matches) setView('detail');
 }
 
@@ -2336,10 +2339,10 @@ const actions = {
         setView('map');
         map.focus();
         },
-    editExhibit: () => openExhibitEditor(),
-    newExhibit: () => openExhibitEditor(true),
-    undo: () => editHistory('undo'),
-    redo: () => editHistory('redo'),
+    editExhibit: ({ origin = 'other' } = {}) => openExhibitEditor(false, origin),
+    newExhibit: ({ origin = 'other' } = {}) => openExhibitEditor(true, origin),
+    undo: ({ origin = 'other' } = {}) => editHistory('undo', origin),
+    redo: ({ origin = 'other' } = {}) => editHistory('redo', origin),
     saveExit,
     structureConflict: () => {
         if (!editConflict) return structureConflict();
@@ -2360,13 +2363,14 @@ $('#inspector').addEventListener('toggle', event => {
 document.addEventListener('click', async event => {
     const element = event.target.closest('button,[data-select]');
     if (!element) return;
+    const origin = element.closest('#sidebar, #editbar') ? 'sidebar' : element.closest('#inspector') ? 'inspector' : 'other';
     try {
         if (element.dataset.floor) { changeFloor(element.dataset.floor); return; }
-        if (element.dataset.renameExhibit) { renameExhibit(element.dataset.renameExhibit); return; }
-        if (element.dataset.trashExhibit) { removeExhibit(element.dataset.trashExhibit); return; }
+        if (element.dataset.renameExhibit) { renameExhibit(element.dataset.renameExhibit, origin); return; }
+        if (element.dataset.trashExhibit) { removeExhibit(element.dataset.trashExhibit, origin); return; }
         if (element.dataset.deleteNote) { deleteNoteDialog(element.dataset.deleteNote); return; }
         if (element.dataset.language) { setLanguage(element.dataset.language); render(); return; }
-        if (element.dataset.select) { select(element.dataset.select, 0, event.shiftKey); return; }
+        if (element.dataset.select) { select(element.dataset.select, 0, event.shiftKey, false, origin); return; }
         if (element.dataset.tab) { collapseEmptyDraft(); tab = element.dataset.tab; renderInspector(); return; }
         if (element.dataset.correct) {
             const record = exhibit();
@@ -2423,7 +2427,7 @@ document.addEventListener('click', async event => {
             return;
         }
         if (element.dataset.tool) { setEditTool(element.dataset.tool); return; }
-        if (element.dataset.duplicateExhibit) { duplicateSelected(element.dataset.duplicateExhibit); return; }
+        if (element.dataset.duplicateExhibit) { duplicateSelected(element.dataset.duplicateExhibit, origin); return; }
         if (element.dataset.addHardware) { addHardware(element.dataset.addHardware); return; }
         if (element.hasAttribute('data-select-parent-exhibits')) { selectParentExhibits([...new Set(hardwareSelection.map(entry => entry.exhibitId))]); return; }
         if (element.dataset.selectParent) { selectParentExhibits([element.dataset.selectParent]); return; }
@@ -2439,7 +2443,8 @@ document.addEventListener('click', async event => {
         }
         const action = element.dataset.action;
         if (action?.startsWith('view:')) { setView(action.split(':')[1]); return; }
-        if (actions[action]) await actions[action]();
+        if (['newExhibit', 'editExhibit', 'undo', 'redo'].includes(action)) await actions[action]({ origin });
+        else if (actions[action]) await actions[action]();
     } catch (error) {
         announce(errorText(error));
     }
@@ -2482,7 +2487,7 @@ document.addEventListener('keydown', event => {
         const key = event.key.toLowerCase();
         if ((event.metaKey || event.ctrlKey) && ['z', 'y'].includes(key)) {
             event.preventDefault();
-            actions[key === 'y' || event.shiftKey ? 'redo' : 'undo']();
+            actions[key === 'y' || event.shiftKey ? 'redo' : 'undo']({ origin: event.target.closest('#sidebar, #editbar') ? 'sidebar' : 'other' });
         } else if (!event.metaKey && !event.ctrlKey && !event.altKey && ['g', 'r', 's'].includes(key)) {
             event.preventDefault();
             const tool = { g: 'translate', r: 'rotate', s: 'scale' }[key];
@@ -2493,7 +2498,7 @@ document.addEventListener('keydown', event => {
     }
     if (event.target.matches('[data-select]') && ['Enter', ' '].includes(event.key)) {
         event.preventDefault();
-        select(event.target.dataset.select, 0, event.shiftKey);
+        select(event.target.dataset.select, 0, event.shiftKey, false, 'sidebar');
     }
 });
 

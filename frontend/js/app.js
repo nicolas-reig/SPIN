@@ -33,6 +33,7 @@ import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
 import { hardwareKey, normalizeHardwareSelection, commonTransform, hardwareSelected, expandExhibitSelection } from './transform-selection.js';
 import { hardwareParameters, exhibitParameters } from './placement-inspector.js';
+import { InspectorNavigation } from './inspector-navigation.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 let noteEditor = null;
@@ -43,6 +44,7 @@ const $ = s => document.querySelector(s),
 const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspector-stack'), {
     sidebar: $('#sidebar'), editbar: $('#editbar'), underlays: $('#inspector-underlays')
 });
+const inspectorNavigation = new InspectorNavigation($('#inspector'));
 let snapshot = null,
     selected = null,
     floorId = '0',
@@ -173,10 +175,10 @@ function renderSelectionInspector(hardware) {
     const members = records.map((record, groupIndex) => `<section class="selection-owner"><div class="row between selection-owner-heading"><h3>${esc(record.name)}</h3><button type="button" class="quiet" data-select-parent="${esc(record.id)}">${esc(t('wholeExhibit'))}</button></div>
         ${exhibitParameters(record, `exhibit-${groupIndex}`, { active: false })}
         ${record.models.map((_, instanceIndex) => hardwareParameters(record, instanceIndex, data().assets, `member-${groupIndex}-${instanceIndex}`, {
-            selected: hardwareSelected(record.id, instanceIndex, editSelection, hardwareSelection), expanded: hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === instanceIndex)
+            selected: hardwareSelected(record.id, instanceIndex, editSelection, hardwareSelection), expanded: hardwareSelection.length === 1 && hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === instanceIndex)
         })).join('')}</section>`).join('');
     $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(title)}</h1></div><div class="panel-content" id="structure-panel">
-        <form id="structure-form" novalidate>${selectionFields()}<details class="selection-members" open><summary>${esc(t(hardware ? 'individualHardware' : 'individualExhibits'))}</summary>${members}</details><div class="error" id="structure-error" role="alert" hidden></div></form>
+        <form id="structure-form" novalidate>${selectionFields()}<details class="selection-members"><summary>${esc(t(hardware ? 'individualHardware' : 'individualExhibits'))}</summary>${members}</details><div class="error" id="structure-error" role="alert" hidden></div></form>
         ${hardware ? '' : joinInspectorHTML(records)}</div>`;
     bindSelectionFields();
     if (!hardware) bindJoinInspector();
@@ -191,7 +193,7 @@ function selectParentExhibits(ids) {
     selected = editSelection.has(selected) ? selected : records[0]?.id || null;
     creationOpen = false;
     if (editConflict) editConflict.open = false;
-    renderList(); renderInspector(); renderMapUI(); updateMap(); syncEditTools(); persistEdit(); syncUrl();
+    renderList(); renderInspector({ focusSelection: true }); renderMapUI(); updateMap(); syncEditTools(); persistEdit(); syncUrl();
 }
 
 const titleFloor = id => data()?.floors.find(f => f.id === id)?.names[lang()] || id || t('noFloor');
@@ -330,6 +332,7 @@ function setView(value) {
     collapseEmptyDraft();
     view = value;
     document.body.dataset.view = value;
+    inspectorNavigation.reveal();
     panelMotion.viewChanged();
     renderMobile();
     map?.resize();
@@ -632,6 +635,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     ))) {
         map?.cancelTransform(); numberDrag?.cancel();
         if (matchMedia('(max-width:860px)').matches) { setView('detail'); panelMotion.settle(); }
+        if (edit) inspectorNavigation.update(editSelection, hardwareSelection, { focus: true });
         return;
     }
     joinGeneration++;
@@ -674,7 +678,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
     if (e.floorId) floorId = e.floorId;
     renderList();
-    renderInspector({ origin });
+    renderInspector({ origin, focusSelection: true });
     renderMapUI();
     await updateMap(changed);
     syncEditTools();
@@ -683,11 +687,6 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     if (edit) persistEdit();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
     if (!extend && matchMedia('(max-width:860px)').matches) setView('detail');
-    if (edit && hardware && hardwareSelection.some(entry => entry.exhibitId === id && entry.instanceIndex === instanceIndex)) {
-        const target = hardwareSelection.length > 1 ? $('#inspector .selection-transform') :
-            [...$('#inspector').querySelectorAll('[data-hardware-card]')].find(card => card.dataset.exhibit === id && Number(card.dataset.hardwareCard) === instanceIndex);
-        target?.scrollIntoView({ block: 'nearest' });
-    }
     if (focused && !focused.isConnected && document.activeElement === document.body) {
         [...document.querySelectorAll('#exhibit-list [data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
     }
@@ -744,7 +743,7 @@ function noteHTML(n) {
         </article>`;
 }
 
-function renderInspector({ origin = 'other' } = {}) {
+function renderInspector({ origin = 'other', focusSelection = false } = {}) {
     const visible = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
     document.body.classList.toggle('inspector-hidden', !visible);
     $('#inspector').inert = !visible || Boolean(editSave?.saving);
@@ -752,6 +751,7 @@ function renderInspector({ origin = 'other' } = {}) {
     $('#resizer').inert = !visible;
     $('#resizer').setAttribute('aria-hidden', String(!visible));
     if (!visible) {
+        inspectorNavigation.reset();
         panelMotion.update(null, [], { origin });
         if (view === 'detail') setView('map');
         renderMobile();
@@ -760,13 +760,12 @@ function renderInspector({ origin = 'other' } = {}) {
     const records = creationOpen || editConflict?.open ? [] : edit ? selectedExhibits() : [exhibit()];
     const context = inspectorContext(records, creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
     const sameContext = context === panelMotion.context;
-    const scroll = sameContext ? $('#structure-panel')?.scrollTop : null;
-    const placementOpen = new Map(sameContext ? [...$('#inspector').querySelectorAll('[data-exhibit-placement]')].map(section => [section.dataset.exhibitPlacement, section.open]) : []);
+    const navigation = sameContext ? inspectorNavigation.capture() : null;
     const ids = creationOpen || editConflict?.open ? [] : edit ? [...editSelection] : records.map(record => record.id);
     panelMotion.prepare(context, ids);
     renderInspectorContent();
-    for (const section of $('#inspector').querySelectorAll('[data-exhibit-placement]')) if (placementOpen.has(section.dataset.exhibitPlacement)) section.open = placementOpen.get(section.dataset.exhibitPlacement);
-    if (scroll != null && $('#structure-panel')) $('#structure-panel').scrollTop = scroll;
+    if (edit && !creationOpen && !editConflict?.open) inspectorNavigation.update(editSelection, hardwareSelection, { previous: navigation, focus: focusSelection });
+    else inspectorNavigation.reset();
     if (panelMotion.update(context, ids, { origin })) {
         const title = $('#inspector h1')?.textContent;
         if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
@@ -1423,7 +1422,7 @@ function renderEditInspector() {
         <div class="instance-heading row between"><h3>${esc(t('modelInstances'))}</h3><details class="hardware-picker"><summary class="icon-button" aria-label="${esc(t('addModel'))}" ${editHelp('addHardwareHint')}>${icon('plus')}</summary><div class="popover">${hardware.map(asset => `<button type="button" data-add-hardware="${esc(asset.id)}" ${editHelp('addHardwareHint')}>${esc(asset.name)}</button>`).join('') || `<p class="small muted">${esc(t('noHardware'))}</p>`}</div></details></div>
         <div id="instance-list">${record.models.map((_, index) => hardwareParameters(record, index, data().assets, index, {
             selected: hardwareSelected(record.id, index, editSelection, hardwareSelection),
-            expanded: hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === index), editable: true
+            expanded: hardwareSelection.length === 1 && hardwareSelection.some(entry => entry.exhibitId === record.id && entry.instanceIndex === index), editable: true
         })).join('')}</div>
         ${viewPresets(record)}`;
     $('#structure-slot').innerHTML = `<form id="structure-form" novalidate>${content}<div class="error" id="structure-error" role="alert" hidden></div></form>`;

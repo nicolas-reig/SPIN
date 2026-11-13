@@ -31,7 +31,7 @@ import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
 import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
-import { hardwareKey, normalizeHardwareSelection, commonTransform, hardwareSelected, expandExhibitSelection } from './transform-selection.js';
+import { normalizeHardwareSelection, commonTransform, hardwareSelected, wholeHardwareSelection, pickHardwareSelection } from './transform-selection.js';
 import { hardwareParameters, exhibitParameters } from './placement-inspector.js';
 import { InspectorNavigation } from './inspector-navigation.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
@@ -648,13 +648,11 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     const focused = document.activeElement?.closest('#exhibit-list [data-select]');
     const clicked = data().exhibits.find(x => x.id === id);
     if (edit && hardware && clicked?.models[instanceIndex]) {
-        const entry = { exhibitId: id, instanceIndex };
-        const key = hardwareKey(entry);
-        if (extend && clicked.floorId === floorId && !hardwareSelection.length) hardwareSelection = expandExhibitSelection(editSelection, data(), floorId);
-        if (!extend || clicked.floorId !== floorId) hardwareSelection = [entry];
-        else if (hardwareSelection.some(item => hardwareKey(item) === key)) hardwareSelection = hardwareSelection.filter(item => hardwareKey(item) !== key);
-        else hardwareSelection.push(entry);
-        editSelection = new Set(hardwareSelection.map(item => item.exhibitId));
+        const selection = pickHardwareSelection(editSelection, hardwareSelection, data(), floorId, {
+            exhibitId: id, instanceIndex, extend, viewport: origin === 'viewport'
+        });
+        hardwareSelection = selection.hardware;
+        editSelection = selection.exhibits;
         selected = editSelection.has(id) ? id : [...editSelection][0] || null;
     } else if (edit && extend) {
         if (!clicked) return;
@@ -1443,7 +1441,7 @@ function render({ origin = 'other' } = {}) {
     editSelection = new Set(edit ? [...editSelection].filter(id => data().exhibits.some(record => record.id === id)) : []);
     if (edit && selected && !editSelection.size) editSelection.add(selected);
     if (edit && editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
-    hardwareSelection = edit ? normalizeHardwareSelection(hardwareSelection, data(), floorId) : [];
+    hardwareSelection = edit ? wholeHardwareSelection(editSelection, normalizeHardwareSelection(hardwareSelection, data(), floorId), data()) : [];
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
     renderInspector({ origin });
@@ -1623,6 +1621,7 @@ function applyEdit(change, { rebuild = false, reset = false, origin = 'other' } 
     });
     if (!didChange) return false;
     hardwareSelection = normalizeHardwareSelection(hardwareSelection, data(), floorId);
+    hardwareSelection = wholeHardwareSelection(editSelection, hardwareSelection, data());
     if (!edit.value.exhibits.some(record => record.id === selected)) selected = null;
     editConflict = null;
     if (editSave) editSave.error = null;

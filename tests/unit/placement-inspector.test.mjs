@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { identity } from '../../frontend/js/domain.js';
 import { hardwareParameters, exhibitParameters } from '../../frontend/js/placement-inspector.js';
-import { hardwareSelected, expandExhibitSelection } from '../../frontend/js/transform-selection.js';
+import { hardwareSelected, expandExhibitSelection, pickHardwareSelection, wholeHardwareSelection } from '../../frontend/js/transform-selection.js';
 
 const record = id => ({ id, name: id, transform: identity(), models: [{ model: 'Display', transform: identity() }, { model: 'Display', transform: identity() }] });
 const assets = [{ id: 'Display', name: 'Display' }];
@@ -49,4 +49,34 @@ test('extending an implicit whole-exhibit selection starts with all current-floo
     const remaining = expanded.filter(entry => entry.instanceIndex !== 0);
     assert.equal(hardwareSelected('Alpha', 0, new Set(['Alpha']), remaining), false);
     assert.equal(hardwareSelected('Alpha', 1, new Set(['Alpha']), remaining), true);
+});
+
+test('the first viewport click selects the entire exhibit and the next click selects an individual component', () => {
+    const a = { ...record('Alpha'), floorId: '1' }, data = { exhibits: [a] };
+    const first = pickHardwareSelection(new Set(), [], data, '1', { exhibitId: 'Alpha', instanceIndex: 1, viewport: true });
+    assert.deepEqual([...first.exhibits], ['Alpha']); assert.deepEqual(first.hardware, []);
+    assert.equal(hardwareSelected('Alpha', 0, first.exhibits, first.hardware), true);
+    const second = pickHardwareSelection(first.exhibits, first.hardware, data, '1', { exhibitId: 'Alpha', instanceIndex: 1, viewport: true });
+    assert.deepEqual(second.hardware, [{ exhibitId: 'Alpha', instanceIndex: 1 }]);
+});
+
+test('manually selecting the final component becomes a whole-exhibit selection and Shift can remove one again', () => {
+    const a = { ...record('Alpha'), floorId: '1' }, data = { exhibits: [a] };
+    const first = pickHardwareSelection(new Set(), [], data, '1', { exhibitId: 'Alpha', instanceIndex: 0 });
+    const all = pickHardwareSelection(first.exhibits, first.hardware, data, '1', { exhibitId: 'Alpha', instanceIndex: 1, extend: true });
+    assert.deepEqual(all.hardware, []); assert.deepEqual([...all.exhibits], ['Alpha']);
+    const subset = pickHardwareSelection(all.exhibits, all.hardware, data, '1', { exhibitId: 'Alpha', instanceIndex: 0, extend: true });
+    assert.deepEqual(subset.hardware, [{ exhibitId: 'Alpha', instanceIndex: 1 }]);
+    const empty = pickHardwareSelection(subset.exhibits, subset.hardware, data, '1', { exhibitId: 'Alpha', instanceIndex: 1, extend: true });
+    assert.equal(empty.exhibits.size, 0); assert.deepEqual(empty.hardware, []);
+});
+
+test('Shift-clicking a new viewport exhibit selects all its hardware and preserves an existing partial selection', () => {
+    const data = { exhibits: ['Alpha', 'Beta'].map(id => ({ ...record(id), floorId: '1' })) };
+    const first = [{ exhibitId: 'Alpha', instanceIndex: 1 }];
+    const selection = pickHardwareSelection(new Set(['Alpha']), first, data, '1', { exhibitId: 'Beta', instanceIndex: 1, viewport: true, extend: true });
+    assert.deepEqual(selection.hardware, [...first, { exhibitId: 'Beta', instanceIndex: 0 }, { exhibitId: 'Beta', instanceIndex: 1 }]);
+    assert.deepEqual([...selection.exhibits], ['Alpha', 'Beta']);
+    assert.deepEqual(first, [{ exhibitId: 'Alpha', instanceIndex: 1 }]);
+    assert.deepEqual(wholeHardwareSelection(new Set(['Alpha']), [{ exhibitId: 'Alpha', instanceIndex: 0 }], data), [{ exhibitId: 'Alpha', instanceIndex: 0 }]);
 });

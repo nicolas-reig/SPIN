@@ -840,6 +840,18 @@ summary {
 }
 #inspector-underlays[hidden] { display: none; }
 #inspector-underlays.withdrawing { z-index: 5; }
+.inspector-retracting {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+}
+.inspector-stack-outgoing {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: calc(100% + var(--stack-extent, 0px));
+    z-index: -1;
+    pointer-events: none;
+}
 .inspector-outgoing {
     position: absolute !important;
     inset: 0 !important;
@@ -863,7 +875,7 @@ summary {
 @media (prefers-reduced-motion: no-preference) {
     .inspector-stack-card { transition: transform 280ms cubic-bezier(.2,.7,.2,1), top 280ms cubic-bezier(.2,.7,.2,1), bottom 280ms cubic-bezier(.2,.7,.2,1); }
 }
-@media (max-width: 860px) { #inspector-stack { display: none; } }
+@media (max-width: 860px) { #inspector-stack, .inspector-stack-outgoing { display: none; } }
 
 .inspector-header {
     padding: 31px 24px 18px;

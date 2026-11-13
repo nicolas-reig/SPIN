@@ -69,16 +69,20 @@ export class PanelMotion {
         this.right.move(0, initial);
     }
 
-    transition(context, exhibits) {
+    transition(context, exhibits, { replace = false } = {}) {
         if (context === this.context) return null;
         if (!context) return 'close';
+        if (exhibits.length === 1 && this.exhibits.length && (replace || !this.exhibits.includes(exhibits[0]))) return 'replace';
         if (exhibits.some(id => !this.exhibits.includes(id)) || !this.exhibits.length || !exhibits.length) return 'enter';
         if (this.exhibits.some(id => !exhibits.includes(id))) return this.exhibits.at(-1) === exhibits.at(-1) ? 'update' : 'remove';
         return 'enter';
     }
 
     clearSnapshots() {
-        for (const snapshot of this.snapshots) { snapshot.motion?.cancel(); snapshot.node.remove(); }
+        for (const snapshot of this.snapshots) {
+            snapshot.motion?.cancel(); snapshot.arrival?.cancel();
+            snapshot.node.remove(); snapshot.stack?.remove(); snapshot.surface?.remove();
+        }
         this.snapshots = [];
         this.preparedSnapshot = null;
         if (this.removalInert !== undefined) { this.inspector.inert = this.removalInert; this.removalInert = undefined; }
@@ -86,7 +90,8 @@ export class PanelMotion {
     }
 
     removeSnapshot(snapshot) {
-        snapshot.motion?.cancel(); snapshot.node.remove();
+        snapshot.motion?.cancel(); snapshot.arrival?.cancel();
+        snapshot.node.remove(); snapshot.stack?.remove(); snapshot.surface?.remove();
         this.snapshots = this.snapshots.filter(item => item !== snapshot);
         if (this.preparedSnapshot === snapshot) this.preparedSnapshot = null;
         if (!this.snapshots.some(item => item.exiting)) {
@@ -96,25 +101,49 @@ export class PanelMotion {
         }
     }
 
-    prepare(context, exhibits) {
+    prepare(context, exhibits, options = {}) {
         this.preparedSnapshot = null;
-        const transition = this.transition(context, exhibits);
-        if (!['enter', 'remove'].includes(transition) || !this.underlays || !this.displayed || !this.canAnimate || !this.inspector.getClientRects().length) return;
+        const transition = this.transition(context, exhibits, options);
+        if (!['enter', 'remove', 'replace'].includes(transition) || !this.underlays || !this.displayed || !this.canAnimate || !this.inspector.getClientRects().length) return;
         const snapshot = inspectorSnapshot(this.inspector, ++this.snapshotSerial);
         snapshot.exiting = transition === 'remove';
+        if (transition === 'replace') {
+            snapshot.surface = document.createElement('div');
+            snapshot.surface.className = 'inspector-retracting';
+        }
+        if (transition === 'replace' && this.stack && this.layers.size && this.desktop.matches) {
+            snapshot.stack = this.stack.cloneNode(true);
+            snapshot.stack.id = '';
+            snapshot.stack.classList.add('inspector-stack-outgoing');
+            // Freeze the existing border positions, including interrupted stack
+            // additions, before retracting them with their old inspector.
+            [...snapshot.stack.children].forEach((card, index) => {
+                const current = getComputedStyle(this.stack.children[index]);
+                for (const property of ['transform', 'opacity', 'top', 'bottom']) card.style[property] = current[property];
+                card.style.transition = 'none';
+            });
+            snapshot.surface.append(snapshot.stack);
+        }
+        snapshot.surface?.append(snapshot.node);
         this.underlays.hidden = false;
         this.underlays.classList.toggle('withdrawing', transition === 'remove');
-        if (transition === 'enter' && this.removalInert !== undefined) { this.inspector.inert = this.removalInert; this.removalInert = undefined; }
+        if (transition !== 'remove' && this.removalInert !== undefined) { this.inspector.inert = this.removalInert; this.removalInert = undefined; }
         const departing = this.snapshots.findIndex(item => item.exiting);
-        if (departing < 0) { this.underlays.append(snapshot.node); this.snapshots.push(snapshot); }
-        else { this.snapshots[departing].node.before(snapshot.node); this.snapshots.splice(departing, 0, snapshot); }
+        const surface = snapshot.surface || snapshot.node;
+        if (departing < 0) { this.underlays.append(surface); this.snapshots.push(snapshot); }
+        else {
+            const previous = this.snapshots[departing];
+            (previous.surface || previous.node).before(surface); this.snapshots.splice(departing, 0, snapshot);
+        }
         snapshot.restoreScroll();
         this.preparedSnapshot = snapshot;
         // A rapid next selection continues the partially arrived previous panel
         // underneath the new one, instead of teleporting its content into place.
         if (this.right.active) {
-            snapshot.motion = new SpringMotion([snapshot.node], { stiffness: 280, damping: 25, name: 'inspector-underlay-spring' });
-            snapshot.motion.move(0, this.right.state());
+            const continuation = new SpringMotion([snapshot.node], { stiffness: 280, damping: 25, name: 'inspector-underlay-spring' });
+            if (transition === 'replace') snapshot.arrival = continuation;
+            else snapshot.motion = continuation;
+            continuation.move(0, this.right.state());
         }
     }
 
@@ -161,13 +190,13 @@ export class PanelMotion {
         });
     }
 
-    update(context, exhibits = this.exhibits, { origin = 'other' } = {}) {
+    update(context, exhibits = this.exhibits, { origin = 'other', replace = false } = {}) {
         const changed = context !== this.context;
-        const transition = this.transition(context, exhibits);
+        const transition = this.transition(context, exhibits, { replace });
         const previousExhibits = this.exhibits;
         const stackChanged = exhibits.length !== previousExhibits.length || exhibits.some((id, index) => id !== previousExhibits[index]);
         this.exhibits = [...exhibits];
-        if (stackChanged) this.updateStack(exhibits);
+        if (stackChanged) this.updateStack(exhibits, transition !== 'replace' && this.canAnimate && this.desktop.matches);
         if (changed) this.afterEntry = null;
         const wasOpen = this.context !== null;
         this.context = context;
@@ -197,6 +226,15 @@ export class PanelMotion {
                     outgoing.motion ??= new SpringMotion([outgoing.node], { stiffness: 280, damping: 25, name: 'inspector-underlay-spring' });
                     outgoing.motion.onRest = () => this.removeSnapshot(outgoing);
                     outgoing.motion.move(this.distance, initial);
+                } else if (transition === 'replace') {
+                    const outgoing = this.preparedSnapshot;
+                    if (outgoing) {
+                        outgoing.motion = new SpringMotion([outgoing.surface], {
+                            stiffness: 280, damping: 25, name: 'inspector-retract-spring', onRest: () => this.removeSnapshot(outgoing)
+                        });
+                        outgoing.motion.move(this.distance, { position: 0, velocity: 0 });
+                    }
+                    this.enter({ fresh: true });
                 } else if (transition === 'enter') this.enter({ fresh: exhibits.length > 1 });
             }
             if (changed && origin === 'sidebar' && this.canAnimate && this.sidebar?.getClientRects().length && !this.left.active) this.left.move(0, { position: 0, velocity: 230 });

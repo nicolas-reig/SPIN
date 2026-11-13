@@ -5,6 +5,7 @@ export function exhibitGroup(name = '') {
 }
 
 export const exhibitGroupKey = name => exhibitGroup(name).normalize('NFC').toLowerCase();
+export const matchesExhibitGroup = (name, filter = null) => filter === null || exhibitGroupKey(name) === filter;
 
 export function groupExhibits(records, language = 'en') {
     const groups = new Map();
@@ -20,20 +21,32 @@ export function groupExhibits(records, language = 'en') {
 
 export class ExhibitGroupState {
     collapsed = new Set();
+    filteredCollapsed = new Set();
+    filter = '';
     selection = new Map();
 
-    setOpen(key, open) {
-        if (open) this.collapsed.delete(key);
-        else this.collapsed.add(key);
+    setFilter(filter) {
+        if (this.filter === filter) return;
+        this.filter = filter;
+        this.filteredCollapsed.clear();
     }
 
-    isOpen(key, revealMatches = false) {
-        return revealMatches || !this.collapsed.has(key);
+    setOpen(key, open) {
+        const collapsed = this.filter ? this.filteredCollapsed : this.collapsed;
+        if (open) collapsed.delete(key);
+        else collapsed.add(key);
+    }
+
+    isOpen(key) {
+        return !(this.filter ? this.filteredCollapsed : this.collapsed).has(key);
     }
 
     reveal(records) {
         const next = new Map(records.map(record => [record.id, exhibitGroupKey(record.name)]));
-        for (const [id, key] of next) if (key && this.selection.get(id) !== key) this.collapsed.delete(key);
+        for (const [id, key] of next) if (key && this.selection.get(id) !== key) {
+            this.collapsed.delete(key);
+            this.filteredCollapsed.delete(key);
+        }
         this.selection = next;
     }
 }

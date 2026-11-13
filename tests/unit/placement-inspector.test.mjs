@@ -1,11 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { identity } from '../../frontend/js/domain.js';
-import { hardwareParameters, exhibitParameters } from '../../frontend/js/placement-inspector.js';
+import { hardwareParameters, exhibitParameters, selectionParameters } from '../../frontend/js/placement-inspector.js';
 import { hardwareSelected, expandExhibitSelection, pickHardwareSelection, wholeHardwareSelection } from '../../frontend/js/transform-selection.js';
 
 const record = id => ({ id, name: id, transform: identity(), models: [{ model: 'Display', transform: identity() }, { model: 'Display', transform: identity() }] });
 const assets = [{ id: 'Display', name: 'Display' }];
+
+test('shared selection controls contain only movement, rotation and uniform scale with neutral values', () => {
+    const html = selectionParameters();
+    assert.equal([...html.matchAll(/<input\b/g)].length, 7);
+    assert.equal([...html.matchAll(/data-vector="position"/g)].length, 3);
+    assert.equal([...html.matchAll(/data-vector="rotation"/g)].length, 3);
+    assert.match(html, /data-vector="scale" data-axis="all" value="1"/);
+    assert.doesNotMatch(html, /<p\b|<select\b|data-group-vector|data-hardware-card|selection-members/);
+    const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+    assert.equal(ids.length, new Set(ids).size);
+    assert.doesNotMatch(selectionParameters({ available: false }), /<input\b/);
+});
+
+test('edit parameter menus keep help in tooltips without visible explanatory paragraphs', () => {
+    const html = hardwareParameters(record('Alpha'), 0, assets, 'component') + exhibitParameters(record('Alpha'), 'group');
+    assert.doesNotMatch(html, /<p\b/);
+    assert.match(html, /aria-description=/);
+});
 
 test('selected component parameters expand and retain their owning exhibit across multiple selections', () => {
     const a = hardwareParameters(record('Alpha'), 1, assets, 'member-0-1');

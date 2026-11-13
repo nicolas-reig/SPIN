@@ -1,6 +1,6 @@
 export const dictionary = {
     de: {
-        selectionDifferentFloors: "Für gemeinsame Änderungen platzierte Objekte auf demselben Geschoss auswählen. Einzelne Platzierungen bleiben unten verfügbar.",
+        selectionDifferentFloors: "Für gemeinsame Änderungen Objekte auf demselben Geschoss auswählen.",
         selectionScaleHint: "Alle ausgewählten Objekte proportional um den gemeinsamen Mittelpunkt skalieren. 1 = unverändert, 2 = doppelte Größe.",
         selectionRotateHint: "Alle ausgewählten Objekte um den gemeinsamen Mittelpunkt drehen. Betrag in Grad.",
         selectionMoveHint: "Alle ausgewählten Objekte um diesen Betrag entlang der gewählten globalen oder lokalen Achse verschieben.",
@@ -78,6 +78,7 @@ export const dictionary = {
         renameExhibit: 'Exponat umbenennen',
         multiSelectHint: 'Mit Umschalt-Klick weitere Exponate auswählen oder abwählen.',
         join: 'Zusammenführen',
+        joinTogether: 'Zusammenführen',
         joinInto: 'Beibehaltenes Exponat',
         joinTargetHint: 'Name und Standardansichten dieses Exponats beibehalten.',
         joinHint: 'Die Hardware bleibt an Ort und Stelle. Posts, Fotos und Links werden beim Speichern zusammengeführt.',
@@ -362,7 +363,7 @@ export const dictionary = {
         no: 'Nein'
     },
     en: {
-        selectionDifferentFloors: "Select placed objects on the same floor to transform them together. Individual placements remain available below.",
+        selectionDifferentFloors: "Select objects on the same floor to transform them together.",
         selectionScaleHint: "Scale all selected objects uniformly around their shared center. 1 = unchanged, 2 = double size.",
         selectionRotateHint: "Rotate all selected objects around their shared center. Amount in degrees.",
         selectionMoveHint: "Move all selected objects by this amount along the chosen global or local axis.",
@@ -440,6 +441,7 @@ export const dictionary = {
         renameExhibit: 'Rename exhibit',
         multiSelectHint: 'Shift-click to add or remove exhibits from the selection.',
         join: 'Join',
+        joinTogether: 'Join together',
         joinInto: 'Exhibit to keep',
         joinTargetHint: 'Keep this exhibit’s name and default views.',
         joinHint: 'Hardware stays in place. Posts, photos and links are combined when you save.',

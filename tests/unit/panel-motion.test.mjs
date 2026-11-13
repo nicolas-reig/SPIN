@@ -5,8 +5,13 @@ import { inspectorSnapshot } from '../../frontend/js/inspector-snapshot.js';
 
 class Element {
     children = []; dataset = {}; calls = []; hidden = false; parent = null; offsetWidth = 360;
-    id = ''; textContent = ''; attrs = new Map(); scrollTop = 0; scrollLeft = 0; inert = false;
-    classList = { add() {}, remove() {}, toggle() {} };
+    id = ''; textContent = ''; attrs = new Map(); scrollTop = 0; scrollLeft = 0; inert = false; className = '';
+    classList = {
+        add: name => { this.className = [...new Set([...this.className.split(' ').filter(Boolean), name])].join(' '); },
+        remove: name => { this.className = this.className.split(' ').filter(value => value && value !== name).join(' '); },
+        contains: name => this.className.split(' ').includes(name),
+        toggle: (name, force) => { if (force ?? !this.classList.contains(name)) this.classList.add(name); else this.classList.remove(name); }
+    };
     style = { setProperty(name, value) { this[name] = value; } };
     getClientRects() { return this.hidden ? [] : [{}]; }
     append(node) { this.children.push(node); node.parent = this; }
@@ -16,7 +21,7 @@ class Element {
     setAttribute(name, value) { this.attrs.set(name, value); }
     removeAttribute(name) { this.attrs.delete(name); }
     cloneNode(deep) {
-        const copy = new Element(); copy.id = this.id; copy.textContent = this.textContent; copy.attrs = new Map(this.attrs); copy.dataset = { ...this.dataset };
+        const copy = new Element(); copy.id = this.id; copy.textContent = this.textContent; copy.attrs = new Map(this.attrs); copy.dataset = { ...this.dataset }; copy.className = this.className;
         if ('value' in this) copy.value = this.defaultValue;
         if ('checked' in this) copy.checked = false;
         if ('selected' in this) copy.selected = false;
@@ -91,6 +96,20 @@ test('one inspector gains one decorative backing card for each additional select
     assert.equal(motion.snapshots.at(-1).motion.curve.target, motion.distance, 'top panel withdraws to reveal its predecessor');
     motion.settle(); assert.equal(stack.children.length, 1);
     update(['A']); motion.settle(); assert.equal(stack.children.length, 0); assert.equal(stack.hidden, true);
+});
+
+test('stack additions suppress duplicate underlay shadows and restore the single-panel shadow after retraction', () => {
+    const { inspector, motion, update } = setup();
+    update(['A']); motion.settle();
+    assert.equal(inspector.classList.contains('inspector-stacked'), false);
+    update(['A', 'B']);
+    assert.equal(inspector.classList.contains('inspector-stacked'), true);
+    assert.equal(motion.preparedSnapshot.node.classList.contains('inspector-under-stack'), true);
+    motion.settle(); update(['C']);
+    assert.equal(inspector.classList.contains('inspector-stacked'), false);
+    assert.equal(motion.preparedSnapshot.node.classList.contains('inspector-stacked'), true, 'the retiring stack retains its own depth styling');
+    assert.equal(motion.preparedSnapshot.node.classList.contains('inspector-under-stack'), false, 'a fresh single selection retains the separate spring retraction');
+    motion.settle();
 });
 
 test('opening exhibit creation from the sidebar brings in the populated new view with R and L', () => {

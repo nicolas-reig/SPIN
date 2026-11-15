@@ -72,7 +72,7 @@ let snapshot = null,
 let creation = null, creationOpen = false, editConflict = null;
 let editSelection = new Set();
 let hardwareSelection = [];
-let transformSpace = 'world';
+let transformSpace = 'local';
 let numberDrag;
 let joinGeneration = 0;
 let editSave = null, cancelledEdit = null;
@@ -2018,7 +2018,7 @@ function restoreEdit() {
     const requestId = cancelledEdit.requestId;
     editSelection = new Set(cancelledEdit.selection || (cancelledEdit.selected ? [cancelledEdit.selected] : []));
     hardwareSelection = cancelledEdit.hardwareSelection || [];
-    transformSpace = cancelledEdit.transformSpace || 'world';
+    transformSpace = cancelledEdit.transformSpace || 'local';
     axisConstraint = cancelledEdit.axisConstraint || '';
     snap = Boolean(cancelledEdit.snap);
     ({ edit, creation, creationOpen, selected, floorId, activeInstance, gizmo } = cancelledEdit);
@@ -2315,7 +2315,7 @@ function recoverEdit() {
     activeInstance = saved.activeInstance || 0;
     gizmo = saved.gizmo ?? 'combined';
     hardwareSelection = normalizeHardwareSelection(saved.hardwareSelection, data(), floorId);
-    transformSpace = saved.transformSpace === 'local' ? 'local' : 'world';
+    transformSpace = saved.transformSpace === 'world' ? 'world' : 'local';
     axisConstraint = ['X', 'Y', 'Z'].includes(saved.axisConstraint) ? saved.axisConstraint : '';
     snap = Boolean(saved.snap);
     editSave = saved.signature ? { signature: saved.signature, requestId: saved.requestId || '', signing: false, saving: false } : null;

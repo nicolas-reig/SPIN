@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -30,7 +30,8 @@ console.log(`JavaScript syntax: ${javascript.length} application modules passed`
 
 const php = [
     ...files(join(root, 'backend'), path => path.endsWith('.php')),
-    join(root, 'config.php'), join(root, 'frontend/api.php')
+    join(root, 'config.example.php'), join(root, 'frontend/api.php'),
+    ...(existsSync(join(root, 'config.php')) ? [join(root, 'config.php')] : [])
 ];
 for (const path of php) run('php', ['-l', path], { quiet: true });
 console.log(`PHP syntax: ${php.length} application files passed`);

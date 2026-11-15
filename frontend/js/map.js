@@ -469,7 +469,9 @@ export class MapView {
         return { transaction: new TransformTransaction(entries), orientation: this.transform.orientation() };
     }
     previewSelectionField(preview, key, axis, value) {
-        const changes = preview.transaction.apply(selectionFieldDelta(preview.transaction.center, key, axis, value, preview.orientation));
+        const delta = selectionFieldDelta(preview.transaction.center, key, axis, value, preview.orientation);
+        const rotation = key === 'rotation' ? new THREE.Quaternion().setFromRotationMatrix(delta) : new THREE.Quaternion();
+        const changes = preview.transaction.apply(delta, rotation);
         this.boundsDirty = true;
         this.transform?.update(); this.requestRender();
         this.onTransformPreview(changes);
@@ -499,7 +501,7 @@ export class MapView {
         const position = this.controls.target.clone().applyMatrix4(matrix);
         return [position.x, 0, position.z];
     }
-    setTool(tool, snap = false, space = 'world', axis = '') {
+    setTool(tool, snap = false, space = 'local', axis = '') {
         this.tool = tool; this.snap = snap;
         this.transform?.configure(tool, snap, space, axis);
     }

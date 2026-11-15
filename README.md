@@ -1,6 +1,6 @@
 # SPIN — Spatial Information Navigator
 
-SPIN is an interactive platform for exploring buildings and their exhibits in 2D and 3D, with easy access to information about their exhibits:Location, Hardware and a place to post updates and documentation for the exhibit.
+SPIN is an interactive platform for exploring buildings and their exhibits in 2D and 3D, with easy access to information about their exhibits: Location, Hardware and a place to post updates and documentation for the exhibit.
 
 ## Assets and exhibit folders
 

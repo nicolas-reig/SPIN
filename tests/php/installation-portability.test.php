@@ -62,7 +62,7 @@ try {
         testCheck(copy($file, $application . '/backend/' . basename($file)), 'Could not copy application source fixture');
     }
     testCheck(copy($testSourceRoot . '/frontend/api.php', $application . '/frontend/api.php'), 'Could not copy API source fixture');
-    testCheck(copy($testSourceRoot . '/config.php', $application . '/config.php'), 'Could not copy default configuration fixture');
+    testCheck(copy($testSourceRoot . '/config.example.php', $application . '/config.php'), 'Could not copy example configuration fixture');
     $runner = $root . '/run-installed.php';
     testWrite($runner, <<<'PHP'
 <?php

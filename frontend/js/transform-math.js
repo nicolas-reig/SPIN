@@ -38,19 +38,37 @@ export function selectionCenter(entries) {
     return entries.length ? center.divideScalar(entries.length) : center;
 }
 
-export function decomposeTransform(matrix, reference = new Quaternion()) {
+export function decomposeTransform(matrix, reference = new Quaternion(), retainOrientation = false) {
     const position = new Vector3().setFromMatrixPosition(matrix);
     const quaternion = new Quaternion();
     const scale = new Vector3();
     const columns = [0, 1, 2].map(index => new Vector3().setFromMatrixColumn(matrix, index));
     const zero = columns.map(column => column.length() === 0);
-    if (!zero.some(Boolean)) matrix.decompose(position, quaternion, scale);
+    if (!zero.some(Boolean)) {
+        matrix.decompose(position, quaternion, scale);
+        if (retainOrientation) {
+            // Signed scales admit four equivalent rotations. Keep the one
+            // matching the requested turn instead of flipping the local axes.
+            const original = quaternion.clone(), signs = scale.clone();
+            let closest = Math.abs(quaternion.dot(reference));
+            for (const axis of ['X', 'Y', 'Z']) {
+                const candidate = original.clone().multiply(new Quaternion().setFromAxisAngle(axisVector(axis), Math.PI));
+                const alignment = Math.abs(candidate.dot(reference));
+                if (alignment <= closest) continue;
+                closest = alignment; quaternion.copy(candidate);
+                scale.copy(signs).multiply(axisVector(axis).multiplyScalar(2).subScalar(1));
+            }
+        }
+    }
     else {
         // A collapsed axis has no recoverable orientation. Complete its basis
         // using the object's retained rotation, as Blender's transform fields do.
         const basis = new Matrix4().makeRotationFromQuaternion(reference);
-        const vectors = columns.map((column, index) => zero[index]
-            ? new Vector3().setFromMatrixColumn(basis, index) : column.clone().normalize());
+        const vectors = columns.map((column, index) => {
+            const direction = new Vector3().setFromMatrixColumn(basis, index);
+            if (zero[index]) return direction;
+            return column.clone().normalize().multiplyScalar(retainOrientation && column.dot(direction) < 0 ? -1 : 1);
+        });
         const present = zero.flatMap((empty, index) => empty ? [] : [index]);
         if (present.length === 2) {
             const missing = zero.indexOf(true);
@@ -85,10 +103,18 @@ export class TransformTransaction {
         this.center = selectionCenter(entries);
     }
 
-    apply(delta) {
+    apply(delta, rotation = null) {
         const next = this.entries.map(entry => {
             if (entry.parent.determinant() === 0) throw Error('transformCollapsedParent');
-            return decomposeTransform(entry.inverse.clone().multiply(delta).multiply(entry.world), entry.quaternion);
+            let reference = entry.quaternion;
+            if (rotation) {
+                // Track the requested rotation independently of scale, including
+                // invisible axes when an object is flattened to zero.
+                const basis = entry.inverse.clone().multiply(new Matrix4().makeRotationFromQuaternion(rotation))
+                    .multiply(entry.parent).multiply(new Matrix4().makeRotationFromQuaternion(entry.quaternion));
+                reference = new Quaternion().setFromRotationMatrix(new Matrix4().extractRotation(basis)).normalize();
+            }
+            return decomposeTransform(entry.inverse.clone().multiply(delta).multiply(entry.world), reference, Boolean(rotation));
         });
         next.forEach((value, index) => {
             const object = this.entries[index].object;

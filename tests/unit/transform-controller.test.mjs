@@ -82,6 +82,65 @@ test('global/local axis cycling, plane exclusion and component numeric input use
     assert.deepEqual(entries[0].object.position.toArray(), [1, 2, 3]); controller.dispose();
 });
 
+test('default local handles and keyboard movement follow a confirmed rotation without baking model transforms', () => {
+    const { controller, entries, key, commits } = setup();
+    controller.configure('combined', false);
+    assert.equal(controller.space, 'local');
+    const object = entries[0].object, mesh = object.children[0];
+    const local = mesh.matrix.toArray(), vertices = mesh.geometry.attributes.position.array.slice();
+    const center = geometryCenter(object);
+    controller.begin('rotate'); key('y'); key('9'); key('0'); key('Enter');
+    near(object.rotation.y, Math.PI / 2);
+    near(controller.group.quaternion.angleTo(object.quaternion), 0);
+    near(geometryCenter(object).distanceTo(center), 0);
+    controller.setSelection(entries);
+    controller.begin('translate'); key('x'); key('3'); key('Enter');
+    near(geometryCenter(object).distanceTo(center.clone().add(new THREE.Vector3(0, 0, -3))), 0);
+    assert.deepEqual(commits.at(-1)[0].transform.rotation, [0, 90, 0]);
+    assert.deepEqual(mesh.matrix.toArray(), local);
+    assert.deepEqual(mesh.geometry.attributes.position.array, vertices);
+    controller.dispose();
+});
+
+test('local keyboard constraints cycle through local, global and free for axes and planes', () => {
+    const { controller, entries, key } = setup({ space: 'local' });
+    entries[0].object.rotation.y = Math.PI / 2;
+    for (const plane of [false, true]) {
+        controller.begin('translate'); key('x', { shiftKey: plane });
+        near(controller.active.orientation.angleTo(entries[0].object.quaternion), 0);
+        key('2');
+        const expected = plane ? new THREE.Vector3(2, 2, 0) : new THREE.Vector3(0, 0, -2);
+        near(entries[0].object.position.distanceTo(expected), 0);
+        key('x', { shiftKey: plane });
+        near(controller.active.orientation.angleTo(new THREE.Quaternion()), 0);
+        key('x', { shiftKey: plane }); assert.equal(controller.active.axis, '');
+        key('Escape');
+    }
+    controller.dispose();
+});
+
+test('mirrored and collapsed objects retain their rotation and local axes through rotation and movement', () => {
+    for (const scale of [[-1, 2, 3], [1, -2, 3], [1, 2, -3], [-1, -2, 3], [0, 2, 3], [0, 0, 3], [0, 0, 0]]) {
+        const { controller, entries, key, commits, errors } = setup({ space: 'local' });
+        const object = entries[0].object, mesh = object.children[0];
+        object.scale.fromArray(scale); object.rotation.set(.2, -.3, .4);
+        const initial = object.quaternion.clone();
+        const expected = initial.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 2 * Math.PI / 3));
+        const local = mesh.matrix.toArray(), vertices = mesh.geometry.attributes.position.array.slice();
+        controller.begin('rotate', {}, { axis: 'Y' }); key('1'); key('2'); key('0'); key('Enter');
+        near(object.quaternion.angleTo(expected), 0);
+        object.scale.toArray().forEach((value, axis) => near(value, scale[axis]));
+        const center = geometryCenter(object);
+        controller.begin('translate', {}, { axis: 'X' }); key('2'); key('Enter');
+        near(geometryCenter(object).distanceTo(center.add(new THREE.Vector3(2, 0, 0).applyQuaternion(expected))), 0, 1e-6);
+        near(object.quaternion.angleTo(expected), 0);
+        assert.equal(commits.length, 2); assert.deepEqual(errors, []);
+        assert.deepEqual(mesh.matrix.toArray(), local);
+        assert.deepEqual(mesh.geometry.attributes.position.array, vertices);
+        controller.dispose();
+    }
+});
+
 test('axis previews follow constrained movement, rotation and scale and hide on release', () => {
     const { controller, entries, key } = setup({ count: 2 });
     const { constraintGuide: guide, constraintAxes: lines, constraintPlane: plane } = controller;

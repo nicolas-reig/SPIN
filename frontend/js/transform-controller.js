@@ -16,7 +16,7 @@ const objectOrientation = object => {
 export class TransformController {
     constructor({ scene, camera, canvas, controls, onChange, onCommit, onError, onPreview = () => {} }) {
         Object.assign(this, { scene, camera, canvas, controls, onChange, onCommit, onError, onPreview });
-        this.entries = []; this.mode = ''; this.space = 'world'; this.constraint = ''; this.snap = false;
+        this.entries = []; this.mode = ''; this.space = 'local'; this.constraint = ''; this.snap = false;
         this.group = new THREE.Group(); this.group.name = 'Transform gizmos'; this.group.visible = false;
         scene.add(this.group);
         this.colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00'];
@@ -51,7 +51,7 @@ export class TransformController {
     setSelection(entries) {
         this.cancel(); this.entries = entries; this.rebuild();
     }
-    configure(mode, snap, space = 'world', constraint = '') {
+    configure(mode, snap, space = 'local', constraint = '') {
         if (mode !== this.mode || space !== this.space || constraint !== this.constraint) this.cancel();
         const rebuild = mode !== this.mode;
         Object.assign(this, { mode, snap, space, constraint });
@@ -244,7 +244,8 @@ export class TransformController {
             const next = event.shiftKey ? axes.filter(value => value !== axis).join('') : axis;
             active.lock = active.axis === next ? (active.lock + 1) % 3 : 1;
             active.axis = active.lock ? next : '';
-            active.orientation = active.lock === 2 ? active.localOrientation.clone() : new THREE.Quaternion();
+            const local = active.lock === 1 ? this.space === 'local' : active.lock === 2 && this.space !== 'local';
+            active.orientation = local ? active.localOrientation.clone() : new THREE.Quaternion();
             this.preview(event);
         } else if (!event.metaKey && !event.ctrlKey && !event.altKey && ['g', 'r', 's'].includes(event.key.toLowerCase())) {
             const mode = { g: 'translate', r: 'rotate', s: 'scale' }[event.key.toLowerCase()];
@@ -338,7 +339,7 @@ export class TransformController {
                 if (snapping && !input.used) amount = round(amount, .1);
                 scale.set(...axes.map((value, index) => selectedAxes.includes(value) ? input.used ? values[input.separate ? index : 0] : amount : 1));
             }
-            const changes = transaction.apply(transformDelta(transaction.center, { translation, rotation, scale, orientation }));
+            const changes = transaction.apply(transformDelta(transaction.center, { translation, rotation, scale, orientation }), rotation);
             a.error = null;
             this.group.position.copy(transaction.center).add(translation);
             this.group.quaternion.copy(rotation).multiply(orientation);

@@ -21,7 +21,8 @@ globalThis.cancelAnimationFrame = () => {};
 
 const THREE = await import('three');
 const { MapView } = await import('../../frontend/js/map.js');
-const { geometryCenter } = await import('../../frontend/js/transform-math.js');
+const { EditSession } = await import('../../frontend/js/domain.js');
+const { geometryCenter, TransformTransaction, transformDelta } = await import('../../frontend/js/transform-math.js');
 
 function disposals(resource) {
     let count = 0;
@@ -172,6 +173,79 @@ test('whole placement derives from loaded component centers and follows componen
     view.key = 'a pending model replacement';
     assert.equal(view.exhibitPlacement('first'), null);
     assert.throws(() => view.beginExhibitPlacement('first'), /mapLoading/);
+});
+
+test('exhibit and component rotations survive serialized edits, scene reload and movement undo without changing child coordinates', async () => {
+    for (const instanceIndex of [undefined, 0]) {
+        const { view } = makeView(), reloaded = makeView();
+        const session = new EditSession(dataset(6));
+        const target = map => instanceIndex == null ? map.objects.get('first') : map.objects.get('first').children[instanceIndex];
+        const store = changes => session.change(state => {
+            for (const change of changes) {
+                const record = state.exhibits.find(record => record.id === change.exhibitId);
+                (change.instanceIndex == null ? record : record.models[change.instanceIndex]).transform = change.transform;
+            }
+        });
+        await view.setData(session.value, 'floor', 'first');
+        const object = target(view);
+        const locals = object.children.map(child => child.matrix.toArray());
+        const vertices = meshes(object).map(mesh => mesh.geometry.attributes.position.array.slice());
+        const transaction = new TransformTransaction([{ exhibitId: 'first', instanceIndex, object }]);
+        const rotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+        store(transaction.apply(transformDelta(transaction.center, { rotation }), rotation));
+        const saved = JSON.parse(JSON.stringify(session.value));
+        const placement = instanceIndex == null ? saved.exhibits[0].transform : saved.exhibits[0].models[instanceIndex].transform;
+        assert.deepEqual(placement.rotation, [0, 90, 0]);
+        if (instanceIndex == null) assert.deepEqual(saved.exhibits[0].models, session.base.exhibits[0].models);
+        else assert.deepEqual(saved.exhibits[0].transform, session.base.exhibits[0].transform);
+        assert.deepEqual(object.children.map(child => child.matrix.toArray()), locals);
+        await reloaded.view.setData(saved, 'floor', 'first');
+        const restored = target(reloaded.view);
+        assert.deepEqual(restored.children.map(child => child.matrix.toArray()), locals);
+        meshes(restored).forEach((mesh, index) => assert.deepEqual(mesh.geometry.attributes.position.array, vertices[index]));
+        const center = geometryCenter(restored);
+        const direction = new THREE.Vector3(2, 0, 0).applyQuaternion(restored.getWorldQuaternion(new THREE.Quaternion()));
+        const movement = new TransformTransaction([{ exhibitId: 'first', instanceIndex, object: restored }]);
+        store(movement.apply(transformDelta(movement.center, { translation: direction }), new THREE.Quaternion()));
+        await reloaded.view.setData(session.value, 'floor', 'first');
+        assert.ok(geometryCenter(target(reloaded.view)).distanceTo(center.clone().add(direction)) < 1e-6);
+        session.undo(); await reloaded.view.setData(session.value, 'floor', 'first');
+        assert.ok(geometryCenter(target(reloaded.view)).distanceTo(center) < 1e-6);
+        session.redo(); await reloaded.view.setData(session.value, 'floor', 'first');
+        assert.ok(geometryCenter(target(reloaded.view)).distanceTo(center.add(direction)) < 1e-6);
+        assert.deepEqual(target(reloaded.view).children.map(child => child.matrix.toArray()), locals);
+        assert.ok(Math.abs(target(reloaded.view).rotation.y - Math.PI / 2) < 1e-8);
+        view.destroy(); reloaded.view.destroy();
+    }
+});
+
+test('shared inspector rotation retains mirrored and collapsed component axes for subsequent local movement', async () => {
+    const { view } = makeView(), data = dataset();
+    data.exhibits[0].models[0].transform.scale = [1, -2, 1];
+    data.exhibits[0].models[1].transform.scale = [0, 0, 0];
+    await view.setData(data, 'floor', 'first', true, { selection: ['first'],
+        hardwareSelection: [0, 1].map(instanceIndex => ({ exhibitId: 'first', instanceIndex })) });
+    const objects = view.transformEntries().map(entry => entry.object);
+    const basis = view.root.quaternion.clone();
+    view.transform = { orientation: () => basis, update() {}, dispose() {} };
+    const preview = view.beginSelectionField();
+    const changes = view.previewSelectionField(preview, 'rotation', 1, 120);
+    changes.forEach((change, index) => {
+        assert.deepEqual(change.transform.scale, data.exhibits[0].models[index].transform.scale);
+        const expected = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (120 + index * 10) * Math.PI / 180);
+        assert.ok(objects[index].quaternion.angleTo(expected) < 1e-7);
+    });
+    basis.multiply(objects[0].quaternion);
+    const centers = objects.map(geometryCenter), rotations = objects.map(object => object.quaternion.clone());
+    const move = view.beginSelectionField(); view.previewSelectionField(move, 'position', 0, 2);
+    const offset = new THREE.Vector3(2, 0, 0).applyQuaternion(basis);
+    objects.forEach((object, index) => {
+        assert.ok(geometryCenter(object).distanceTo(centers[index].clone().add(offset)) < 1e-6);
+        assert.ok(object.quaternion.angleTo(rotations[index]) < 1e-7);
+    });
+    view.restoreSelectionField(move);
+    objects.forEach((object, index) => assert.ok(geometryCenter(object).distanceTo(centers[index]) < 1e-6));
+    view.destroy();
 });
 
 test('64 repeated models retain one set of geometry buffers instead of 64', async t => {

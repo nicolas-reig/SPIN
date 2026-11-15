@@ -6,17 +6,20 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {rm} from 'node:fs/promises';
 import {phpGet} from './transport.mjs';
+import {syntheticInstallation} from '../fixtures/synthetic-installation.mjs';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
-const app=path.resolve(process.env.VISUAL_TEST_SOURCE||path.join(here,'../..'));
-const data=path.resolve(process.env.VISUAL_TEST_DATA||path.dirname(app));
 const python=process.env.PYTHON||'python3';
 const php=process.env.PHP||'php';
 function command(...args){return JSON.parse(execFileSync(python,[path.join(here,'fixture.py'),...args],{encoding:'utf8',maxBuffer:32*1024*1024}));}
 
 test('Unchanged production PHP bridge returns real fixture snapshot and GLB bytes',async()=>{
-  const staged=command('stage','--source',app,'--data',data,'--profile','matrix','--php',php);
+  const installation=process.env.VISUAL_TEST_SOURCE ? null : await syntheticInstallation();
+  const app=path.resolve(process.env.VISUAL_TEST_SOURCE||installation.app);
+  const data=path.resolve(process.env.VISUAL_TEST_DATA||installation?.root||path.dirname(app));
+  let staged;
   try {
+    staged=command('stage','--source',app,'--data',data,'--profile','matrix','--php',php);
     const response=await phpGet(path.join(staged.root,'WebApp'),'',php);
     assert.equal(response.status,200);
     const snapshot=JSON.parse(response.body.toString());
@@ -52,5 +55,8 @@ test('Unchanged production PHP bridge returns real fixture snapshot and GLB byte
     assert(JSON.parse(bad.body.toString()).error);
     const after=command('fingerprint','--source',app,'--data',data);
     for(const key of ['code','assets','exhibits'])assert.equal(after[key].sha256,staged.original[key].sha256);
-  } finally {await rm(staged.root,{recursive:true,force:true});}
+  } finally {
+    if(staged)await rm(staged.root,{recursive:true,force:true});
+    await installation?.cleanup();
+  }
 });

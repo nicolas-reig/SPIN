@@ -1,18 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { EditSession, identity } from '../../frontend/js/domain.js';
 import { editSnapshot, restoreEditSnapshot } from '../../frontend/js/drafts.js';
 
 // Compare observable edit behavior with the review's fixed source baseline.
 // Only source modules are read; fixtures never open content folders or models.
-const root = fileURLToPath(new URL('../../', import.meta.url));
-const baselineSource = path => execFileSync('git', ['show', `0071aff:${path}`], { cwd: root, encoding: 'utf8' });
+const baselineSource = path => readFileSync(new URL('../fixtures/source-baseline/' + path, import.meta.url), 'utf8');
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-const baselineDomainUrl = moduleUrl(baselineSource('frontend/js/domain.js'));
+const baselineDomainUrl = moduleUrl(baselineSource('domain.js'));
 const baselineDomain = await import(baselineDomainUrl);
-const baselineDrafts = await import(moduleUrl(baselineSource('frontend/js/drafts.js')
+const baselineDrafts = await import(moduleUrl(baselineSource('drafts.js')
     .replace("'./domain.js'", JSON.stringify(baselineDomainUrl))));
 
 function random(seed) {

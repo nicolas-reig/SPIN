@@ -1,0 +1,19 @@
+{
+  "name": "spin-development",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "npm run test:source && npm run test:harness && npm run test:release",
+    "test:source": "node tools/review-source.mjs",
+    "test:harness": "python3 -m unittest discover -s tests/visual -p 'test_*.py' -v && node --test tests/visual/*.test.mjs",
+    "test:release": "python3 -m unittest discover -s tests/pipeline -p 'test_*.py' -v",
+    "test:browser": "node --test tests/browser/*.test.mjs",
+    "build": "python3 tools/build-release.py"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}

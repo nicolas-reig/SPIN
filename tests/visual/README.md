@@ -119,5 +119,5 @@ historical comparison. Do not replace the active Assets or Exponate.
 
 The transform UI now intentionally differs from the old pixel baselines. Current
 transform implementation and manual interaction verification are recorded in
-[transform-editing-todo.md](../../docs/transform-editing-todo.md). The historical
+[transform-editing.md](../../docs/reviews/transform-editing.md). The historical
 strict pixel and browser memory gates above retain their original status.

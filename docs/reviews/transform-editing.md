@@ -1,4 +1,4 @@
-# Transform editing — completed 12 November 2026
+# Transform editing review — completed 12 November 2026
 
 The UI groundwork from `d5cbeba` is now integrated. Application code owns the
 controller and gizmo meshes; vendored Three.js was not changed.

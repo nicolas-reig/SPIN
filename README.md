@@ -2,6 +2,25 @@
 
 SPIN is an interactive platform for exploring buildings and their exhibits in 2D and 3D, with easy access to information about their exhibits: Location, Hardware and a place to post updates and documentation for the exhibit.
 
+[![CI](https://github.com/nicolas-reig/SPIN/actions/workflows/ci.yml/badge.svg)](https://github.com/nicolas-reig/SPIN/actions/workflows/ci.yml)
+
+## Getting started
+
+The application runs on PHP 8.1+ with JSON, fileinfo and mbstring. Copy `config.example.php`
+to `config.php`, set the two content paths, and serve `frontend/` as the web root.
+For local development:
+
+```sh
+php -S 127.0.0.1:8000 -t frontend
+```
+
+Open <http://127.0.0.1:8000>. Use a PHP-capable web server for a shared installation.
+Node and Python are development tools; the installed app runs on PHP alone.
+
+- [Installation, automatic CI/CD and releases](docs/deployment.md)
+- [Source verification](tests/README.md) and [browser regression tooling](tests/visual/README.md)
+- [Historical implementation reviews](docs/reviews/README.md)
+
 ## Assets and exhibit folders
 
 The building and its content live in two folders outside `WebApp/`: `Assets/` and `Exponate/`. Models, placement, statuses, saved views, posts and documentation links belong to these folders. There is no content database to export.

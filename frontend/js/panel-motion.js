@@ -78,6 +78,13 @@ export class PanelMotion {
         return 'enter';
     }
 
+    continueContext(context) {
+        if (this.context === null || context === null) return;
+        // Completing a form keeps the same panel and any entry already in progress.
+        if (this.visibleContext === this.context) this.visibleContext = context;
+        this.context = context;
+    }
+
     clearSnapshots() {
         for (const snapshot of this.snapshots) {
             snapshot.motion?.cancel(); snapshot.arrival?.cancel();

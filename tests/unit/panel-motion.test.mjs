@@ -123,6 +123,58 @@ test('opening exhibit creation from the sidebar brings in the populated new view
     motion.settle();
 });
 
+test('confirming a new exhibit continues the creation inspector without another slide or outgoing copy', () => {
+    const { inspector, resizer, sidebar, underlays, stack, motion, update } = setup();
+    update(['A']); motion.settle();
+    const creation = inspectorContext([], 'create');
+    motion.prepare(creation, []); inspector.textContent = 'New exhibit'; motion.update(creation, [], { origin: 'sidebar' });
+    motion.settle();
+    const counts = [inspector.calls.length, resizer.calls.length, sidebar.calls.length];
+    motion.continueContext(inspectorContext([{ id: 'New name' }]));
+    update(['New name'], { origin: 'sidebar' });
+    assert.deepEqual([inspector.calls.length, resizer.calls.length, sidebar.calls.length], counts);
+    assert.equal(motion.snapshots.length, 0); assert.equal(underlays.hidden, true);
+    assert.equal(stack.children.length, 0); assert.equal(stack.hidden, true);
+    assert.equal(motion.visibleContext, motion.context);
+    update(['A']);
+    assert.equal(inspector.calls.length, counts[0] + 1, 'selecting a different exhibit still enters normally');
+    assert.equal(motion.preparedSnapshot.node.textContent, 'New name');
+    motion.settle();
+});
+
+test('confirming a name during entry keeps the running spring and its completion callback', () => {
+    const { inspector, motion, update } = setup();
+    const creation = inspectorContext([], 'create');
+    motion.update(creation, []);
+    const animation = inspector.calls.at(-1);
+    animation.currentTime = 90;
+    const position = motion.right.state();
+    motion.continueContext(inspectorContext([{ id: 'New name' }]));
+    update(['New name']);
+    assert.equal(inspector.calls.length, 1); assert.equal(animation.cancelled, false);
+    assert.deepEqual(motion.right.state(), position); assert.equal(motion.snapshots.length, 0);
+    let completed = 0;
+    motion.afterEnter(() => completed++);
+    assert.equal(completed, 0);
+    animation.finish();
+    assert.equal(completed, 1); assert.equal(motion.right.active, false);
+});
+
+test('a continued creation context remembers visibility when the mobile inspector is revealed', () => {
+    for (const alreadyVisible of [true, false]) {
+        const { inspector, motion, update } = setup();
+        inspector.hidden = !alreadyVisible;
+        motion.update(inspectorContext([], 'create'), []); motion.settle();
+        inspector.hidden = true; motion.viewChanged();
+        const count = inspector.calls.length;
+        motion.continueContext(inspectorContext([{ id: 'New name' }]));
+        update(['New name']);
+        inspector.hidden = false; motion.viewChanged();
+        assert.equal(inspector.calls.length, count + (alreadyVisible ? 0 : 1), 'only a form never shown needs an initial entry');
+        motion.settle();
+    }
+});
+
 test('incoming panels have their new content while the previous inspector remains rendered underneath until covered', () => {
     const { inspector, sidebar, underlays, motion, update } = setup();
     update(['A']); motion.settle();

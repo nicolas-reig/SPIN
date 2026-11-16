@@ -75,4 +75,61 @@ for (const [name, viewport] of [
             await context.close();
         }
     });
+
+    test(`${name}: naming a new exhibit keeps its inspector in place`, { timeout: 120000 }, async () => {
+        const audit = { requests: [], blockedWrites: [], errors: [] };
+        const errors = [];
+        const context = await browser.newContext({ viewport, locale: 'en-GB', reducedMotion: 'no-preference' });
+        await installTransport(context, installation.app, audit);
+        await context.addInitScript(() => localStorage.setItem('hub-language', 'en'));
+        const page = await context.newPage();
+        page.on('pageerror', error => errors.push(error.message));
+        page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+        try {
+            await page.goto(`${TEST_ORIGIN}/index.html?webgl=1&floor=${installation.fixture.home_floor}`);
+            await page.locator('[data-select]').first().waitFor();
+            await page.locator('.app-menu summary').click();
+            await page.locator('[data-action="enterEdit"]').click();
+            await page.locator('[data-action="newExhibit"]').click();
+            await page.locator('#creation-form').waitFor();
+            await page.waitForFunction(() => !document.getAnimations().some(animation => ['inspector-spring', 'sidebar-spring'].includes(animation.id)));
+            await page.evaluate(() => {
+                window.creationMotion = { animations: [], snapshots: 0 };
+                const animate = Element.prototype.animate;
+                Element.prototype.animate = function (...args) {
+                    if (['inspector', 'resizer', 'sidebar', 'editbar'].includes(this.id)) window.creationMotion.animations.push(this.id);
+                    return animate.apply(this, args);
+                };
+                new MutationObserver(records => {
+                    window.creationMotion.snapshots += records.reduce((count, record) => count + record.addedNodes.length, 0);
+                }).observe(document.querySelector('#inspector-underlays'), { childList: true });
+            });
+            const exhibitName = 'New inspector continuity';
+            await page.locator('#ex-name').fill(exhibitName);
+            await page.locator('#creation-form [type="submit"]').click();
+            await page.locator('#structure-form').waitFor();
+            assert.equal(await page.locator('#inspector h1').textContent(), exhibitName);
+            assert.deepEqual(await page.evaluate(() => window.creationMotion), { animations: [], snapshots: 0 });
+            assert.equal(await page.locator('#inspector-underlays > *').count(), 0);
+            assert.equal(await page.locator('#inspector-stack > *').count(), 0);
+            if (name === 'mobile') {
+                await page.locator('[data-action="view:list"]').click();
+                await page.locator('[data-select=' + JSON.stringify(exhibitName) + ']').click();
+                assert.deepEqual(await page.evaluate(() => window.creationMotion), { animations: [], snapshots: 0 }, 'revealing the same inspector keeps its context');
+                await page.locator('[data-action="view:list"]').click();
+            }
+            const existing = installation.fixture.exhibits.find(row => row.floor_id === installation.fixture.home_floor);
+            await page.locator('[data-select=' + JSON.stringify(existing.id) + ']').click();
+            await page.waitForFunction(() => window.creationMotion.animations.includes('inspector'));
+            assert.deepEqual(errors, [], 'No browser or console errors');
+            assert.deepEqual(audit.errors, [], 'No external requests or transport failures');
+            assert.deepEqual(audit.blockedWrites, [], 'Creation stays in the local edit draft');
+        } catch (error) {
+            await page.screenshot({ path: new URL(name + '-creation-failure.png', output).pathname }).catch(() => {});
+            throw error;
+        } finally {
+            await writeFile(new URL(name + '-creation-audit.json', output), JSON.stringify({ ...audit, errors }, null, 2) + '\n');
+            await context.close();
+        }
+    });
 }

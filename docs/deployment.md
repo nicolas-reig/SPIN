@@ -1,5 +1,8 @@
 # GitHub pipeline and installation
 
+For the practical review-before-merge workflow, see
+[the AI review guide](https://github.com/nicolas-reig/SPIN/blob/main/docs/review-workflow.md).
+
 Every push to an active branch, pull request, merge queue entry and manual run starts
 the [CI workflow](../.github/workflows/ci.yml). Branches under `preserved/` retain
 historical snapshots and do not start push builds. No path filters skip required checks.
@@ -21,8 +24,10 @@ monthly updates for development dependencies. Runtime files use vendored depende
 
 ## Automatic delivery
 
-After all gates pass, GitHub stores `spin-<commit>.tar.gz` and its `.sha256` file as
-the `spin-<commit>` artifact for 14 days. Successful main-branch builds can be installed
+After all gates pass on `main` or an explicit version tag, GitHub stores
+`spin-<commit>.tar.gz` and its `.sha256` file as the `spin-<commit>` artifact for
+14 days. Working branches and pull requests run the same checks without delivering
+an installation package. Successful main-branch builds can be installed
 directly from the repository's Actions page. Packaging uses the checked-out commit's
 timestamp, sorted paths, fixed permissions and a stable gzip header, so the same
 runtime bytes and commit produce the same archive.

@@ -18,6 +18,7 @@ Open <http://127.0.0.1:8000>. Use a PHP-capable web server for a shared installa
 Node and Python are development tools; the installed app runs on PHP alone.
 
 - [Installation, automatic CI/CD and releases](docs/deployment.md)
+- [Flujo práctico de revisión con IA](docs/review-workflow.md)
 - [Source verification](tests/README.md) and [browser regression tooling](tests/visual/README.md)
 - [Historical implementation reviews](docs/reviews/README.md)
 

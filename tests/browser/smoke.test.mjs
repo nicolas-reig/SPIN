@@ -120,7 +120,7 @@ for (const [name, viewport] of [
             }
             const existing = installation.fixture.exhibits.find(row => row.floor_id === installation.fixture.home_floor);
             await page.locator('[data-select=' + JSON.stringify(existing.id) + ']').click();
-            assert((await page.evaluate(() => window.creationMotion.animations)).includes('inspector'), 'another exhibit still gets its entry animation');
+            await page.waitForFunction(() => window.creationMotion.animations.includes('inspector'));
             assert.deepEqual(errors, [], 'No browser or console errors');
             assert.deepEqual(audit.errors, [], 'No external requests or transport failures');
             assert.deepEqual(audit.blockedWrites, [], 'Creation stays in the local edit draft');

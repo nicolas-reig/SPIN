@@ -1916,6 +1916,7 @@ function commitCreation() {
         const record = newExhibit(raw.name, raw.floorId);
         if (data().exhibits.some(item => [item.id, item.name, ...(item.joinedFrom || [])].some(value => value.toLocaleLowerCase() === record.id.toLocaleLowerCase()))) throw Error('duplicateName');
         edit.change(state => state.exhibits.push(record));
+        if (creationOpen) panelMotion.continueContext(inspectorContext([record]));
         creation = null;
         creationOpen = false;
         selected = record.id;

@@ -1449,7 +1449,6 @@ function renderEditInspector() {
 }
 
 function render({ origin = 'other' } = {}) {
-    document.title = t('exhibits') + ' · ' + t('hub');
     document.body.classList.toggle('editing', Boolean(edit));
     $('#sidebar').inert = Boolean(editSave?.saving);
     renderHeader();

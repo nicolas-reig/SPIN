@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="12 12 232 232" role="img" aria-labelledby="title desc">
   <title id="title">SPIN compass — 55° perspective with raised details</title>
   <desc id="desc">The app's compass tilted 55 degrees about the X axis. The circular rim and cardinal triangles have subtle extrusion; the eight intermediate marks have less relief. The central N is flat on the face. Transparent background.</desc>
   <!-- True 3D perspective: rotateX(55deg), camera distance 400, radius 100.

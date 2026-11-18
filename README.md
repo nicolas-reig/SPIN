@@ -9,12 +9,12 @@ SPIN is a file-based service hub for exploring a building and its exhibits in 2D
 SPIN needs PHP 8.1 or newer with JSON, fileinfo, and mbstring. Use a JavaScript-enabled browser with WebGPU or WebGL 2 for the map. Browser libraries, fonts, and icons are bundled so the app can run on an intranet without internet access. Documentation links still depend on access to their destinations.
 
 1. Use **`frontend/` as the web document root**. Keep `backend/`, `config.php`, and both content directories outside the public root. Keep `frontend/` and `backend/` next to each other.
-2. Copy [`backend/config.example.php`](backend/config.example.php) to **`config.php` at the repository root**, next to `frontend/`. Set `assets_dir` to the floor and hardware library and `exhibits_dir` to the exhibit folders. The sample points to sibling `Assets/` and `Exponate/` directories. You can use other names and locations outside the repository.
+2. Copy [`backend/config.example.php`](backend/config.example.php) to **`config.php` at the repository root**, next to `frontend/`. Set `assets_dir` to the floor and hardware library and `exhibits_dir` to the exhibit folders. The sample points to sibling `Assets/` and `Exhibits/` directories. You can use other names and locations outside the repository.
 3. Give the account running PHP read access to the application and both content directories, and write access to the exhibit directory and its contents and to PHP's temporary directory. For photo uploads, ensure PHP's upload and request limits accommodate the files your team uses. SPIN accepts up to eight JPEG, PNG, or WebP photos per post, up to 8 MiB per upload.
 
 Open the app's address in your browser. SPIN is designed for a trusted intranet. Signatures record the name entered for attribution, and access control is handled by the deployment.
 
-When updating the app, preserve your local `config.php`, `Assets/`, and `Exponate/`. The two content directories hold the building model and service records, so back them up together.
+When updating the app, preserve your local `config.php`, `Assets/`, and `Exhibits/`. The two content directories hold the building model and service records, so back them up together.
 
 ### File structure
 
@@ -38,7 +38,7 @@ installation/
 │   │       └── model.glb
 │   └── HardwareModels/
 │       └── Display.glb
-└── Exponate/
+└── Exhibits/
     └── Atrium-Display/
         ├── .exhibit.json     # Optional status, placement, hardware, and saved views
         ├── Notizen/          # UTF-8 Markdown posts
@@ -47,7 +47,7 @@ installation/
 ```
 
 - **Assets.** Add a directory named with a whole floor number such as `-1`, `0`, or `1` beneath `Floors/`. Put its geometry in `model.glb`. Use `.floors.json` for German and English floor names and optional default views. Put reusable, self-contained GLB files directly in `HardwareModels/`. SPIN reads both libraries from disk, and multiple exhibits can reference the same hardware model.
-- **Exhibits.** Each direct child of `Exponate/` is an exhibit and takes its name from the folder. SPIN lists an exhibit even when it has no metadata or map placement. To appear on the map, an exhibit needs an existing floor assignment and at least one recognized hardware model. A prefix before the first hyphen adds an optional list group. For example, `Atrium-Display` appears under **Atrium** with its full name.
+- **Exhibits.** Each direct child of `Exhibits/` is an exhibit and takes its name from the folder. SPIN lists an exhibit even when it has no metadata or map placement. To appear on the map, an exhibit needs an existing floor assignment and at least one recognized hardware model. A prefix before the first hyphen adds an optional list group. For example, `Atrium-Display` appears under **Atrium** with its full name.
 
 The [content format reference](backend/content-format.md) covers JSON fields and defaults, GLB export requirements, filename rules, and examples for Markdown, photos, and shortcuts.
 
@@ -81,7 +81,3 @@ Post, link, and structural drafts stay in the current browser tab's session and 
 - **Storage and API.** [`frontend/api.php`](frontend/api.php) reads the local configuration and uses [`backend/Store.php`](backend/Store.php) to assemble a JSON snapshot from the files. The API also serves recognized GLBs and photos and handles writes. The files are the source of truth. There is no database. Structural edits update metadata and exhibit folders, while posts and links keep their own file formats.
 - **Browser and map.** [`frontend/js/app.js`](frontend/js/app.js) coordinates the list, map, inspector, and edit session. Three.js uses the same GLB geometry for the orthographic 2D map and perspective 3D view. The 2D map normally uses outlines and thickness shading. Hardware instances share library geometry and have their own local transforms within the exhibit's placement. Camera framing uses saved presets when available and fits the geometry otherwise.
 - **Refresh and saves.** A visible, idle tab checks for file changes about every 15 seconds. Reload after replacing a GLB to load the new geometry. PHP validates each save, serializes app writes for the installation, and checks revisions for conflicting changes. If a structural draft conflicts with a newer edit, the app lets you reconcile the changes before saving.
-
-## Development
-
-Node.js and Python are used by the test tools. The installed app runs on PHP and browser JavaScript. See [Development and tests](tests/README.md) for local checks and CI, and [AGENTS.md](AGENTS.md) for the repository workflow.

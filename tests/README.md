@@ -1,22 +1,33 @@
-# Review verification
+# Development and tests
 
-Run application syntax checks and source regression tests with Node.js 24+ and PHP 8.1+:
+Run commands from the repository root. Use Node.js 24, PHP 8.1+, and Python 3.13 for the full suite. Tests create disposable data and do not need a local SPIN configuration.
 
 ```sh
-node tools/review-source.mjs
+node tests/check-source.mjs
 ```
 
-The runner checks the non-vendor application JavaScript and PHP, discovers `tests/unit/*.test.mjs` recursively, and runs PHP tests named `*.test.php`. A failed command stops the run. These tests use synthetic data and model objects; they do not open a browser or inspect the real content folders.
+The source check runs JavaScript and PHP syntax checks, the unit tests in `unit/`, and the API and data contract tests in `php/`. It requires no npm or Python packages.
 
-Screenshot capture and strict baseline/candidate image comparisons are a separate gate documented in [visual/README.md](visual/README.md). Passing source tests alone does not establish visual equivalence.
+For the fixture, PHP transport, and screenshot comparator tests, install the Python requirements into a virtual environment and run the full suite.
 
-For the complete automated suite, install the development dependencies with
-`npm ci` and `python3 -m pip install -r requirements-ci.txt`, then run `npm test`.
-This also checks the visual harness and release packages. Every default test uses
-disposable synthetic data; a clean checkout needs no `config.php` or content folders.
-The frozen editor reference is stored in [fixtures/source-baseline](fixtures/source-baseline/README.md),
-so shallow clones work without old Git objects.
+```sh
+python3 -m venv tests/.venv
+source tests/.venv/bin/activate
+python3 -m pip install -r tests/requirements.txt
+npm --prefix tests test
+```
 
-`npx playwright install chromium` followed by `npm run test:browser` runs the
-desktop/mobile smoke checks. See [the pipeline guide](../docs/deployment.md) for
-GitHub triggers, release artifacts and installation instructions.
+On PowerShell, activate that environment with `. .\tests\.venv\Scripts\Activate.ps1`.
+
+Run the browser smoke tests with Chromium.
+
+```sh
+cd tests
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+The smoke tests use generated floor models and exercise desktop and mobile. Screenshots and request logs go to `tests/artifacts/browser/`. For optional screenshot comparisons and browser profiling, see [visual/README.md](visual/README.md).
+
+GitHub runs these checks on pull requests, pushes to `main`, and merge queue entries. The `CI / required` check reports their combined result. Dependabot uses the pinned test dependencies in this folder.

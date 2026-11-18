@@ -137,12 +137,10 @@ def stage_copy(source, data, profile, destination=None, *, php='php', seed=27182
     original = fingerprint(source, data)
     app = stage / 'WebApp'
     app.mkdir()
-    for name in CODE_ROOTS:
-        path = Path(source) / name
-        if path.is_dir():
-            shutil.copytree(path, app / name, copy_function=shutil.copy2, ignore=shutil.ignore_patterns(*SKIP))
-        else:
-            shutil.copy2(path, app / name)
+    for name in ('frontend', 'backend'):
+        shutil.copytree(Path(source) / name, app / name, copy_function=shutil.copy2, ignore=shutil.ignore_patterns(*SKIP))
+    if (Path(source) / 'config.php').is_file():
+        shutil.copy2(Path(source) / 'config.php', app / 'config.php')
     for name in ('Assets', 'Exponate'):
         shutil.copytree(Path(data) / name, stage / name, copy_function=shutil.copy2, ignore=shutil.ignore_patterns(*SKIP))
     copied = fingerprint(app, stage)
@@ -150,8 +148,14 @@ def stage_copy(source, data, profile, destination=None, *, php='php', seed=27182
         if original[key]['sha256'] != copied[key]['sha256']:
             raise ValueError(f'Staged {key} content/mtime differs before fixture augmentation')
     fixture = matrix_fixture(stage, seed) if profile == 'matrix' else None
-    config = subprocess.check_output([php, '-r', '$v=require $argv[1];echo json_encode($v);', str(app / 'config.php')], text=True)
-    configured = json.loads(config)
+    config = app / 'backend/config.php'
+    if not config.is_file():
+        if (app / 'config.php').is_file():
+            config = app / 'config.php'
+        else:
+            shutil.copy2(app / 'backend/config.example.php', config)
+    serialized = subprocess.check_output([php, '-r', '$v=require $argv[1];echo json_encode($v);', str(config)], text=True)
+    configured = json.loads(serialized)
     if not isinstance(configured, dict):
         raise ValueError('config.php must return a settings object')
     overrides = {}
@@ -164,7 +168,7 @@ def stage_copy(source, data, profile, destination=None, *, php='php', seed=27182
     if overrides:
         # Test-only config adaptation: retain every unrelated setting and record the delta.
         encoded = base64.b64encode(json.dumps(configured, ensure_ascii=False).encode()).decode()
-        (app / 'config.php').write_text("<?php return json_decode(base64_decode('" + encoded + "'), true, 512, JSON_THROW_ON_ERROR);\n")
+        config.write_text("<?php return json_decode(base64_decode('" + encoded + "'), true, 512, JSON_THROW_ON_ERROR);\n")
     final = fingerprint(app, stage)
     return {'root': str(stage.resolve()), 'profile': profile, 'original': original, 'staged': final,
             'fixture': fixture, 'config_overrides': overrides}

@@ -1,9 +1,10 @@
 .DS_Store
 *.log
+/backend/config.php
 /config.php
 /dist/
-/node_modules/
+node_modules/
 __pycache__/
 *.py[cod]
 .venv/
-/tests/browser/artifacts/
+/tests/**/artifacts/

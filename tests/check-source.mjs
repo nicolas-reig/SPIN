@@ -30,7 +30,7 @@ console.log(`JavaScript syntax: ${javascript.length} application modules passed`
 
 const php = [
     ...files(join(root, 'backend'), path => path.endsWith('.php')),
-    join(root, 'config.example.php'), join(root, 'frontend/api.php'),
+    join(root, 'frontend/api.php'),
     ...(existsSync(join(root, 'config.php')) ? [join(root, 'config.php')] : [])
 ];
 for (const path of php) run('php', ['-l', path], { quiet: true });

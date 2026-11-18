@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
+const localConfig = path.join(repository, 'backend/config.php');
 
 // Copy code and generate content in a disposable installation. Never read local config/data.
 export async function syntheticInstallation() {
@@ -15,10 +16,10 @@ export async function syntheticInstallation() {
         for (const name of ['frontend', 'backend']) {
             await cp(path.join(repository, name), path.join(app, name), {
                 recursive: true,
-                filter: source => path.basename(source) !== '.DS_Store'
+                filter: source => path.basename(source) !== '.DS_Store' && source !== localConfig
             });
         }
-        await copyFile(path.join(repository, 'config.example.php'), path.join(app, 'config.php'));
+        await copyFile(path.join(app, 'backend/config.example.php'), path.join(app, 'backend/config.php'));
         for (const name of ['Assets', 'Exponate']) await mkdir(path.join(root, name));
         const fixture = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c',
             'import json,sys;from pathlib import Path;from fixture import matrix_fixture;print(json.dumps(matrix_fixture(Path(sys.argv[1]))))', root

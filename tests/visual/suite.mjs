@@ -10,7 +10,7 @@ const baseline=option('--baseline');
 if(!baseline)throw Error('Required: --baseline /path/to/frozen/{WebApp,Assets,Exponate}');
 const candidate=path.resolve(option('--candidate',path.join(here,'../..')));
 const data=path.resolve(option('--data',baseline));
-const output=path.resolve(option('--output',path.join(here,'artifacts/suite')));
+const output=path.resolve(option('--output',path.join(here,'../artifacts/visual/suite')));
 const python=option('--python',process.env.PYTHON||'python3');
 const passthrough=[];
 for(const key of ['--browser','--php','--backend','--seed'])if(option(key))passthrough.push(key,option(key));

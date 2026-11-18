@@ -59,10 +59,12 @@ try {
     mkdir($application . '/frontend', 0775, true);
     mkdir($runtime);
     foreach (glob($testSourceRoot . '/backend/*.php') ?: [] as $file) {
+        if (basename($file) === 'config.php') continue;
         testCheck(copy($file, $application . '/backend/' . basename($file)), 'Could not copy application source fixture');
     }
     testCheck(copy($testSourceRoot . '/frontend/api.php', $application . '/frontend/api.php'), 'Could not copy API source fixture');
-    testCheck(copy($testSourceRoot . '/config.example.php', $application . '/config.php'), 'Could not copy example configuration fixture');
+    $configPath = $application . '/backend/config.php';
+    testCheck(copy($application . '/backend/config.example.php', $configPath), 'Could not copy example configuration fixture');
     $runner = $root . '/run-installed.php';
     testWrite($runner, <<<'PHP'
 <?php
@@ -104,11 +106,12 @@ PHP);
     $default = portableRun($runner, $application, $runtime);
     $defaultHashes = [portableSourceHashes($defaultAssets), portableSourceHashes($defaultExhibits)];
     testCheck(array_column($default['floors'], 'id') === ['-3', '9'] && array_column($default['exhibits'], 'id') === ['Default Ω'], 'A source-only application installation must load the configured sibling roots without a floor zero');
-    testCheck(!is_dir($application . '/tests') && !is_dir($application . '/tools'), 'Runtime fixture must exclude development and test tooling');
+    testCheck(!is_dir($application . '/tests') && !is_dir($application . '/.github'), 'Runtime fixture must exclude development and test tooling');
 
     $customAssets = $root . '/SeparateStorage/模型';
     $customExhibits = $root . '/DifferentStorage/展品';
     $model = portableDataset($customAssets, $customExhibits, [-8, 17], 'Gerät 中文');
+    testCheck(unlink($configPath), 'Could not switch the fixture to the legacy configuration location');
     testWrite($application . '/config.php', "<?php\nreturn " . var_export(['assets_dir' => $customAssets, 'exhibits_dir' => $customExhibits], true) . ";\n");
     $sourceHashes = portableSourceHashes($application);
     $custom = portableRun($runner, $application, $runtime);

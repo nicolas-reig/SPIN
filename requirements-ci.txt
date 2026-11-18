@@ -1,2 +1,0 @@
-# Development only; the installed application needs PHP alone.
-Pillow==12.1.0

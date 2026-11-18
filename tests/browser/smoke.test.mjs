@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { syntheticInstallation } from '../fixtures/synthetic-installation.mjs';
 import { installTransport, TEST_ORIGIN } from '../visual/transport.mjs';
 
-const output = new URL('./artifacts/', import.meta.url);
+const output = new URL('../artifacts/browser/', import.meta.url);
 let installation, browser;
 
 before(async () => {

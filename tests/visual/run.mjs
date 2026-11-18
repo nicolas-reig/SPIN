@@ -16,7 +16,7 @@ const input = process.argv.slice(2);
 function option(name, fallback) {const index=input.indexOf(name); return index<0 ? fallback : input[index+1];}
 const source = path.resolve(option('--source', path.join(here,'../..')));
 const data = path.resolve(option('--data', path.dirname(source)));
-const output = path.resolve(option('--output', path.join(here,'artifacts/run')));
+const output = path.resolve(option('--output', path.join(here,'../artifacts/visual/run')));
 const memoryOnly=input.includes('--memory-only');
 const profile = option('--profile',memoryOnly?'matrix':'source');
 assert(!memoryOnly || profile==='matrix','--memory-only requires --profile matrix');
@@ -432,16 +432,13 @@ try {
   report.stage=pythonJSON(['stage','--source',source,'--data',data,'--profile',profile,'--php',php,'--seed',seed]);
   report.input_fingerprint=report.stage.original.code.sha256;
   await saveReport();
-  const modules=[process.env.PLAYWRIGHT_MODULE,'playwright','playwright-core',
-    '/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/playwright-core',
-    '/Users/nreigs/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core'].filter(Boolean);
+  const modules=[process.env.PLAYWRIGHT_MODULE,'playwright','playwright-core'].filter(Boolean);
   let playwright;
   for(const module of modules) {try {playwright=require(module);report.playwright_version=require(module+'/package.json').version;break;}catch{}}
   if(!playwright)throw Error('Install Playwright or set PLAYWRIGHT_MODULE to a playwright-core directory');
   const executable=option('--browser',process.env.CHROME_PATH);
   const launchOptions={headless:true,args};
   if(executable)launchOptions.executablePath=executable;
-  else if(process.platform==='darwin')launchOptions.executablePath='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   report.browser_executable=launchOptions.executablePath||'Playwright bundled Chromium';
   browser=await playwright.chromium.launch(launchOptions);report.browser_version=browser.version();
   const snapshot=JSON.parse((await phpGet(path.join(report.stage.root,'WebApp'),'',php)).body.toString());

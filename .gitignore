@@ -2,8 +2,8 @@
 *.log
 /config.php
 /dist/
-/node_modules/
+node_modules/
 __pycache__/
 *.py[cod]
 .venv/
-/tests/browser/artifacts/
+/tests/**/artifacts/

@@ -18,7 +18,7 @@ export async function syntheticInstallation() {
                 filter: source => path.basename(source) !== '.DS_Store'
             });
         }
-        await copyFile(path.join(repository, 'config.example.php'), path.join(app, 'config.php'));
+        await copyFile(path.join(repository, 'backend/config.example.php'), path.join(app, 'config.php'));
         for (const name of ['Assets', 'Exponate']) await mkdir(path.join(root, name));
         const fixture = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c',
             'import json,sys;from pathlib import Path;from fixture import matrix_fixture;print(json.dumps(matrix_fixture(Path(sys.argv[1]))))', root

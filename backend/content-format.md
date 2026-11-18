@@ -1,6 +1,6 @@
 # Content format
 
-SPIN stores floors and shared models in `Assets/` and exhibit metadata, posts, photos, and links in `Exponate/`. The paths come from [the installation configuration](../README.md#getting-started). Names inside these roots are case sensitive.
+SPIN stores floors and shared models in `Assets/` and exhibit metadata, posts, photos, and links in `Exponate/`. The paths come from [the installation configuration](../README.md#usage). Names inside these roots are case sensitive.
 
 ## Assets and exhibit folders
 

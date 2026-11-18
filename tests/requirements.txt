@@ -1,2 +1,2 @@
 # Used by the visual comparator and its tests.
-Pillow==12.1.0
+Pillow==13.0.0

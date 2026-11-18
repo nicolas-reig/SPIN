@@ -17,9 +17,7 @@ class StageIntegrityTests(unittest.TestCase):
             (self.app / folder).mkdir(parents=True)
         (self.app / 'frontend' / 'index.html').write_text('<title>fixture</title>')
         (self.app / 'backend' / 'Store.php').write_text('<?php')
-        (self.app / 'backend/config.php').write_text(
-            "<?php return ['assets_dir'=>dirname(__DIR__, 2).'/Assets','exhibits_dir'=>dirname(__DIR__, 2).'/Exponate'];"
-        )
+        (self.app / 'config.php').write_text("<?php return ['assets_dir'=>dirname(__DIR__).'/Assets','exhibits_dir'=>dirname(__DIR__).'/Exponate'];")
         for name in ('Assets', 'Exponate'):
             folder = self.app.parent / name
             folder.mkdir()
@@ -39,7 +37,6 @@ class StageIntegrityTests(unittest.TestCase):
         self.assertNotEqual(fingerprint(self.app, self.app.parent)['code']['sha256'], before['code']['sha256'])
 
     def test_absolute_config_roots_are_redirected_only_in_the_disposable_copy(self):
-        (self.app / 'backend/config.php').unlink()
         (self.app / 'config.php').write_text("<?php return ['assets_dir'=>'/somewhere/Assets','exhibits_dir'=>'/somewhere/Exponate','another_setting'=>42];")
         before = fingerprint(self.app, self.app.parent)
         result = stage_copy(self.app, self.app.parent, 'source', self.root / 'staged')

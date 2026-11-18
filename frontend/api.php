@@ -3,18 +3,15 @@
 declare(strict_types=1);
 
 ini_set('display_errors', '0');
-$app = dirname(__DIR__);
-require $app . '/backend/Store.php';
-require $app . '/backend/Files.php';
-require $app . '/backend/RequestCache.php';
-require $app . '/backend/HumanFiles.php';
-require $app . '/backend/JoinFiles.php';
+require dirname(__DIR__) . '/backend/Store.php';
+require dirname(__DIR__) . '/backend/Files.php';
+require dirname(__DIR__) . '/backend/RequestCache.php';
+require dirname(__DIR__) . '/backend/HumanFiles.php';
+require dirname(__DIR__) . '/backend/JoinFiles.php';
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 try {
-    $configPath = $app . '/backend/config.php';
-    // Keep the existing path available for installations upgraded from the old layout.
-    $config = require (is_file($configPath) ? $configPath : $app . '/config.php');
+    $config = require dirname(__DIR__) . '/config.php';
     $store = new Store($config['assets_dir'], $config['exhibits_dir']);
     RequestCache::prune();
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {

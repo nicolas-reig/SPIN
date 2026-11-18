@@ -1,6 +1,5 @@
 .DS_Store
 *.log
-/backend/config.php
 /config.php
 /dist/
 node_modules/

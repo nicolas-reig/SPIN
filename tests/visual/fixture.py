@@ -148,12 +148,9 @@ def stage_copy(source, data, profile, destination=None, *, php='php', seed=27182
         if original[key]['sha256'] != copied[key]['sha256']:
             raise ValueError(f'Staged {key} content/mtime differs before fixture augmentation')
     fixture = matrix_fixture(stage, seed) if profile == 'matrix' else None
-    config = app / 'backend/config.php'
+    config = app / 'config.php'
     if not config.is_file():
-        if (app / 'config.php').is_file():
-            config = app / 'config.php'
-        else:
-            shutil.copy2(app / 'backend/config.example.php', config)
+        shutil.copy2(app / 'backend/config.example.php', config)
     serialized = subprocess.check_output([php, '-r', '$v=require $argv[1];echo json_encode($v);', str(config)], text=True)
     configured = json.loads(serialized)
     if not isinstance(configured, dict):

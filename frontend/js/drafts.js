@@ -6,6 +6,18 @@ export const hasNoteDraft = draft => Boolean(text(draft?.body) || draft?.images?
 export const hasLinkDraft = draft => Boolean(draft?.id || text(draft?.title) ||
     text(draft?.url) || text(draft?.description));
 
+// Colons are reserved in exhibit IDs, so batch drafts can share the existing stores.
+export const batchDraftKey = ids => ':' + JSON.stringify([...ids].sort());
+
+export function draftRecipients(key) {
+    if (!key.startsWith(':')) return [key];
+    try {
+        const ids = JSON.parse(key.slice(1));
+        if (Array.isArray(ids) && ids.every(id => typeof id === 'string')) return ids;
+    } catch {}
+    return [];
+}
+
 export class DraftStore {
     constructor(dataset, storage = sessionStorage) {
         this.prefix = 'hub-session-' + dataset + '-';

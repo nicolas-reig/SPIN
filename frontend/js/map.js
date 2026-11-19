@@ -158,7 +158,7 @@ export class MapView {
         canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
         canvas.addEventListener('pointerup', e => {
             this.orbitFromTop = null;
-            if (e.button !== 0 || !this.editing && e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.active) return;
+            if (e.button !== 0 || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.active) return;
             const r = canvas.getBoundingClientRect();
             const pointer = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
             const ray = new THREE.Raycaster();
@@ -714,12 +714,11 @@ export class MapView {
     }
     focusObjects() {
         if (this.editing) return this.transformEntries().map(entry => entry.object);
-        const object = this.objects.get(this.selected);
-        return object ? [object] : [];
+        return [...this.selection].map(id => this.objects.get(id)).filter(Boolean);
     }
     focus(onlyWhenHidden = false) {
         const objects = this.focusObjects();
-        if (!objects.length || (onlyWhenHidden && objects.length === 1 && this.isVisible(this.selected))) return;
+        if (!objects.length || (onlyWhenHidden && objects.every(object => this.isVisible(object.userData.exhibitId)))) return;
         this.cancelTransform();
         const exhibit = this.data?.exhibits.find(record => {
             const group = this.objects.get(record.id);

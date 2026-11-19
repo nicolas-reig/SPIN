@@ -371,6 +371,29 @@ summary {
     padding: 0 var(--sidebar-label-inset) 24px;
 }
 
+.sidebar-title:has(.content-select-toggle) {
+    padding-inline-end: 0;
+    flex-wrap: nowrap;
+}
+
+.content-select-toggle {
+    min-height: var(--sidebar-control-size);
+    padding: 4px 6px;
+    gap: 5px;
+    font-size: .75rem;
+}
+
+.content-select-toggle svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+
+.content-select-toggle[aria-pressed=true] {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
 .search-row {
     display: flex;
     align-items: center;
@@ -535,6 +558,21 @@ summary {
 
 .exhibit-row:hover:not(.active) {
     background: #e4e7eb;
+}
+
+.content-selection-mark {
+    display: grid;
+    place-items: center;
+    width: 17px;
+    height: 17px;
+    flex: none;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+}
+
+.content-selection-mark svg {
+    width: 13px;
+    height: 13px;
 }
 
 .exhibit-label {
@@ -933,6 +971,28 @@ summary {
 .inspector-tools .icon-button {
     margin-right: -7px;
     color: #858b92;
+}
+
+.batch-recipients {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 10px 0 0;
+    padding: 0;
+    max-height: 6rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    list-style: none;
+}
+
+.batch-recipients li {
+    padding: 3px 7px;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--paper);
+    font-size: .75rem;
+    overflow-wrap: anywhere;
 }
 
 .compact-status {
@@ -1653,9 +1713,13 @@ dialog::backdrop {
 
     #mobile-nav button {
         flex: 1;
+        min-width: 0;
         min-height: 44px;
+        padding: 6px 4px;
+        gap: 6px;
         background: transparent;
         font-size: .875rem;
+        line-height: 1.25;
         border-radius: 6px;
     }
 
@@ -1667,6 +1731,7 @@ dialog::backdrop {
     #mobile-nav button .lucide {
         width: 20px;
         height: 20px;
+        flex: none;
     }
 
     #resizer {
@@ -1731,7 +1796,9 @@ dialog::backdrop {
     }
 
     .inspector-tools>.icon-button {
-        display: none;
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
     }
 
     .compact-status {

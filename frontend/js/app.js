@@ -30,7 +30,7 @@ import { icon } from './icons.js';
 import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
-import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
+import { DraftStore, hasNoteDraft, hasLinkDraft, batchDraftKey, draftRecipients, editSnapshot, restoreEditSnapshot } from './drafts.js';
 import { normalizeHardwareSelection, commonTransform, hardwareSelected, wholeHardwareSelection, pickHardwareSelection } from './transform-selection.js';
 import { hardwareParameters, exhibitParameters, selectionParameters } from './placement-inspector.js';
 import { InspectorNavigation } from './inspector-navigation.js';
@@ -71,6 +71,7 @@ let snapshot = null,
     noticeTimer, noticeClearTimer;
 let creation = null, creationOpen = false, editConflict = null;
 let editSelection = new Set();
+let contentSelection = new Set(), selectingContent = false;
 let hardwareSelection = [];
 let transformSpace = 'local';
 let numberDrag;
@@ -116,8 +117,15 @@ function loadDrafts() {
 }
 const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
-const selectedExhibits = () => data()?.exhibits.filter(record => editSelection.has(record.id)) || [];
-const isSelected = id => edit ? editSelection.has(id) : id === selected;
+const selectionIds = () => edit ? editSelection : contentSelection;
+const isSelected = id => selectionIds().has(id);
+const selectedExhibits = () => data()?.exhibits.filter(record => isSelected(record.id)) || [];
+const isContentBatch = () => !edit && contentSelection.size > 1;
+const composerKey = () => isContentBatch() ? batchDraftKey(contentSelection) : selected;
+const selectionCount = (key, count = contentSelection.size) => t(key).replace('{count}', count);
+const batchTargets = () => selectedExhibits().map(record => ({
+    exhibitId: record.id, baseRevision: record.revision, contentTag: record.contentTag
+}));
 const floor = () => data()?.floors.find(f => f.id === floorId);
 function selectionTransforms() {
     if (!edit) return [];
@@ -242,7 +250,8 @@ $('#notice').addEventListener('animationend', event => {
 });
 
 function errorText(e) {
-    return t(e.key || e.message || 'storage');
+    const message = t(e.key || e.message || 'storage');
+    return e.details?.exhibitId ? `${message} (${e.details.exhibitId})` : message;
 }
 
 function updateDraftWarnings() {
@@ -299,12 +308,12 @@ function persistEdit() {
 }
 
 function discardComposer(kind) {
-    const id = selected, store = kind === 'notes' ? drafts : linkDrafts, draft = store[id];
+    const id = composerKey(), store = kind === 'notes' ? drafts : linkDrafts, draft = store[id];
     if (!draft || draft.saving) return;
     delete store[id];
     kind === 'notes' ? persistDrafts() : persistLinks();
     renderPanel();
-    cancelledDraft = { kind, id, draft };
+    cancelledDraft = { kind, id, draft, targets: isContentBatch() ? [...contentSelection] : null };
     announce(t('draftCancelled'), 'restoreDraft');
 }
 
@@ -320,8 +329,18 @@ function restoreComposer() {
     cancelledDraft = null;
     saved.kind === 'notes' ? persistDrafts() : persistLinks();
     tab = saved.kind === 'notes' ? 'notes' : 'documentation';
-    select(saved.id);
-    renderPanel();
+    if (saved.targets) {
+        collapseEmptyDraft();
+        contentSelection = new Set(saved.targets);
+        if (!contentSelection.has(selected)) selected = saved.targets[0];
+        floorId = exhibit()?.floorId || floorId;
+        render();
+        setView('detail');
+        syncUrl();
+    } else {
+        select(saved.id);
+        renderInspector();
+    }
     announce(t('draftRestored'));
 }
 
@@ -350,7 +369,7 @@ function floorLabel(record) {
 }
 
 function collapseEmptyDraft() {
-    const draft = drafts[selected];
+    const draft = drafts[composerKey()];
     if (draft && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length) {
         draft.open = false;
         draft.signing = false;
@@ -420,7 +439,8 @@ function renderSidebar() {
     ];
     $('#sidebar').setAttribute('aria-label', t('exhibits'));
     $('#sidebar').innerHTML = `
-        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', 'plus') : ''}</div>
+        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', 'plus') :
+            `<button type="button" class="quiet content-select-toggle" data-action="toggleContentSelection" aria-label="${esc(t('selectMultiple'))}" aria-controls="exhibit-list" aria-pressed="${selectingContent}" title="${esc(t('multiSelectHint'))}">${icon('layers')}<span>${esc(t('selectShort'))}</span></button>`}</div>
         <div class="search-row">
             <div class="searchbox">
                 ${icon('search', 'search-icon')}
@@ -513,7 +533,7 @@ function fitSidebar() {
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
         // Reserve row padding, action or status space, and a scrollbar gutter.
-        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16);
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + (showContentChecks() ? 24 : 0) + 16);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }
@@ -521,7 +541,11 @@ function fitSidebar() {
 window.addEventListener('resize', fitSidebar, { passive: true });
 document.fonts.ready.then(fitSidebar);
 
+const showContentChecks = () => !edit && (selectingContent || isContentBatch());
+
 function renderList() {
+    const focused = document.activeElement?.closest('#exhibit-list [data-select]');
+    const showChecks = showContentChecks();
     const groups = groupExhibits(data().exhibits, lang());
     renderGroupFilter(groups);
     const q = query.trim().toLocaleLowerCase(lang());
@@ -545,6 +569,7 @@ function renderList() {
     const groupDescription = groupFilter !== null ? groups.find(group => group.key === groupFilter)?.name || t('ungrouped') : '';
     $('#filter-description').textContent = [scope !== 'name' ? t(scope) : '', floorDescription, groupDescription, appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
     const row = e => {
+        const active = isSelected(e.id);
         const details = [titleFloor(e.floorId)];
         if (!e.placed) details.push(t('unplaced'));
         else if (!edit) details.push(t(e.status));
@@ -555,9 +580,10 @@ function renderList() {
             ${e.id === selected && editSelection.size === 1 ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}
         </div>`;
         return `
-        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
+        <div class="exhibit-entry"><button type="button" class="exhibit-row ${active ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${active}" title="${esc([...details, t('multiSelectHint')].join(' · '))}">
             <span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>
             ${exhibitLabel(e)}
+            ${showChecks ? `<span class="content-selection-mark" aria-hidden="true">${active ? icon('check') : ''}</span>` : ''}
         </button></div>`;
     };
     $('#exhibit-list').innerHTML = records.length ? groupExhibits(records, lang()).map(group => {
@@ -567,7 +593,23 @@ function renderList() {
             <summary data-group-toggle data-disclosure="true">${icon('chevron-right', 'disclosure-icon')}<span class="exhibit-group-label">${esc(group.name)}</span><span class="exhibit-group-count">${group.records.length}</span></summary>
             <div class="exhibit-group-members">${members}</div></details>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
+    if (focused && document.activeElement === document.body) {
+        [...$('#exhibit-list').querySelectorAll('[data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
+    }
     fitSidebar();
+}
+
+function setContentSelectionMode(value) {
+    selectingContent = value;
+    $('[data-action=toggleContentSelection]')?.setAttribute('aria-pressed', String(value));
+}
+
+function clearContentSelection() {
+    setContentSelectionMode(false);
+    const wasDetail = view === 'detail';
+    select(null);
+    if (wasDetail) setView('list');
+    $('[data-action=toggleContentSelection]')?.focus({ preventScroll: true });
 }
 
 function updateMapHelp() {
@@ -656,14 +698,18 @@ async function initializeMap() {
 }
 async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
-        reset, selection: edit ? [...editSelection] : selected ? [selected] : [], hardwareSelection: edit ? hardwareSelection : []
+        reset, selection: [...selectionIds()], hardwareSelection: edit ? hardwareSelection : []
     });
     updateTransformFields(null, { groupsOnly: true });
 }
 
 async function select(id, instanceIndex = 0, extend = false, hardware = false, origin = 'other') {
-    if (editSave?.saving) return;
-    if (!extend && id && selected === id && !creationOpen && !editConflict?.open && (!edit || editSelection.size === 1 && (
+    if (!snapshot || editSave?.saving) return;
+    extend ||= !edit && selectingContent && ['sidebar', 'viewport'].includes(origin);
+    const clicked = data().exhibits.find(record => record.id === id);
+    if (extend && !clicked) return;
+    if (!extend && id && selected === id && (!clicked?.floorId || clicked.floorId === floorId) &&
+        !creationOpen && !editConflict?.open && selectionIds().size === 1 && (!edit || (
         hardware ? hardwareSelection.length === 1 && hardwareSelection[0].instanceIndex === instanceIndex : !hardwareSelection.length || exhibit()?.models.length === 1
     ))) {
         map?.cancelTransform(); numberDrag?.cancel();
@@ -678,8 +724,6 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
     const previous = selected;
-    const focused = document.activeElement?.closest('#exhibit-list [data-select]');
-    const clicked = data().exhibits.find(x => x.id === id);
     if (edit && hardware && clicked?.models[instanceIndex]) {
         const selection = pickHardwareSelection(editSelection, hardwareSelection, data(), floorId, {
             exhibitId: id, instanceIndex, extend, viewport: origin === 'viewport'
@@ -687,16 +731,18 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
         hardwareSelection = selection.hardware;
         editSelection = selection.exhibits;
         selected = editSelection.has(id) ? id : [...editSelection][0] || null;
-    } else if (edit && extend) {
-        if (!clicked) return;
+    } else if (extend) {
         hardwareSelection = [];
-        if (editSelection.has(id)) editSelection.delete(id);
-        else editSelection.add(id);
-        selected = editSelection.has(selected) ? selected : [...editSelection][0] || null;
+        const selection = selectionIds();
+        if (selection.has(id)) selection.delete(id);
+        else selection.add(id);
+        selected = selection.has(selected) ? selected : [...selection][0] || null;
     } else {
         hardwareSelection = [];
         selected = clicked?.id || null;
-        editSelection = new Set(selected ? [selected] : []);
+        const selection = new Set(selected ? [selected] : []);
+        if (edit) editSelection = selection;
+        else contentSelection = selection;
     }
     if (edit) hardwareSelection = wholeHardwareSelection(editSelection, hardwareSelection, data());
     const e = data().exhibits.find(x => x.id === selected);
@@ -706,9 +752,10 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
         syncEditTools();
         return;
     }
-    const changed = Boolean(e.floorId && floorId !== e.floorId);
+    const targetFloor = !edit && extend ? (isSelected(id) ? clicked.floorId : null) : e.floorId;
+    const changed = Boolean(targetFloor && floorId !== targetFloor);
     activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
-    if (e.floorId) floorId = e.floorId;
+    if (targetFloor) floorId = targetFloor;
     renderList();
     renderInspector({ origin, focusSelection: true, replaceSelection: !extend });
     renderMapUI();
@@ -718,10 +765,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     syncUrl();
     if (edit) persistEdit();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
-    if (!extend && matchMedia('(max-width:860px)').matches) setView('detail');
-    if (focused && !focused.isConnected && document.activeElement === document.body) {
-        [...document.querySelectorAll('#exhibit-list [data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
-    }
+    if (!extend && selected === e.id && selectionIds().size === 1 && matchMedia('(max-width:860px)').matches) setView('detail');
 }
 
 function changeFloor(id) {
@@ -734,7 +778,10 @@ function changeFloor(id) {
     floorId = id;
     hardwareSelection = [];
     const e = exhibit();
-    if (e?.floorId !== id) { selected = null; editSelection.clear(); }
+    if (e?.floorId !== id && (edit || !selectingContent && !isContentBatch())) {
+        selected = null;
+        selectionIds().clear();
+    }
     renderMapUI();
     renderList();
     renderInspector();
@@ -789,19 +836,21 @@ function renderInspector({ origin = 'other', focusSelection = false, replaceSele
         renderMobile();
         return;
     }
-    const records = creationOpen || editConflict?.open ? [] : edit ? selectedExhibits() : [exhibit()];
-    const context = inspectorContext(records, creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
+    const ids = creationOpen || editConflict?.open ? [] : [...selectionIds()];
+    const context = isContentBatch() ? 'batch-content' : inspectorContext(
+        ids.map(id => ({ id })), creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
     const sameContext = context === panelMotion.context;
     const navigation = sameContext ? inspectorNavigation.capture() : null;
-    const ids = creationOpen || editConflict?.open ? [] : edit ? [...editSelection] : records.map(record => record.id);
     panelMotion.prepare(context, ids, { replace: replaceSelection });
     renderInspectorContent();
     if (edit && !creationOpen && !editConflict?.open) inspectorNavigation.update(editSelection, hardwareSelection, { previous: navigation, focus: focusSelection });
     else inspectorNavigation.reset();
-    if (panelMotion.update(context, ids, { origin, replace: replaceSelection })) {
+    if (panelMotion.update(context, ids, { origin, replace: replaceSelection }) || isContentBatch()) {
         const title = $('#inspector h1')?.textContent;
-        if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
+        const message = `${t('detail')}: ${title}`;
+        if (title && $('#inspector-update').textContent !== message) $('#inspector-update').textContent = message;
     }
+    renderMobile();
 }
 
 function renderInspectorContent() {
@@ -816,23 +865,25 @@ function renderInspectorContent() {
         $('#inspector').innerHTML = `<div class="panel-content empty">${esc(t('noSelection'))}</div>`;
         return;
     }
+    const batch = isContentBatch();
     $('#inspector').innerHTML = `
         <div class="inspector-header">
             <div class="inspector-tools">
-                <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
-                <div class="status-picker">
+                ${batch ? `<h1>${esc(selectionCount('exhibitsSelected'))}</h1>${iconButton('clearSelection', 'clearContentSelection', 'x')}` :
+                `<h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1><div class="status-picker">
                     <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" aria-busy="${statusSaving}" title="${esc(t(e.status))}" ${statusSaving ? 'disabled' : ''}>${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
                         ${STATUSES.map(status => `<button type="button" class="status-choice" data-status-choice="${status}" role="menuitemradio" tabindex="-1" aria-label="${esc(t(status))}" aria-checked="${status === e.status}">${statusHTML(status)}</button>`).join('')}
                     </div>
-                </div>
+                </div>`}
             </div>
+            ${batch ? `<ul class="batch-recipients" aria-label="${esc(t('selectedExhibits'))}" tabindex="0">${selectedExhibits().map(record => `<li>${esc(displayName(record))}</li>`).join('')}</ul>` : ''}
         </div>
         <div class="tabs" role="tablist" aria-label="${esc(t('detail'))}">
             ${['notes', 'documentation'].map(key => `<button role="tab" id="tab-${key}" aria-controls="inspector-content" aria-selected="${tab === key}" tabindex="${tab === key ? 0 : -1}" data-tab="${key}">${esc(t(key))}</button>`).join('')}
         </div>
         <div class="panel-content" id="inspector-content" role="tabpanel" aria-labelledby="tab-${tab}"></div>`;
-    bindStatusPicker();
+    if (!batch) bindStatusPicker();
     renderPanel();
     $('#inspector').querySelector('[role=tablist]').addEventListener('keydown', ev => {
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) {
@@ -897,7 +948,7 @@ document.addEventListener('pointerdown', event => {
     if (!event.target.closest('.status-picker')) closeStatusPicker();
     const form = $('#note-form');
     const draft = drafts[selected];
-    if (form && !form.contains(event.target) && !event.target.closest('dialog, .selection-menu') && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
+    if (!isContentBatch() && form && !form.contains(event.target) && !event.target.closest('dialog, .selection-menu') && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
         collapseEmptyDraft();
         renderComposer();
     }
@@ -905,13 +956,14 @@ document.addEventListener('pointerdown', event => {
 
 function renderPanel() {
     const e = exhibit();
-    if (!e) return;
     const el = $('#inspector-content');
+    if (!e || !el) return;
+    const id = composerKey(), batch = isContentBatch();
     if (tab === 'notes') {
-        el.innerHTML = `<div id="composer-slot"></div>${e.notes.filter(n => drafts[e.id]?.noteId !== n.id || drafts[e.id]?.readOnly).map(noteHTML).join('')}`;
-        if (!drafts[e.id]) {
-            drafts[e.id] = newDraft(e);
-            drafts[e.id].open = false;
+        el.innerHTML = `<div id="composer-slot"></div>${batch ? '' : e.notes.filter(n => drafts[id]?.noteId !== n.id || drafts[id]?.readOnly).map(noteHTML).join('')}`;
+        if (!drafts[id]) {
+            drafts[id] = newDraft(batch ? {} : e);
+            drafts[id].open = batch;
         }
         renderComposer();
     } else {
@@ -920,25 +972,27 @@ function renderPanel() {
 }
 
 function renderLinks(e, element) {
-    const draft = linkDrafts[e.id] ||= { open: false, id: null, title: '', url: '', description: '' };
-    const searchable = e.links.length > 6;
-    if (!searchable) delete linkSearches[e.id];
+    const id = composerKey(), batch = isContentBatch();
+    const draft = linkDrafts[id] ||= { open: batch, id: null, title: '', url: '', description: '' };
+    const links = batch ? [] : e.links;
+    const searchable = links.length > 6;
+    if (!searchable) delete linkSearches[id];
     element.innerHTML = `
         ${searchable ? `<div class="searchbox link-search">
             ${icon('search', 'search-icon')}
-            <input id="link-search" type="search" value="${esc(linkSearches[e.id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
+            <input id="link-search" type="search" value="${esc(linkSearches[id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
         </div>` : ''}
         <form class="composer link-composer ${draft.open ? 'composing' : ''}" id="link-form" novalidate>
             <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t(draft.open ? 'title' : 'addLink'))}" maxlength="160" value="${esc(draft.title)}">
             <div class="link-fields" ${draft.open ? '' : 'hidden'}>
                 <input id="link-url" name="url" type="text" inputmode="url" aria-label="${esc(t('url'))}" placeholder="${esc(t('url'))}" value="${esc(draft.url)}">
                 <textarea id="link-description" name="description" aria-label="${esc(t('description'))}" placeholder="${esc(t('description'))}" maxlength="1000">${esc(draft.description)}</textarea>
-                <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t(draft.saving ? 'saving' : 'save'))}</button></div>
+                <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t(draft.saving ? 'saving' : batch ? 'addToSelection' : 'save'))}</button></div>
             </div>
-            <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
+            <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(composerError(draft)) : ''}</p>
             ${draftWarning('links')}
         </form>
-        <div id="link-results">${e.links.map(link => `
+        <div id="link-results">${links.map(link => `
             <article class="link-card">
                 <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">
                     <span class="document-label">
@@ -964,13 +1018,13 @@ function renderLinks(e, element) {
     const filterLinks = () => {
         const query = search?.value.trim().toLocaleLowerCase() || '';
         cards.forEach((card, index) => {
-            const link = e.links[index];
+            const link = links[index];
             card.hidden = ![link.title, link.url, link.description].join(' ').toLocaleLowerCase().includes(query);
         });
         empty.hidden = !query || cards.some(card => !card.hidden);
     };
     search?.addEventListener('input', () => {
-        linkSearches[e.id] = search.value;
+        linkSearches[id] = search.value;
         filterLinks();
     });
     filterLinks();
@@ -987,40 +1041,51 @@ function renderLinks(e, element) {
     form.addEventListener('input', event => {
         if (['title', 'url', 'description'].includes(event.target.name)) draft[event.target.name] = event.target.value;
         delete draft.error;
+        delete draft.errorTarget;
         form.querySelector('.link-error').hidden = true;
         persistLinks();
     });
     form.addEventListener('submit', async event => {
         event.preventDefault();
         if (draft.saving) return;
-        const current = data().exhibits.find(item => item.id === e.id);
+        const current = exhibit();
+        const targets = batch ? batchTargets() : null;
         draft.saving = true;
         form.querySelector('button[type=submit]').textContent = t('saving');
         form.querySelectorAll('input, textarea, button').forEach(input => { input.disabled = true; });
+        delete draft.errorTarget;
         try {
-            if (!draft.title.trim()) throw Error('invalidInput');
+            const title = draft.title.trim(), description = draft.description.trim();
+            if (!title) throw Error('invalidInput');
             const url = documentUrl(draft.url);
             if (!url) throw Error('invalidUrl');
             draft.url = url;
             form.querySelector('#link-url').value = url;
+            if (batch) {
+                const submission = JSON.stringify([title, url, description]);
+                if (draft.submission !== submission) draft.requestId = uid();
+                draft.submission = submission;
+                persistLinks();
+            }
             const result = await api.save({
-                action: 'putLink', exhibitId: current.id, linkId: draft.id,
-                title: draft.title.trim(), url, description: draft.description.trim(),
-                baseRevision: current.revision, contentTag: current.contentTag, requestId: uid()
+                action: 'putLink', title, url, description, requestId: batch ? draft.requestId : uid(),
+                ...(batch ? { targets } : {
+                    exhibitId: current.id, linkId: draft.id, baseRevision: current.revision, contentTag: current.contentTag
+                })
             });
-            delete linkDrafts[current.id];
+            delete linkDrafts[id];
             persistLinks();
             acceptSnapshot(result.snapshot);
-            announce(t('saved'));
+            announce(batch ? selectionCount('savedToExhibits', targets.length) : t('saved'));
         } catch (error) {
-            draft.error = error.key || error.message || 'storage';
-            const message = form.querySelector('.link-error');
-            message.textContent = errorText(error);
-            message.hidden = false;
+            draft.errorTarget = error.details?.exhibitId;
+            const stale = batch && error.key === 'conflict';
+            draft.error = stale ? 'batchLinkConflict' : error.key || error.message || 'storage';
+            if (stale) await refresh();
         } finally {
             draft.saving = false;
             persistLinks();
-            if (selected === e.id && tab === 'documentation' && !edit && linkDrafts[e.id] === draft) renderPanel();
+            if (composerKey() === id && tab === 'documentation' && !edit && linkDrafts[id] === draft) renderPanel();
         }
     });
 }
@@ -1033,7 +1098,11 @@ function noteLinkDialog() {
         if (url && !safeUrl(url)) throw Error('invalidUrl');
         closeDialog();
         editor.setLink(url, String(form.get('text') || ''), link);
-    }, 'noteLink:' + exhibit().id + ':' + drafts[selected].requestId);
+    }, 'noteLink:' + (isContentBatch() ? '' : selected) + ':' + drafts[composerKey()].requestId);
+}
+
+function composerError(draft) {
+    return errorText({ key: draft.error, details: { exhibitId: draft.errorTarget } });
 }
 
 function newDraft(e, n = null) {
@@ -1055,14 +1124,15 @@ function newDraft(e, n = null) {
 function renderComposer() {
     noteEditor?.destroy();
     noteEditor = null;
-    const e = exhibit(),
-        d = drafts[e.id];
+    const id = composerKey(), batch = isContentBatch();
+    const d = drafts[id];
     if (!d) return;
     if (d.readOnly) {
         $('#composer-slot').innerHTML = iconButton('continueEdit', 'resumeNote', 'pencil-line');
         return;
     }
-    const active = d.open || Boolean(d.body || d.images.length || d.noteId);
+    const active = batch || d.open || Boolean(d.body || d.images.length || d.noteId);
+    const submitLabel = t(d.saving ? 'saving' : d.noteId ? 'save' : batch ? 'postToSelection' : 'postShort');
     $('#composer-slot').innerHTML = `
         <form class="composer ${active ? 'composing' : ''}" id="note-form" novalidate>
             ${d.noteId ? `<div class="composer-correction row between">${iconButton('backToNote', 'backToNote', 'arrow-left')}${button('cancel', 'discardDraft', 'quiet')}</div>` : ''}
@@ -1078,11 +1148,11 @@ function renderComposer() {
                         <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}">${icon('image-plus')}</button>
                         <input type="file" id="note-image" hidden accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple>
                     </div>
-                    <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : d.noteId ? 'save' : 'postShort'))}</button>
+                    <button class="primary post-button" type="submit">${esc(submitLabel)}</button>
                 </div>
                 <div class="composer-secondary" ${d.signing ? 'hidden' : ''}>
                     <span class="draft-label" title="${esc(t('draftScope'))}">${esc(t('draftShort'))}</span>
-                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
+                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${d.noteId || batch ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
                 </div>
             </div>
             ${d.readingImages ? `<p class="muted small" role="status">${esc(t('addingImages'))}</p>` : ''}
@@ -1090,16 +1160,16 @@ function renderComposer() {
                 <div class="signature-step">
                     <label for="note-signature">${esc(t('signature'))}</label>
                     <input id="note-signature" autocomplete="off" maxlength="120" value="${esc(d.signature)}" aria-describedby="note-error" placeholder="${esc(t('yourName'))}">
-                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : d.noteId ? 'save' : 'postShort'))}</button></div>
+                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(submitLabel)}</button></div>
                 </div>` : ''}
-            <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(t(d.error)) : ''}</div>
+            <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(composerError(d)) : ''}</div>
             ${draftWarning('notes')}
             ${d.conflict ? button('reviewConflict', 'noteConflict', 'quiet') : ''}
         </form>`;
     const form = $('#note-form');
     let choosingImage = false;
     noteEditor = createNoteEditor($('#note-editor'), {
-        exhibitId: e.id,
+        exhibitId: batch ? '' : id,
         value: d.body, label: t('noteBody'), placeholder: t('writeNote'), disabled: Boolean(d.saving),
         onChange: value => { d.body = value; delete d.error; persistDrafts(); },
         onFocus: () => {
@@ -1113,7 +1183,7 @@ function renderComposer() {
         if (event.target.closest('[data-format]')) event.preventDefault();
     });
     form.addEventListener('focusout', event => {
-        if (!event.relatedTarget || form.contains(event.relatedTarget) || event.relatedTarget.closest('dialog, .selection-menu')) return;
+        if (batch || !event.relatedTarget || form.contains(event.relatedTarget) || event.relatedTarget.closest('dialog, .selection-menu')) return;
         setTimeout(() => {
             if (!form.isConnected || $('#dialog').open || document.activeElement?.closest('.selection-menu') || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing || choosingImage || d.readingImages) return;
             d.open = false;
@@ -1131,7 +1201,7 @@ function renderComposer() {
     $('#note-signature')?.addEventListener('keydown', ev => {
         if (ev.key === 'Enter') {
             ev.preventDefault();
-            postNote(e.id);
+            postNote(id);
         }
     });
     $('#note-status')?.addEventListener('change', ev => {
@@ -1148,7 +1218,7 @@ function renderComposer() {
     fileInput.addEventListener('change', event => {
         choosingImage = false;
         const files = [...event.target.files];
-        if (files.length) addImages(files, e.id);
+        if (files.length) addImages(files, id);
         else $('#note-body')?.focus();
     });
     fileInput.addEventListener('cancel', () => {
@@ -1159,18 +1229,19 @@ function renderComposer() {
         const files = [...(ev.clipboardData?.files || [])];
         if (files.length) {
             ev.preventDefault();
-            addImages(files, e.id);
+            addImages(files, id);
         }
     });
     form.addEventListener('dragover', ev => ev.preventDefault());
     form.addEventListener('drop', ev => {
         ev.preventDefault();
         d.open = true;
-        addImages([...ev.dataTransfer.files], e.id);
+        addImages([...ev.dataTransfer.files], id);
     });
     form.addEventListener('submit', ev => {
         ev.preventDefault();
-        if (d.readingImages) return;
+        if (d.readingImages || d.saving) return;
+        delete d.errorTarget;
         if (!d.body.trim() && !d.images.length && !d.existingImages.length) {
             d.error = 'bodyRequired';
             renderComposer();
@@ -1191,8 +1262,9 @@ async function addImages(files, id) {
     draft.open = true;
     draft.readingImages = true;
     delete draft.error;
+    delete draft.errorTarget;
     const redraw = () => {
-        if (drafts[id] === draft && selected === id && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
+        if (drafts[id] === draft && composerKey() === id && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
     };
     redraw();
     try {
@@ -1213,8 +1285,9 @@ async function addImages(files, id) {
 }
 async function postNote(id) {
     const d = drafts[id];
-    if (d.saving || d.readingImages) return;
+    if (!d || d.saving || d.readingImages) return;
     if (!d.signing) return;
+    delete d.errorTarget;
     if (!d.signature.trim()) {
         d.error = 'signatureRequired';
         renderComposer();
@@ -1228,6 +1301,7 @@ async function postNote(id) {
         return;
     }
     d.saving = true;
+    const batch = isContentBatch(), targets = batch ? batchTargets() : null;
     const signature = d.signature.trim();
     if (d.submissionSignature && d.submissionSignature !== signature) {
         d.images.forEach(image => { image.id = uid(); });
@@ -1238,38 +1312,31 @@ async function postNote(id) {
     d.submissionSignature = signature;
     persistDrafts();
     renderComposer();
-    const submit = $('#note-form button[type=submit]');
-    if (submit) {
-        submit.disabled = true;
-        submit.textContent = t('saving');
-    }
     try {
         const payload = {
             action: d.noteId ? 'correctNote' : 'note',
-            exhibitId: id,
-            baseRevision: d.baseRevision,
-            contentTag: d.contentTag,
+            ...(batch ? { targets } : { exhibitId: id, baseRevision: d.baseRevision, contentTag: d.contentTag }),
             requestId: d.requestId,
             signature,
             body: d.body,
             images: [...d.existingImages]
         };
         if (d.noteId) payload.noteId = d.noteId;
-        else if (d.status) payload.status = d.status;
+        else if (!batch && d.status) payload.status = d.status;
         const result = await api.postNote(payload, d.images);
         rememberSignature(signature);
         delete drafts[id];
         persistDrafts();
         acceptSnapshot(result.snapshot);
-        announce(t('saved'));
+        announce(batch ? selectionCount('savedToExhibits', targets.length) : t('saved'));
     } catch (error) {
         d.error = error.key || 'storage';
-        d.conflict = error.status === 409;
+        d.errorTarget = error.details?.exhibitId;
+        d.conflict = !batch && error.status === 409;
         persistDrafts();
-        if (id === selected && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
     } finally {
         d.saving = false;
-        if (drafts[id] && id === selected && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
+        if (drafts[id] === d && id === composerKey() && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
     }
 }
 
@@ -1302,7 +1369,12 @@ function acceptSnapshot(value) {
 
 function renderMobile() {
     const detail = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
-    $('#mobile-nav').innerHTML = [['list', 'list'], ['map', 'map'], ['detail', 'panel-right']].map(([key, name]) => `<button type="button" data-action="view:${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}>${icon(name)}<span>${esc(t(key === 'list' ? 'exhibits' : key))}</span></button>`).join('');
+    const focused = document.activeElement?.closest('#mobile-nav [data-action]')?.dataset.action;
+    $('#mobile-nav').innerHTML = [['list', 'list'], ['map', 'map'], ['detail', 'panel-right']].map(([key, name]) => {
+        const label = key === 'detail' && isContentBatch() ? selectionCount('selectionCount') : t(key === 'list' ? 'exhibits' : key);
+        return `<button type="button" data-action="view:${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}>${icon(name)}<span>${esc(label)}</span></button>`;
+    }).join('');
+    if (focused) $(`#mobile-nav [data-action="${focused}"]`)?.focus({ preventScroll: true });
 }
 
 function renderEditBar() {
@@ -1336,7 +1408,8 @@ function editorActions(record) {
 }
 
 function hasJoinDraft(id) {
-    return hasNoteDraft(drafts[id]) || hasLinkDraft(linkDrafts[id]) ||
+    return Object.entries(drafts).some(([key, draft]) => hasNoteDraft(draft) && draftRecipients(key).includes(id)) ||
+        Object.entries(linkDrafts).some(([key, draft]) => hasLinkDraft(draft) && draftRecipients(key).includes(id)) ||
         Object.entries(dialogDrafts).some(([key, values]) => key.split(':')[1] === id &&
             Object.values(values).some(value => typeof value === 'string' && value.trim()));
 }
@@ -1454,17 +1527,26 @@ function render({ origin = 'other' } = {}) {
     renderHeader();
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
-    if (!data().exhibits.some(e => e.id === selected)) selected = null;
-    editSelection = new Set(edit ? [...editSelection].filter(id => data().exhibits.some(record => record.id === id)) : []);
-    if (edit && selected && !editSelection.size) editSelection.add(selected);
-    if (edit && editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
+    const available = new Set(data().exhibits.map(record => record.id));
+    if (!available.has(selected)) selected = null;
+    if (edit) {
+        editSelection = new Set([...editSelection].filter(id => available.has(id)));
+        if (selected && !editSelection.size) editSelection.add(selected);
+        if (editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
+        contentSelection.clear();
+        selectingContent = false;
+    } else {
+        editSelection.clear();
+        contentSelection = new Set([...contentSelection].filter(id => available.has(id)));
+        selected ||= [...contentSelection][0] || null;
+        if (selected) contentSelection.add(selected);
+    }
     hardwareSelection = edit ? wholeHardwareSelection(editSelection, normalizeHardwareSelection(hardwareSelection, data(), floorId), data()) : [];
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
     renderInspector({ origin });
     renderMapUI();
     renderEditBar();
-    renderMobile();
     updateMap();
     $('#resizer').setAttribute('aria-label', t('resize'));
     document.documentElement.lang = lang();
@@ -2076,7 +2158,12 @@ function moveRenamedDrafts(session, saved) {
     for (const store of [drafts, linkDrafts, linkSearches]) {
         const entries = Object.entries(store);
         for (const key of Object.keys(store)) delete store[key];
-        for (const [key, value] of entries) store[renames.get(key) || key] = value;
+        for (const [key, value] of entries) {
+            const recipients = draftRecipients(key);
+            const renamedKey = recipients.length > 1 ? batchDraftKey(recipients.map(id => renames.get(id) || id)) : renames.get(key) || key;
+            if (recipients.length > 1 && renamedKey !== key && value.requestId) value.requestId = uid();
+            store[renamedKey] = value;
+        }
     }
     dialogDrafts = Object.assign(Object.create(null), Object.fromEntries(Object.entries(dialogDrafts).map(([key, value]) => {
         const parts = key.split(':');
@@ -2356,6 +2443,8 @@ const actions = {
     },
     refresh,
     enterEdit,
+    toggleContentSelection: () => { setContentSelectionMode(!selectingContent); renderList(); },
+    clearContentSelection,
     resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },
     backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
     discardDraft: () => discardComposer('notes'),
@@ -2373,14 +2462,14 @@ const actions = {
     joinExhibits: openJoinSelection,
     cancelConflict: () => { editConflict.open = false; renderInspector(); renderMapUI(); syncEditTools(); },
     cancelSignature: () => {
-        drafts[selected].signing = false;
+        drafts[composerKey()].signing = false;
         persistDrafts();
         renderComposer();
     },
-    confirmNote: () => postNote(selected),
+    confirmNote: () => postNote(composerKey()),
     closeComposer: () => {
-        drafts[selected].open = false;
-        drafts[selected].signing = false;
+        drafts[composerKey()].open = false;
+        drafts[composerKey()].signing = false;
         persistDrafts();
         renderComposer();
     },
@@ -2469,11 +2558,12 @@ document.addEventListener('click', async event => {
             return;
         }
         if (element.dataset.removeImage !== undefined) {
-            drafts[selected].images.splice(Number(element.dataset.removeImage), 1);
+            drafts[composerKey()].images.splice(Number(element.dataset.removeImage), 1);
             persistDrafts(); renderComposer(); return;
         }
         if (element.dataset.removeExisting) {
-            drafts[selected].existingImages = drafts[selected].existingImages.filter(id => id !== element.dataset.removeExisting);
+            const draft = drafts[composerKey()];
+            draft.existingImages = draft.existingImages.filter(id => id !== element.dataset.removeExisting);
             persistDrafts(); renderComposer(); return;
         }
         if (element.dataset.setView || element.dataset.resetView || element.dataset.previewView) {
@@ -2553,7 +2643,10 @@ document.addEventListener('keydown', event => {
         if (creationOpen) { event.preventDefault(); cancelCreation(); return; }
         if (editConflict?.open) { event.preventDefault(); actions.cancelConflict(); return; }
         if (edit && gizmo) { event.preventDefault(); gizmo = ''; syncEditTools(); renderMapUI(); return; }
-        if (!typing && !event.target.closest('.status-picker, .selection-menu')) select(null);
+        if (!typing && !event.target.closest('.status-picker, .selection-menu')) {
+            if (selectingContent || isContentBatch()) clearContentSelection();
+            else select(null);
+        }
     }
     if (edit && !typing && !editSave?.saving) {
         const key = event.key.toLowerCase();

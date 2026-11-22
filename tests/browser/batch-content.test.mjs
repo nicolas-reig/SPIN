@@ -47,6 +47,32 @@ after(async () => {
     await installation?.cleanup();
 });
 
+test('each added exhibit slides in once the service inspector is stacked', async () => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'no-preference' });
+    try {
+        await context.addInitScript(() => {
+            window.inspectorEntries = [];
+            const animate = Element.prototype.animate;
+            Element.prototype.animate = function (...args) {
+                const animation = animate.apply(this, args);
+                if (this.id === 'inspector') window.inspectorEntries.push(animation);
+                return animation;
+            };
+        });
+        const page = await context.newPage();
+        await page.goto(`${origin}/index.html?webgl=1`);
+        const exhibits = page.locator('[data-select]');
+        await exhibits.nth(0).click();
+        await exhibits.nth(1).press('Shift+Enter');
+        await page.waitForFunction(() => window.inspectorEntries.filter(animation => animation.id === 'inspector-spring').length === 2);
+        await exhibits.nth(2).press('Shift+Enter');
+        await page.waitForFunction(() => window.inspectorEntries.filter(animation => animation.id === 'inspector-spring').length === 3);
+        assert.equal(await page.locator('#inspector .selection-tags .exhibit-tag').count(), 3);
+    } finally {
+        await context.close();
+    }
+});
+
 for (const [name, viewport] of [
     ['desktop', { width: 1440, height: 1000 }],
     ['mobile', { width: 390, height: 844 }]

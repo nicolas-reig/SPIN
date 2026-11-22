@@ -7,7 +7,7 @@ import {
 } from 'three/addons/controls/OrbitControls.js';
 import { TransformController } from './transform-controller.js';
 import { transformKey, geometryCenter, exhibitPlacement, ExhibitPlacementTransaction, TransformTransaction, selectionFieldDelta } from './transform-math.js';
-import { coordinateNumber, coordinateVector } from './domain.js';
+import { coordinateNumber, coordinateVector, focusPlacement } from './domain.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -19,6 +19,7 @@ import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clip
 import { focusGeometry, nextBestView, birdFocusView } from './camera-focus.js';
 
 const radians = v => v * Math.PI / 180;
+const perspectiveFocusPadding = .72;
 
 function applyTransform(object, t) {
     object.position.fromArray(t.position);
@@ -67,6 +68,7 @@ export class MapView {
         this.scene.add(this.root);
         this.boundsDirty = true;
         this.objects = new Map();
+        this.focusDirections = new Map();
         this.materials = Object.fromEntries(Object.entries(colorScheme().materials).map(([name, color]) => {
             const material = new THREE.MeshStandardMaterial({
                 color,
@@ -93,6 +95,8 @@ export class MapView {
         this.scene.add(light);
         this.camera = new THREE.PerspectiveCamera(38, 1, .05, 2000);
         this.camera.position.set(28, 27, 33);
+        this.exhibitRay = new THREE.Raycaster();
+        this.pointerPosition = new THREE.Vector2();
     }
     async init() {
         const params = new URLSearchParams(location.search);
@@ -140,42 +144,102 @@ export class MapView {
             }
         });
         this.controls.listenToKeyEvents(canvas);
-        canvas.addEventListener('pointerdown', e => {
+        this.bindPointerEvents(canvas);
+        this.resize();
+        return this;
+    }
+    bindPointerEvents(canvas) {
+        this.pointerEvents = new AbortController();
+        const listen = (target, type, handler, capture = false) =>
+            target.addEventListener(type, handler, { capture, signal: this.pointerEvents.signal });
+        const movedPointer = (event, start) => Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) > 5;
+
+        const clearHover = () => {
+            this.hoverPointer = null;
+            delete canvas.dataset.exhibitHover;
+        };
+        const queueHover = event => {
+            if (event.pointerType === 'touch') return;
+            this.hoverPointer = event;
+            if (this.hoverFrame) return;
+            this.hoverFrame = requestAnimationFrame(() => {
+                this.hoverFrame = 0;
+                const pointer = this.hoverPointer;
+                this.hoverPointer = null;
+                if (pointer && !canvas.dataset.cameraDragging && !this.transform.active &&
+                    this.pickExhibit(pointer)) canvas.dataset.exhibitHover = 'true';
+                else delete canvas.dataset.exhibitHover;
+            });
+        };
+        listen(canvas, 'pointerdown', e => {
             e.preventDefault();
             canvas.focus({ preventScroll: true });
             getSelection()?.removeAllRanges();
-            this.pointerId = e.pointerId;
-            this.down = [e.clientX, e.clientY];
-            this.orbitFromTop = navigationGesture(e.button, e.shiftKey, this.mode).leaveTop ? { button: e.button, shiftKey: e.shiftKey, clientX: e.clientX, clientY: e.clientY } : null;
+            const supportedButton = e.button >= 0 && e.button <= 2;
+            this.down = { id: e.pointerId, clientX: e.clientX, clientY: e.clientY, supportedButton,
+                orbitFromTop: supportedButton && navigationGesture(e.button, e.shiftKey, this.mode).leaveTop ? e : null };
         });
-        canvas.addEventListener('pointermove', e => {
-            if (!this.orbitFromTop || !e.buttons || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) <= 5) return;
-            const gesture = this.orbitFromTop;
-            this.orbitFromTop = null;
-            this.setView('perspective', true);
-            this.controls._onMouseDown(gesture);
-        }, true);
-        canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
-        canvas.addEventListener('pointerup', e => {
-            this.orbitFromTop = null;
-            if (e.button !== 0 || !this.editing && e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.active) return;
-            const r = canvas.getBoundingClientRect();
-            const pointer = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
-            const ray = new THREE.Raycaster();
-            ray.setFromCamera(pointer, this.camera);
-            const hits = ray.intersectObjects([...this.objects.values()], true);
-            for (const h of hits) {
-                let o = h.object;
-                while (o && !o.userData.exhibitId) o = o.parent;
-                if (o) {
-                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex ?? 0, e.shiftKey, this.editing);
-                    return;
+        listen(canvas, 'pointerenter', queueHover);
+        listen(canvas, 'pointerleave', clearHover);
+        listen(canvas, 'pointermove', e => {
+            const down = this.down;
+            if (down?.id === e.pointerId && e.buttons && (down.dragged || movedPointer(e, down))) {
+                down.dragged = true;
+                if (down.orbitFromTop) {
+                    const gesture = down.orbitFromTop;
+                    down.orbitFromTop = null;
+                    this.setView('perspective', true);
+                    this.down = down;
+                    this.controls._onMouseDown(gesture);
                 }
+                if (e.pointerType !== 'touch' && this.controls.enabled && down.supportedButton) {
+                    clearHover();
+                    canvas.dataset.cameraDragging = 'true';
+                }
+            } else if (!e.buttons) {
+                if (down?.id === e.pointerId) this.resetPointerDrag();
+                queueHover(e);
             }
-            this.onSelect(null, 0, e.shiftKey);
+        }, true);
+        listen(canvas, 'pointerup', e => {
+            const down = this.down;
+            if (down?.id !== e.pointerId) return;
+            this.resetPointerDrag();
+            if (e.button === 0 && !down.dragged && !movedPointer(e, down) && !this.transform.active) {
+                const exhibit = this.pickExhibit(e);
+                if (exhibit) this.onSelect(exhibit.exhibitId, exhibit.instanceIndex ?? 0, e.shiftKey, this.editing);
+                else this.onSelect(null, 0, e.shiftKey);
+            }
+            queueHover(e);
         });
-        this.resize();
-        return this;
+        listen(canvas, 'pointercancel', event => {
+            if (this.down?.id === event.pointerId) this.resetPointerDrag();
+            clearHover();
+        });
+        listen(canvas, 'lostpointercapture', event => {
+            if (this.down?.id === event.pointerId) this.resetPointerDrag();
+            if (!event.buttons) queueHover(event);
+        });
+        listen(canvas, 'wheel', queueHover);
+        listen(window, 'blur', () => { this.resetPointerDrag(); clearHover(); });
+    }
+    resetPointerDrag() {
+        this.down = null;
+        if (this.renderer) delete this.renderer.domElement.dataset.cameraDragging;
+    }
+    pickExhibit(event) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width;
+        const y = (event.clientY - rect.top) / rect.height;
+        if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return null;
+        this.camera.updateMatrixWorld();
+        this.exhibitRay.setFromCamera(this.pointerPosition.set(x * 2 - 1, 1 - y * 2), this.camera);
+        for (const hit of this.exhibitRay.intersectObjects([...this.objects.values()], true)) {
+            let object = hit.object;
+            while (object && !object.userData.exhibitId) object = object.parent;
+            if (object) return object.userData;
+        }
+        return null;
     }
     resize() {
         if (!this.renderer) return;
@@ -281,10 +345,12 @@ export class MapView {
         this.requestRender();
     }
     async setData(data, floorId, selected, editing = false, {
-        reset = false, selection = selected ? [selected] : [], hardwareSelection = []
+        reset = false, selection = selected ? [selected] : [], hardwareSelection = [], savedExhibits = data.exhibits
     } = {}) {
         this.cancelTransform();
+        if (this.data?.assets !== data.assets) this.assetRevisions = new Map(data.assets.map(asset => [asset.id, asset.revision]));
         this.data = data;
+        this.savedExhibits = savedExhibits;
         this.selected = selected;
         this.selection = new Set(selection);
         this.hardwareSelection = hardwareSelection;
@@ -437,10 +503,14 @@ export class MapView {
     }
     cancelTransform() {
         const cancelled = this.transform?.cancel?.() || false;
-        this.down = null; this.orbitFromTop = null;
+        this.resetPointerDrag();
         return cancelled;
     }
-    beginTransform(mode) { cancelAnimationFrame(this.cameraFrame); return this.transform?.begin(mode) || false; }
+    beginTransform(mode) {
+        cancelAnimationFrame(this.cameraFrame);
+        this.resetPointerDrag();
+        return this.transform?.begin(mode) || false;
+    }
     transformKey(event) { return this.transform?.key(event) || false; }
     exhibitPlacement(id) {
         const group = this.objects.get(id);
@@ -625,19 +695,83 @@ export class MapView {
         };
     }
     fallbackView(ids, mode = this.mode) {
-        return this.automaticView(ids.map(id => this.objects.get(id)).filter(Boolean), mode);
+        const exhibit = ids.length === 1 ? this.data?.exhibits.find(record => record.id === ids[0]) : null;
+        return this.automaticView(ids.map(id => this.objects.get(id)).filter(Boolean), mode, exhibit);
     }
-    automaticView(objects, mode = this.mode) {
+    focusDirection(record, object, preparingSave = false) {
+        const placement = focusPlacement(record);
+        const saved = this.savedExhibits.find(exhibit => exhibit.id === record.id);
+        const savedPlacement = focusPlacement(saved);
+        if (saved?.focusDirection && savedPlacement === placement) return saved.focusDirection;
+        const models = [this.floor.modelId, ...record.models.map(instance => instance.model)];
+        const key = JSON.stringify([this.data.datasetKey, placement, models.map(id => this.assetRevisions.get(id))]);
+        const cached = this.focusDirections.get(record.id);
+        if (cached?.key === key) return cached.direction;
+        // In edit mode a draft can change many times before the signed save.
+        if (!preparingSave && this.editing && placement !== savedPlacement) {
+            return saved?.focusDirection || (cached?.placement === savedPlacement ? cached.direction : null);
+        }
+
+        this.root.updateMatrixWorld(true);
+        const view = nextBestView(focusGeometry([object]), {
+            direction: this.framingDirection('perspective'), occluders: this.root.children,
+            padding: { horizontal: perspectiveFocusPadding, vertical: perspectiveFocusPadding }
+        });
+        if (!view) return null;
+        const direction = coordinateVector(new THREE.Vector3(...view.position).sub(new THREE.Vector3(...view.target)).normalize().toArray());
+        this.focusDirections.set(record.id, { key, placement, direction });
+        return direction;
+    }
+    static async prepareFocusDirections(data, savedExhibits, records, displayed, signal) {
+        const result = new Map();
+        for (const floorId of new Set(records.map(record => record.floorId))) {
+            signal?.throwIfAborted();
+            const current = displayed?.data === data && displayed.floor?.id === floorId && displayed.key === displayed.installedKey;
+            const view = current ? displayed : new MapView({});
+            const abort = () => { view.generation++; };
+            if (!current) signal?.addEventListener('abort', abort, { once: true });
+            try {
+                if (!current) await view.setData(data, floorId, null, false, { savedExhibits });
+                signal?.throwIfAborted();
+                for (const record of records.filter(item => item.floorId === floorId)) {
+                    const object = view.objects.get(record.id);
+                    if (!object || object.children.some(holder => !holder.children.length) ||
+                        view.floor.modelId && !view.root.children.some(child => child.userData.floor)) continue;
+                    try {
+                        const direction = view.focusDirection(record, object, true);
+                        if (direction) result.set(record.id, direction);
+                    } catch (error) {
+                        console.warn('Could not prepare automatic exhibit focus.', error);
+                    }
+                }
+            } finally {
+                if (!current) {
+                    signal?.removeEventListener('abort', abort);
+                    view.destroy();
+                }
+            }
+        }
+        return Object.fromEntries(result);
+    }
+    automaticView(objects, mode = this.mode, exhibit = null) {
         mode = cameraMode(mode);
+        const padding = this.framingPadding(), aspect = this.framingAspect();
+        const factor = mode === 'top' ? .82 : perspectiveFocusPadding;
+        const focusPadding = { horizontal: padding.horizontal * factor, vertical: padding.vertical * factor };
+        if (mode === 'perspective' && exhibit && objects.length === 1 && this.floor && this.key === this.installedKey) {
+            const box = new THREE.Box3().setFromObject(objects[0]);
+            const cached = box.isEmpty() ? null : this.focusDirection(exhibit, objects[0]);
+            const direction = cached ? new THREE.Vector3(...cached) : this.framingDirection(mode);
+            return frameBounds(box.isEmpty() ? this.sceneBounds() : box, direction, aspect, focusPadding);
+        }
         this.root.updateMatrixWorld(true);
         const geometry = focusGeometry(objects);
         if (!geometry.points.length) {
             geometry.box.copy(this.sceneBounds());
             geometry.points = boundsCorners(geometry.box);
         }
-        const padding = this.framingPadding();
-        const options = { aspect: this.framingAspect(), direction: this.camera.position.clone().sub(this.controls.target),
-            padding: { horizontal: padding.horizontal * .82, vertical: padding.vertical * .82 }, occluders: this.root.children };
+        const options = { aspect, direction: this.camera.position.clone().sub(this.controls.target),
+            padding: focusPadding, occluders: this.root.children };
         return (mode === 'top' ? birdFocusView : nextBestView)(geometry, options) ||
             frameBounds(geometry.box, this.framingDirection(mode), options.aspect, { perspective: mode !== 'top', ...padding });
     }
@@ -714,12 +848,11 @@ export class MapView {
     }
     focusObjects() {
         if (this.editing) return this.transformEntries().map(entry => entry.object);
-        const object = this.objects.get(this.selected);
-        return object ? [object] : [];
+        return [...this.selection].map(id => this.objects.get(id)).filter(Boolean);
     }
     focus(onlyWhenHidden = false) {
         const objects = this.focusObjects();
-        if (!objects.length || (onlyWhenHidden && objects.length === 1 && this.isVisible(this.selected))) return;
+        if (!objects.length || (onlyWhenHidden && objects.every(object => this.isVisible(object.userData.exhibitId)))) return;
         this.cancelTransform();
         const exhibit = this.data?.exhibits.find(record => {
             const group = this.objects.get(record.id);
@@ -727,7 +860,7 @@ export class MapView {
         });
         const preset = objects.length === 1 ? exhibit?.views?.[viewKey(this.mode)] : null;
         if (preset) this.applyView(this.focusView(exhibit.id, preset));
-        else this.applyView(this.automaticView(objects), this.mode, { orbit: true });
+        else this.applyView(this.automaticView(objects, this.mode, objects.length === 1 ? exhibit : null), this.mode, { orbit: true });
     }
     focusFloor() {
         const ids = this.data.exhibits.filter(exhibit => exhibit.floorId === this.floor.id).map(exhibit => exhibit.id);
@@ -816,6 +949,8 @@ export class MapView {
         this.generation++;
         cancelAnimationFrame(this.frame);
         cancelAnimationFrame(this.cameraFrame);
+        cancelAnimationFrame(this.hoverFrame);
+        this.pointerEvents?.abort();
         this.observer?.disconnect();
         this.controls?.dispose();
         this.transform?.dispose();

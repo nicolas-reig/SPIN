@@ -119,6 +119,78 @@ function geometryMemory(object) {
     return { geometries: geometries.size, buffers: buffers.size, bytes: [...buffers].reduce((sum, buffer) => sum + buffer.byteLength, 0) };
 }
 
+test('viewport hover and clicks agree, while camera drags retain priority through release or cancellation', t => {
+    const previousFrame = globalThis.requestAnimationFrame;
+    const previousSelection = globalThis.getSelection;
+    let frame;
+    globalThis.requestAnimationFrame = callback => { frame = callback; return 1; };
+    globalThis.getSelection = () => null;
+    t.after(() => {
+        globalThis.requestAnimationFrame = previousFrame;
+        globalThis.getSelection = previousSelection;
+    });
+    const { view } = makeView();
+    const canvas = Object.assign(new EventTarget(), {
+        dataset: {}, focus() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 })
+    });
+    view.renderer = { domElement: canvas };
+    view.controls = { enabled: true };
+    view.transform = { active: false };
+    view.camera.position.set(0, 0, 10);
+    view.camera.lookAt(0, 0, 0);
+    const group = new THREE.Group();
+    const component = new THREE.Group();
+    component.userData = { exhibitId: 'nested exhibit', instanceIndex: 2 };
+    component.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), view.materials.ok));
+    group.add(component);
+    group.updateMatrixWorld(true);
+    view.objects.set('nested exhibit', group);
+    const picks = [];
+    view.onSelect = (...selection) => picks.push(selection);
+    view.bindPointerEvents(canvas);
+    t.after(() => { view.pointerEvents.abort(); view.stopColorUpdates(); });
+
+    const pointer = (type, changes = {}) => canvas.dispatchEvent(Object.assign(new Event(type), {
+        pointerId: 1, pointerType: 'mouse', button: 0, buttons: 0, clientX: 50, clientY: 50, ...changes
+    }));
+    const render = () => { const next = frame; frame = null; next?.(); };
+    pointer('pointerenter');
+    pointer('pointermove', { clientX: 0 });
+    render();
+    assert.equal(canvas.dataset.exhibitHover, undefined, 'only the latest hover is picked within a frame');
+    pointer('pointermove');
+    render();
+    assert.equal(canvas.dataset.exhibitHover, 'true');
+
+    pointer('pointerdown', { buttons: 1 });
+    pointer('pointermove', { buttons: 1, clientX: 70 });
+    assert.equal(canvas.dataset.cameraDragging, 'true');
+    assert.equal(canvas.dataset.exhibitHover, undefined);
+    pointer('pointermove', { buttons: 1 });
+    pointer('pointerup');
+    render();
+    assert.equal(canvas.dataset.cameraDragging, undefined);
+    assert.equal(canvas.dataset.exhibitHover, 'true');
+    assert.deepEqual(picks, [], 'returning to the press point after a drag is still a drag');
+
+    pointer('pointerdown', { buttons: 1 });
+    pointer('pointerup');
+    assert.deepEqual(picks[0]?.slice(0, 2), ['nested exhibit', 2]);
+    view.editing = false;
+    pointer('pointermove', { shiftKey: true });
+    render();
+    assert.equal(canvas.dataset.exhibitHover, 'true', 'PR 10 Shift-click remains clickable in service mode');
+    pointer('pointerdown', { buttons: 1, shiftKey: true });
+    pointer('pointerup', { shiftKey: true });
+    assert.deepEqual(picks[1], ['nested exhibit', 2, true, false]);
+    pointer('pointerdown', { buttons: 2, button: 2 });
+    pointer('pointermove', { buttons: 2, clientX: 70 });
+    assert.equal(canvas.dataset.cameraDragging, 'true');
+    pointer('pointercancel');
+    render();
+    assert.deepEqual(canvas.dataset, {});
+});
+
 test('actual setData loads and smooths a repeated unskinned asset once, with separate object transforms and materials', async () => {
     const { view, calls, records } = makeView();
     const data = dataset();
@@ -150,6 +222,67 @@ test('actual setData loads and smooths a repeated unskinned asset once, with sep
     first.children[0].position.x += 100;
     assert.equal(first.children[1].position.x, 2);
     assert.equal(second.children[0].position.x, 0);
+    view.destroy();
+});
+
+test('automatic 3D exhibit focus reuses the search across recentering, resizing and unrelated edits', async () => {
+    const { view } = makeView();
+    const data = dataset();
+    await view.setData(data, 'floor', 'first');
+    let rays = 0;
+    const obstacle = new THREE.Object3D();
+    obstacle.raycast = () => { rays++; };
+    view.root.add(obstacle);
+
+    const initial = view.fallbackView(['first'], 'perspective');
+    const initialRays = rays;
+    assert.ok(initialRays > 0, 'the first focus searches for a visible direction');
+    assert.deepEqual(view.fallbackView(['first'], 'perspective'), initial);
+
+    const unrelated = structuredClone(data);
+    unrelated.exhibits[0].status = 'problem';
+    unrelated.exhibits[1].transform.position[0] += 2;
+    await view.setData(unrelated, 'floor', 'first');
+    view.container.clientWidth = 200;
+    view.container.clientHeight = 800;
+    const narrow = view.fallbackView(['first'], 'perspective');
+    const distance = preset => new THREE.Vector3(...preset.position).distanceTo(new THREE.Vector3(...preset.target));
+    const direction = preset => new THREE.Vector3(...preset.position).sub(new THREE.Vector3(...preset.target)).normalize();
+    assert.ok(distance(narrow) > distance(initial), 'narrow viewports get more stand-off distance');
+    assert.ok(direction(narrow).dot(direction(initial)) > .999999, 'viewport-specific framing reuses the direction');
+    assert.equal(rays, initialRays);
+    view.destroy();
+});
+
+test('signed placement save prepares a fresh direction and subsequent focus uses the persisted value', async () => {
+    const { view } = makeView();
+    const data = dataset();
+    data.exhibits[0].focusDirection = [0, .6, -.8];
+    await view.setData(data, 'floor', 'first');
+    let rays = 0;
+    const obstacle = new THREE.Object3D();
+    obstacle.raycast = () => { rays++; };
+    view.root.add(obstacle);
+    view.fallbackView(['first'], 'perspective');
+    assert.equal(rays, 0, 'persisted directions skip searching');
+
+    const draft = structuredClone(data);
+    draft.exhibits[0].models[0].transform.position[0] += 3;
+    await view.setData(draft, 'floor', 'first', true, { savedExhibits: data.exhibits });
+    view.fallbackView(['first'], 'perspective');
+    assert.equal(rays, 0, 'reframing a draft waits for signed Save before searching');
+    const focusDirections = await MapView.prepareFocusDirections(draft, data.exhibits, [draft.exhibits[0]], view);
+    const saveRays = rays;
+    assert.ok(saveRays > 0, 'moving a component makes its exhibit search during Save');
+    assert.equal(Object.keys(focusDirections).length, 1);
+    assert.equal(focusDirections.first.length, 3);
+    assert.notDeepEqual(focusDirections.first, data.exhibits[0].focusDirection);
+
+    draft.exhibits[0].focusDirection = focusDirections.first;
+    await view.setData(draft, 'floor', 'first');
+    view.focusDirections.clear();
+    view.fallbackView(['first'], 'perspective');
+    assert.equal(rays, saveRays, 'the saved direction works without a browser cache');
     view.destroy();
 });
 

@@ -7,7 +7,7 @@ import {
     EditSession,
     identity,
     STATUSES,
-    normalizeStatus, validTransform, normalizeTransform
+    normalizeStatus, validTransform, normalizeTransform, focusPlacement
 } from './domain.js';
 import {
     t,
@@ -30,16 +30,18 @@ import { icon } from './icons.js';
 import { colorMode, onColorModeChange } from './colors.js';
 import { safeUrl, documentUrl, opensInBrowser } from './domain.js';
 import { copyText } from './clipboard.js';
-import { DraftStore, hasNoteDraft, hasLinkDraft, editSnapshot, restoreEditSnapshot } from './drafts.js';
+import { DraftStore, hasNoteDraft, hasLinkDraft, batchDraftKey, draftRecipients, editSnapshot, restoreEditSnapshot } from './drafts.js';
 import { normalizeHardwareSelection, commonTransform, hardwareSelected, wholeHardwareSelection, pickHardwareSelection } from './transform-selection.js';
 import { hardwareParameters, exhibitParameters, selectionParameters } from './placement-inspector.js';
 import { InspectorNavigation } from './inspector-navigation.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 import { groupExhibits, matchesExhibitGroup, ExhibitGroupState } from './exhibit-groups.js';
+import { adaptiveExhibitName, installAdaptiveExhibitNames } from './exhibit-label.js';
 let noteEditor = null;
 installSelects();
 installControlMotion();
+installAdaptiveExhibitNames();
 const $ = s => document.querySelector(s),
     api = new Api();
 const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspector-stack'), {
@@ -71,6 +73,7 @@ let snapshot = null,
     noticeTimer, noticeClearTimer;
 let creation = null, creationOpen = false, editConflict = null;
 let editSelection = new Set();
+let contentSelection = new Set(), selectingContent = false;
 let hardwareSelection = [];
 let transformSpace = 'local';
 let numberDrag;
@@ -116,8 +119,15 @@ function loadDrafts() {
 }
 const data = () => edit?.value || snapshot;
 const exhibit = () => data()?.exhibits.find(e => e.id === selected);
-const selectedExhibits = () => data()?.exhibits.filter(record => editSelection.has(record.id)) || [];
-const isSelected = id => edit ? editSelection.has(id) : id === selected;
+const selectionIds = () => edit ? editSelection : contentSelection;
+const isSelected = id => selectionIds().has(id);
+const selectedExhibits = () => data()?.exhibits.filter(record => isSelected(record.id)) || [];
+const isContentBatch = () => !edit && contentSelection.size > 1;
+const composerKey = () => isContentBatch() ? batchDraftKey(contentSelection) : selected;
+const selectionCount = (key, count = contentSelection.size) => t(key).replace('{count}', count);
+const batchTargets = () => selectedExhibits().map(record => ({
+    exhibitId: record.id, baseRevision: record.revision, contentTag: record.contentTag
+}));
 const floor = () => data()?.floors.find(f => f.id === floorId);
 function selectionTransforms() {
     if (!edit) return [];
@@ -172,9 +182,10 @@ function bindSelectionFields() {
 
 function renderSelectionInspector(hardware) {
     const records = selectedExhibits();
-    const title = hardware ? `${hardwareSelection.length} ${t('hardwareComponents')}` : `${records.length} ${t('exhibits')}`;
+    const title = hardware ? selectionCount('hardwareComponentsSelected', hardwareSelection.length) :
+        selectionCount('exhibitsSelected', records.length);
     const problem = hardware ? '' : joinProblem(records);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(title)}</h1></div><div class="panel-content selection-panel" id="structure-panel">
+    $('#inspector').innerHTML = `${selectionHeader(records, title)}<div class="panel-content selection-panel" id="structure-panel">
         <form id="structure-form" novalidate>${selectionFields()}<div class="error" id="structure-error" role="alert" hidden></div></form></div>
         <div class="inspector-footer selection-footer"><div class="error" id="join-error" role="alert" ${problem ? '' : 'hidden'}>${esc(problem ? t(problem) : '')}</div>
         <div class="selection-actions">${button('cancel', 'cancelJoin', 'quiet')}${hardware ? '' : button('joinTogether', 'joinExhibits', 'primary', `${problem ? 'disabled' : ''} ${editHelp('joinHint')}`)}</div></div>`;
@@ -242,7 +253,8 @@ $('#notice').addEventListener('animationend', event => {
 });
 
 function errorText(e) {
-    return t(e.key || e.message || 'storage');
+    const message = t(e.key || e.message || 'storage');
+    return e.details?.exhibitId ? `${message} (${e.details.exhibitId})` : message;
 }
 
 function updateDraftWarnings() {
@@ -299,12 +311,12 @@ function persistEdit() {
 }
 
 function discardComposer(kind) {
-    const id = selected, store = kind === 'notes' ? drafts : linkDrafts, draft = store[id];
+    const id = composerKey(), store = kind === 'notes' ? drafts : linkDrafts, draft = store[id];
     if (!draft || draft.saving) return;
     delete store[id];
     kind === 'notes' ? persistDrafts() : persistLinks();
     renderPanel();
-    cancelledDraft = { kind, id, draft };
+    cancelledDraft = { kind, id, draft, targets: isContentBatch() ? [...contentSelection] : null };
     announce(t('draftCancelled'), 'restoreDraft');
 }
 
@@ -320,8 +332,18 @@ function restoreComposer() {
     cancelledDraft = null;
     saved.kind === 'notes' ? persistDrafts() : persistLinks();
     tab = saved.kind === 'notes' ? 'notes' : 'documentation';
-    select(saved.id);
-    renderPanel();
+    if (saved.targets) {
+        collapseEmptyDraft();
+        contentSelection = new Set(saved.targets);
+        if (!contentSelection.has(selected)) selected = saved.targets[0];
+        floorId = exhibit()?.floorId || floorId;
+        render();
+        setView('detail');
+        syncUrl();
+    } else {
+        select(saved.id);
+        renderInspector();
+    }
     announce(t('draftRestored'));
 }
 
@@ -345,12 +367,25 @@ function displayName(record) {
     return record?.name || '';
 }
 
+function exhibitTag(record) {
+    return `<span class="exhibit-tag">${adaptiveExhibitName(displayName(record))}</span>`;
+}
+
+function selectionHeader(records, title, action = '') {
+    return `<div class="inspector-header">
+        <div class="inspector-tools"><h1>${esc(title)}</h1>${action}</div>
+        <ul class="selection-tags" role="list" aria-label="${esc(t('selectedExhibits'))}" tabindex="0">
+            ${records.map(record => `<li>${exhibitTag(record)}</li>`).join('')}
+        </ul>
+    </div>`;
+}
+
 function floorLabel(record) {
     return record.names[lang()];
 }
 
 function collapseEmptyDraft() {
-    const draft = drafts[selected];
+    const draft = drafts[composerKey()];
     if (draft && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length) {
         draft.open = false;
         draft.signing = false;
@@ -371,7 +406,7 @@ function removeExhibit(id, origin = 'other') {
     const createdAt = Date.parse(record.createdAt);
     const needsWarning = record.notes.length || record.links.length || !Number.isFinite(createdAt) || Date.now() - createdAt > 10 * 60 * 1000;
     if (!needsWarning) { remove(); return; }
-    showDialog('deleteExhibit', `<p>${esc(record.name)}</p><p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('deleteExhibit')}`, remove);
+    showDialog('deleteExhibit', `<p>${adaptiveExhibitName(record.name)}</p><p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('deleteExhibit')}`, remove);
     $('#dialog button[type=submit]').className = 'danger';
 }
 
@@ -420,7 +455,8 @@ function renderSidebar() {
     ];
     $('#sidebar').setAttribute('aria-label', t('exhibits'));
     $('#sidebar').innerHTML = `
-        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', 'plus') : ''}</div>
+        <div class="sidebar-title row between"><h2>${esc(t('exhibits'))}</h2>${edit ? iconButton('newExhibit', 'newExhibit', 'plus') :
+            `<button type="button" class="quiet content-select-toggle" data-action="toggleContentSelection" aria-label="${esc(t('selectMultiple'))}" aria-controls="exhibit-list" aria-pressed="${selectingContent}" title="${esc(t('multiSelectHint'))}">${icon('layers')}<span>${esc(t('selectShort'))}</span></button>`}</div>
         <div class="search-row">
             <div class="searchbox">
                 ${icon('search', 'search-icon')}
@@ -479,17 +515,10 @@ function renderSidebar() {
 
 function exhibitLabel(record, editable = false) {
     const text = displayName(record);
-    const name = value => `<span class="exhibit-name" ${editable ? 'aria-hidden="true"' : ''}>${esc(value)}</span>`;
-    let title = name(text);
-    if (editable) {
-        if (record.id === selected && editSelection.size === 1) {
-            const end = text.search(/\S+$/u);
-            title = `${name(text.slice(0, end))}<span class="exhibit-name-end">${name(text.slice(end))}<button type="button" class="icon-button exhibit-rename" data-rename-exhibit="${esc(record.id)}" aria-label="${esc(t('renameExhibit') + ': ' + text)}" ${editHelp('renameExhibitHint')}>${icon('pencil-line')}</button></span>`;
-        }
-        title = `<span class="exhibit-title-line">${title}</span>`;
-    }
+    const rename = editable && record.id === selected && editSelection.size === 1
+        ? `<button type="button" class="icon-button exhibit-rename" data-rename-exhibit="${esc(record.id)}" aria-label="${esc(t('renameExhibit') + ': ' + text)}" ${editHelp('renameExhibitHint')}>${icon('pencil-line')}</button>` : '';
     return `<span class="exhibit-label">
-        ${title}
+        <span class="exhibit-name${editable ? ' exhibit-title-line' : ''}" ${editable && !rename ? 'aria-hidden="true"' : ''}>${adaptiveExhibitName(text, rename)}</span>
         ${!edit && colorMode() !== 'default' ? `<span class="exhibit-status-name">${esc(t(record.status))}</span>` : ''}
         ${record.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
     </span>`;
@@ -522,6 +551,7 @@ window.addEventListener('resize', fitSidebar, { passive: true });
 document.fonts.ready.then(fitSidebar);
 
 function renderList() {
+    const focused = document.activeElement?.closest('#exhibit-list [data-select]');
     const groups = groupExhibits(data().exhibits, lang());
     renderGroupFilter(groups);
     const q = query.trim().toLocaleLowerCase(lang());
@@ -545,6 +575,7 @@ function renderList() {
     const groupDescription = groupFilter !== null ? groups.find(group => group.key === groupFilter)?.name || t('ungrouped') : '';
     $('#filter-description').textContent = [scope !== 'name' ? t(scope) : '', floorDescription, groupDescription, appliedStatusFilter ? t(appliedStatusFilter) : '', query ? '“' + query + '”' : ''].filter(Boolean).join(' · ');
     const row = e => {
+        const active = isSelected(e.id);
         const details = [titleFloor(e.floorId)];
         if (!e.placed) details.push(t('unplaced'));
         else if (!edit) details.push(t(e.status));
@@ -555,7 +586,7 @@ function renderList() {
             ${e.id === selected && editSelection.size === 1 ? `<div class="item-actions exhibit-actions"><button type="button" class="icon-button" data-duplicate-exhibit="${esc(e.id)}" aria-label="${esc(t('duplicate') + ': ' + displayName(e))}" ${editHelp('duplicateExhibitHint')}>${icon('copy-plus')}</button><button type="button" class="icon-button danger" data-trash-exhibit="${esc(e.id)}" aria-label="${esc(t('deleteExhibit') + ': ' + displayName(e))}" ${editHelp('removeExhibitHint')}>${icon('trash')}</button></div>` : ''}
         </div>`;
         return `
-        <div class="exhibit-entry"><button class="exhibit-row ${e.id === selected ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${e.id === selected}" title="${esc(details.join(' · '))}">
+        <div class="exhibit-entry"><button type="button" class="exhibit-row ${active ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${active}" title="${esc([...details, t('multiSelectHint')].join(' · '))}">
             <span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>
             ${exhibitLabel(e)}
         </button></div>`;
@@ -567,7 +598,23 @@ function renderList() {
             <summary data-group-toggle data-disclosure="true">${icon('chevron-right', 'disclosure-icon')}<span class="exhibit-group-label">${esc(group.name)}</span><span class="exhibit-group-count">${group.records.length}</span></summary>
             <div class="exhibit-group-members">${members}</div></details>`;
     }).join('') : `<p class="empty">${esc(t('noResults'))}</p>`;
+    if (focused && document.activeElement === document.body) {
+        [...$('#exhibit-list').querySelectorAll('[data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
+    }
     fitSidebar();
+}
+
+function setContentSelectionMode(value) {
+    selectingContent = value;
+    $('[data-action=toggleContentSelection]')?.setAttribute('aria-pressed', String(value));
+}
+
+function clearContentSelection() {
+    setContentSelectionMode(false);
+    const wasDetail = view === 'detail';
+    select(null);
+    if (wasDetail) setView('list');
+    $('[data-action=toggleContentSelection]')?.focus({ preventScroll: true });
 }
 
 function updateMapHelp() {
@@ -656,14 +703,19 @@ async function initializeMap() {
 }
 async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
-        reset, selection: edit ? [...editSelection] : selected ? [selected] : [], hardwareSelection: edit ? hardwareSelection : []
+        reset, selection: [...selectionIds()], hardwareSelection: edit ? hardwareSelection : [],
+        savedExhibits: (edit?.base || snapshot).exhibits
     });
     updateTransformFields(null, { groupsOnly: true });
 }
 
 async function select(id, instanceIndex = 0, extend = false, hardware = false, origin = 'other') {
-    if (editSave?.saving) return;
-    if (!extend && id && selected === id && !creationOpen && !editConflict?.open && (!edit || editSelection.size === 1 && (
+    if (!snapshot || editSave?.saving) return;
+    extend ||= !edit && selectingContent && ['sidebar', 'viewport'].includes(origin);
+    const clicked = data().exhibits.find(record => record.id === id);
+    if (extend && !clicked) return;
+    if (!extend && id && selected === id && (!clicked?.floorId || clicked.floorId === floorId) &&
+        !creationOpen && !editConflict?.open && selectionIds().size === 1 && (!edit || (
         hardware ? hardwareSelection.length === 1 && hardwareSelection[0].instanceIndex === instanceIndex : !hardwareSelection.length || exhibit()?.models.length === 1
     ))) {
         map?.cancelTransform(); numberDrag?.cancel();
@@ -678,8 +730,6 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     if (editConflict) editConflict.open = false;
     collapseEmptyDraft();
     const previous = selected;
-    const focused = document.activeElement?.closest('#exhibit-list [data-select]');
-    const clicked = data().exhibits.find(x => x.id === id);
     if (edit && hardware && clicked?.models[instanceIndex]) {
         const selection = pickHardwareSelection(editSelection, hardwareSelection, data(), floorId, {
             exhibitId: id, instanceIndex, extend, viewport: origin === 'viewport'
@@ -687,16 +737,18 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
         hardwareSelection = selection.hardware;
         editSelection = selection.exhibits;
         selected = editSelection.has(id) ? id : [...editSelection][0] || null;
-    } else if (edit && extend) {
-        if (!clicked) return;
+    } else if (extend) {
         hardwareSelection = [];
-        if (editSelection.has(id)) editSelection.delete(id);
-        else editSelection.add(id);
-        selected = editSelection.has(selected) ? selected : [...editSelection][0] || null;
+        const selection = selectionIds();
+        if (selection.has(id)) selection.delete(id);
+        else selection.add(id);
+        selected = selection.has(selected) ? selected : [...selection][0] || null;
     } else {
         hardwareSelection = [];
         selected = clicked?.id || null;
-        editSelection = new Set(selected ? [selected] : []);
+        const selection = new Set(selected ? [selected] : []);
+        if (edit) editSelection = selection;
+        else contentSelection = selection;
     }
     if (edit) hardwareSelection = wholeHardwareSelection(editSelection, hardwareSelection, data());
     const e = data().exhibits.find(x => x.id === selected);
@@ -706,9 +758,10 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
         syncEditTools();
         return;
     }
-    const changed = Boolean(e.floorId && floorId !== e.floorId);
+    const targetFloor = !edit && extend ? (isSelected(id) ? clicked.floorId : null) : e.floorId;
+    const changed = Boolean(targetFloor && floorId !== targetFloor);
     activeInstance = !extend ? instanceIndex : selected === previous ? activeInstance : 0;
-    if (e.floorId) floorId = e.floorId;
+    if (targetFloor) floorId = targetFloor;
     renderList();
     renderInspector({ origin, focusSelection: true, replaceSelection: !extend });
     renderMapUI();
@@ -718,10 +771,7 @@ async function select(id, instanceIndex = 0, extend = false, hardware = false, o
     syncUrl();
     if (edit) persistEdit();
     if (changed) announce(t('floorChanged') + ': ' + titleFloor(floorId));
-    if (!extend && matchMedia('(max-width:860px)').matches) setView('detail');
-    if (focused && !focused.isConnected && document.activeElement === document.body) {
-        [...document.querySelectorAll('#exhibit-list [data-select]')].find(button => button.dataset.select === focused.dataset.select)?.focus({ preventScroll: true });
-    }
+    if (!extend && selected === e.id && selectionIds().size === 1 && matchMedia('(max-width:860px)').matches) setView('detail');
 }
 
 function changeFloor(id) {
@@ -734,7 +784,10 @@ function changeFloor(id) {
     floorId = id;
     hardwareSelection = [];
     const e = exhibit();
-    if (e?.floorId !== id) { selected = null; editSelection.clear(); }
+    if (e?.floorId !== id && (edit || !selectingContent && !isContentBatch())) {
+        selected = null;
+        selectionIds().clear();
+    }
     renderMapUI();
     renderList();
     renderInspector();
@@ -754,25 +807,57 @@ function syncUrl() {
     history.replaceState(null, '', url);
 }
 
-function noteHTML(n) {
-    if (n.deleted) return `<article class="note tombstone"><p>${esc(t('noteBy'))} <strong>${esc(n.author)}</strong></p><p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p><time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time></article>`;
-    const shortDate = date(n.at);
+function contentSource(record) {
+    return `<div class="content-source">${exhibitTag(record)}</div>`;
+}
+
+function noteHTML(n, record, batch = false) {
+    const source = batch ? contentSource(record) : '';
+    if (n.deleted) return `<article class="note tombstone">
+        ${source}
+        <p>${esc(t('noteBy'))} <strong>${esc(n.author)}</strong></p>
+        <p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p>
+        <time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time>
+    </article>`;
+    const correction = n.corrections?.at(-1);
     return `
         <article class="note">
+            ${source}
             <div class="note-meta">
                 <span class="note-author">${esc(n.author)}</span>
-                <time class="note-date" datetime="${esc(n.at)}" title="${esc(date(n.at, true))}">${esc(shortDate)}</time>
+                <time class="note-date" datetime="${esc(n.at)}" title="${esc(date(n.at, true))}">${esc(date(n.at))}</time>
             </div>
-            <div class="note-body">${markdown(n.body, selected)}</div>
+            <div class="note-body">${markdown(n.body, record.id)}</div>
             ${n.images.map(id => `<a href="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" target="_blank" rel="noopener"><img class="note-image" src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}" loading="lazy"></a>`).join('')}
-            <div class="note-footer">
-                ${n.corrections?.length ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(n.corrections.at(-1).signature)} · ${esc(date(n.corrections.at(-1).at))}</p></details>` : '<span></span>'}
-                <div class="item-actions">
+            ${correction || !batch ? `<div class="note-footer">
+                ${correction ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(correction.signature)} · ${esc(date(correction.at))}</p></details>` : '<span></span>'}
+                ${batch ? '' : `<div class="item-actions">
                     <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${icon('pencil-line')}<span>${esc(t('correct'))}</span></button></div></details>
                     <button type="button" class="icon-button danger" data-delete-note="${esc(n.id)}" aria-label="${esc(t('deleteNote'))}" title="${esc(t('deleteNote'))}">${icon('trash')}</button>
-                </div>
-            </div>
+                </div>`}
+            </div>` : ''}
         </article>`;
+}
+
+function linkHTML(link, source = null) {
+    return `<article class="link-card">
+        ${source ? contentSource(source) : ''}
+        <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">
+            <span class="document-label">
+                <span class="document-title">${esc(link.title)}</span>
+                <small class="document-url">${esc(link.url)}</small>
+            </span>
+            ${icon('link')}
+        </a>
+        ${link.description ? `<p>${esc(link.description)}</p>` : ''}
+        <div class="link-actions">
+            <button type="button" class="icon-button" data-copy="${esc(link.url)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>
+            ${source ? '' : `<div class="item-actions">
+                <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button></div></details>
+                <button type="button" class="icon-button danger" data-delete-link="${esc(link.id)}" aria-label="${esc(t('remove') + ': ' + link.title)}" title="${esc(t('remove'))}">${icon('trash')}</button>
+            </div>`}
+        </div>
+    </article>`;
 }
 
 function renderInspector({ origin = 'other', focusSelection = false, replaceSelection = false } = {}) {
@@ -789,19 +874,21 @@ function renderInspector({ origin = 'other', focusSelection = false, replaceSele
         renderMobile();
         return;
     }
-    const records = creationOpen || editConflict?.open ? [] : edit ? selectedExhibits() : [exhibit()];
-    const context = inspectorContext(records, creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
+    const ids = creationOpen || editConflict?.open ? [] : [...selectionIds()];
+    const context = isContentBatch() ? 'batch-content' : inspectorContext(
+        ids.map(id => ({ id })), creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
     const sameContext = context === panelMotion.context;
     const navigation = sameContext ? inspectorNavigation.capture() : null;
-    const ids = creationOpen || editConflict?.open ? [] : edit ? [...editSelection] : records.map(record => record.id);
     panelMotion.prepare(context, ids, { replace: replaceSelection });
     renderInspectorContent();
     if (edit && !creationOpen && !editConflict?.open) inspectorNavigation.update(editSelection, hardwareSelection, { previous: navigation, focus: focusSelection });
     else inspectorNavigation.reset();
-    if (panelMotion.update(context, ids, { origin, replace: replaceSelection })) {
+    if (panelMotion.update(context, ids, { origin, replace: replaceSelection }) || isContentBatch()) {
         const title = $('#inspector h1')?.textContent;
-        if (title) $('#inspector-update').textContent = `${t('detail')}: ${title}`;
+        const message = `${t('detail')}: ${title}`;
+        if (title && $('#inspector-update').textContent !== message) $('#inspector-update').textContent = message;
     }
+    renderMobile();
 }
 
 function renderInspectorContent() {
@@ -816,10 +903,11 @@ function renderInspectorContent() {
         $('#inspector').innerHTML = `<div class="panel-content empty">${esc(t('noSelection'))}</div>`;
         return;
     }
+    const batch = isContentBatch();
     $('#inspector').innerHTML = `
-        <div class="inspector-header">
+        ${batch ? selectionHeader(selectedExhibits(), selectionCount('exhibitsSelected'), iconButton('clearSelection', 'clearContentSelection', 'x')) : `<div class="inspector-header">
             <div class="inspector-tools">
-                <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
+                <h1 title="${esc(titleFloor(e.floorId))}" aria-label="${esc(displayName(e))}">${adaptiveExhibitName(displayName(e))}</h1>
                 <div class="status-picker">
                     <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" aria-busy="${statusSaving}" title="${esc(t(e.status))}" ${statusSaving ? 'disabled' : ''}>${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
@@ -827,12 +915,12 @@ function renderInspectorContent() {
                     </div>
                 </div>
             </div>
-        </div>
+        </div>`}
         <div class="tabs" role="tablist" aria-label="${esc(t('detail'))}">
             ${['notes', 'documentation'].map(key => `<button role="tab" id="tab-${key}" aria-controls="inspector-content" aria-selected="${tab === key}" tabindex="${tab === key ? 0 : -1}" data-tab="${key}">${esc(t(key))}</button>`).join('')}
         </div>
         <div class="panel-content" id="inspector-content" role="tabpanel" aria-labelledby="tab-${tab}"></div>`;
-    bindStatusPicker();
+    if (!batch) bindStatusPicker();
     renderPanel();
     $('#inspector').querySelector('[role=tablist]').addEventListener('keydown', ev => {
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) {
@@ -897,7 +985,7 @@ document.addEventListener('pointerdown', event => {
     if (!event.target.closest('.status-picker')) closeStatusPicker();
     const form = $('#note-form');
     const draft = drafts[selected];
-    if (form && !form.contains(event.target) && !event.target.closest('dialog, .selection-menu') && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
+    if (!isContentBatch() && form && !form.contains(event.target) && !event.target.closest('dialog, .selection-menu') && draft?.open && !draft.noteId && !draft.body.trim() && !draft.images.length && !draft.existingImages.length && !draft.readingImages) {
         collapseEmptyDraft();
         renderComposer();
     }
@@ -905,57 +993,48 @@ document.addEventListener('pointerdown', event => {
 
 function renderPanel() {
     const e = exhibit();
-    if (!e) return;
     const el = $('#inspector-content');
+    if (!e || !el) return;
+    const id = composerKey(), batch = isContentBatch();
+    const records = batch ? selectedExhibits() : [e];
     if (tab === 'notes') {
-        el.innerHTML = `<div id="composer-slot"></div>${e.notes.filter(n => drafts[e.id]?.noteId !== n.id || drafts[e.id]?.readOnly).map(noteHTML).join('')}`;
-        if (!drafts[e.id]) {
-            drafts[e.id] = newDraft(e);
-            drafts[e.id].open = false;
+        const editingNote = batch || drafts[id]?.readOnly ? null : drafts[id]?.noteId;
+        const notes = records.flatMap(record => record.notes.filter(note => note.id !== editingNote).map(note => ({ record, note })));
+        if (batch) notes.sort((a, b) => b.note.at.localeCompare(a.note.at));
+        el.innerHTML = `<div id="composer-slot"></div>${notes.map(({ record, note }) => noteHTML(note, record, batch)).join('')}`;
+        if (!drafts[id]) {
+            drafts[id] = newDraft(batch ? {} : e);
+            drafts[id].open = batch;
         }
         renderComposer();
     } else {
-        renderLinks(e, el);
+        const links = records.flatMap(record => record.links.map(link => ({ record, link })));
+        if (batch) links.sort((a, b) => a.link.title.localeCompare(b.link.title, lang(), { sensitivity: 'base' }));
+        renderLinks(el, links, batch);
     }
 }
 
-function renderLinks(e, element) {
-    const draft = linkDrafts[e.id] ||= { open: false, id: null, title: '', url: '', description: '' };
-    const searchable = e.links.length > 6;
-    if (!searchable) delete linkSearches[e.id];
+function renderLinks(element, links, batch) {
+    const id = composerKey();
+    const draft = linkDrafts[id] ||= { open: batch, id: null, title: '', url: '', description: '' };
+    const searchable = links.length > 6;
+    if (!searchable) delete linkSearches[id];
     element.innerHTML = `
         ${searchable ? `<div class="searchbox link-search">
             ${icon('search', 'search-icon')}
-            <input id="link-search" type="search" value="${esc(linkSearches[e.id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
+            <input id="link-search" type="search" value="${esc(linkSearches[id] || '')}" placeholder="${esc(t('searchLinks'))}" aria-label="${esc(t('searchLinks'))}" aria-controls="link-results" autocomplete="off">
         </div>` : ''}
         <form class="composer link-composer ${draft.open ? 'composing' : ''}" id="link-form" novalidate>
             <input id="link-title" name="title" aria-label="${esc(t('title'))}" placeholder="${esc(t(draft.open ? 'title' : 'addLink'))}" maxlength="160" value="${esc(draft.title)}">
             <div class="link-fields" ${draft.open ? '' : 'hidden'}>
                 <input id="link-url" name="url" type="text" inputmode="url" aria-label="${esc(t('url'))}" placeholder="${esc(t('url'))}" value="${esc(draft.url)}">
                 <textarea id="link-description" name="description" aria-label="${esc(t('description'))}" placeholder="${esc(t('description'))}" maxlength="1000">${esc(draft.description)}</textarea>
-                <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t(draft.saving ? 'saving' : 'save'))}</button></div>
+                <div class="row between"><button type="button" class="quiet" data-action="cancelLink">${esc(t('cancel'))}</button><button type="submit" class="primary">${esc(t(draft.saving ? 'saving' : batch ? 'addToSelection' : 'save'))}</button></div>
             </div>
-            <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(errorText({ key: draft.error })) : ''}</p>
+            <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(composerError(draft)) : ''}</p>
             ${draftWarning('links')}
         </form>
-        <div id="link-results">${e.links.map(link => `
-            <article class="link-card">
-                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">
-                    <span class="document-label">
-                        <span class="document-title">${esc(link.title)}</span>
-                        <small class="document-url">${esc(link.url)}</small>
-                    </span>
-                    ${icon('link')}
-                </a>
-                ${link.description ? `<p>${esc(link.description)}</p>` : ''}
-                <div class="link-actions">
-                    <button type="button" class="icon-button" data-copy="${esc(link.id)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>
-                    <div class="item-actions">
-                        <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button></div></details>
-                        <button type="button" class="icon-button danger" data-delete-link="${esc(link.id)}" aria-label="${esc(t('remove') + ': ' + link.title)}" title="${esc(t('remove'))}">${icon('trash')}</button>
-                    </div>
-                </div>
-            </article>`).join('')}
+        <div id="link-results">${links.map(({ record, link }) => linkHTML(link, batch ? record : null)).join('')}
             <p id="link-no-results" class="empty" role="status" hidden>${esc(t('noLinkResults'))}</p>
         </div>`;
     const search = element.querySelector('#link-search');
@@ -964,13 +1043,13 @@ function renderLinks(e, element) {
     const filterLinks = () => {
         const query = search?.value.trim().toLocaleLowerCase() || '';
         cards.forEach((card, index) => {
-            const link = e.links[index];
-            card.hidden = ![link.title, link.url, link.description].join(' ').toLocaleLowerCase().includes(query);
+            const { link, record } = links[index];
+            card.hidden = ![link.title, link.url, link.description, batch ? displayName(record) : ''].join(' ').toLocaleLowerCase().includes(query);
         });
         empty.hidden = !query || cards.some(card => !card.hidden);
     };
     search?.addEventListener('input', () => {
-        linkSearches[e.id] = search.value;
+        linkSearches[id] = search.value;
         filterLinks();
     });
     filterLinks();
@@ -987,40 +1066,51 @@ function renderLinks(e, element) {
     form.addEventListener('input', event => {
         if (['title', 'url', 'description'].includes(event.target.name)) draft[event.target.name] = event.target.value;
         delete draft.error;
+        delete draft.errorTarget;
         form.querySelector('.link-error').hidden = true;
         persistLinks();
     });
     form.addEventListener('submit', async event => {
         event.preventDefault();
         if (draft.saving) return;
-        const current = data().exhibits.find(item => item.id === e.id);
+        const current = exhibit();
+        const targets = batch ? batchTargets() : null;
         draft.saving = true;
         form.querySelector('button[type=submit]').textContent = t('saving');
         form.querySelectorAll('input, textarea, button').forEach(input => { input.disabled = true; });
+        delete draft.errorTarget;
         try {
-            if (!draft.title.trim()) throw Error('invalidInput');
+            const title = draft.title.trim(), description = draft.description.trim();
+            if (!title) throw Error('invalidInput');
             const url = documentUrl(draft.url);
             if (!url) throw Error('invalidUrl');
             draft.url = url;
             form.querySelector('#link-url').value = url;
+            if (batch) {
+                const submission = JSON.stringify([title, url, description]);
+                if (draft.submission !== submission) draft.requestId = uid();
+                draft.submission = submission;
+                persistLinks();
+            }
             const result = await api.save({
-                action: 'putLink', exhibitId: current.id, linkId: draft.id,
-                title: draft.title.trim(), url, description: draft.description.trim(),
-                baseRevision: current.revision, contentTag: current.contentTag, requestId: uid()
+                action: 'putLink', title, url, description, requestId: batch ? draft.requestId : uid(),
+                ...(batch ? { targets } : {
+                    exhibitId: current.id, linkId: draft.id, baseRevision: current.revision, contentTag: current.contentTag
+                })
             });
-            delete linkDrafts[current.id];
+            delete linkDrafts[id];
             persistLinks();
             acceptSnapshot(result.snapshot);
-            announce(t('saved'));
+            announce(batch ? selectionCount('savedToExhibits', targets.length) : t('saved'));
         } catch (error) {
-            draft.error = error.key || error.message || 'storage';
-            const message = form.querySelector('.link-error');
-            message.textContent = errorText(error);
-            message.hidden = false;
+            draft.errorTarget = error.details?.exhibitId;
+            const stale = batch && error.key === 'conflict';
+            draft.error = stale ? 'batchLinkConflict' : error.key || error.message || 'storage';
+            if (stale) await refresh();
         } finally {
             draft.saving = false;
             persistLinks();
-            if (selected === e.id && tab === 'documentation' && !edit && linkDrafts[e.id] === draft) renderPanel();
+            if (composerKey() === id && tab === 'documentation' && !edit && linkDrafts[id] === draft) renderPanel();
         }
     });
 }
@@ -1033,7 +1123,11 @@ function noteLinkDialog() {
         if (url && !safeUrl(url)) throw Error('invalidUrl');
         closeDialog();
         editor.setLink(url, String(form.get('text') || ''), link);
-    }, 'noteLink:' + exhibit().id + ':' + drafts[selected].requestId);
+    }, 'noteLink:' + (isContentBatch() ? '' : selected) + ':' + drafts[composerKey()].requestId);
+}
+
+function composerError(draft) {
+    return errorText({ key: draft.error, details: { exhibitId: draft.errorTarget } });
 }
 
 function newDraft(e, n = null) {
@@ -1055,14 +1149,15 @@ function newDraft(e, n = null) {
 function renderComposer() {
     noteEditor?.destroy();
     noteEditor = null;
-    const e = exhibit(),
-        d = drafts[e.id];
+    const id = composerKey(), batch = isContentBatch();
+    const d = drafts[id];
     if (!d) return;
     if (d.readOnly) {
         $('#composer-slot').innerHTML = iconButton('continueEdit', 'resumeNote', 'pencil-line');
         return;
     }
-    const active = d.open || Boolean(d.body || d.images.length || d.noteId);
+    const active = batch || d.open || Boolean(d.body || d.images.length || d.noteId);
+    const submitLabel = t(d.saving ? 'saving' : d.noteId ? 'save' : batch ? 'postToSelection' : 'postShort');
     $('#composer-slot').innerHTML = `
         <form class="composer ${active ? 'composing' : ''}" id="note-form" novalidate>
             ${d.noteId ? `<div class="composer-correction row between">${iconButton('backToNote', 'backToNote', 'arrow-left')}${button('cancel', 'discardDraft', 'quiet')}</div>` : ''}
@@ -1078,11 +1173,11 @@ function renderComposer() {
                         <button type="button" class="icon-button photo-button" id="add-note-image" aria-label="${esc(t('photo'))}" title="${esc(t('photoHint'))}">${icon('image-plus')}</button>
                         <input type="file" id="note-image" hidden accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple>
                     </div>
-                    <button class="primary post-button" type="submit">${esc(t(d.saving ? 'saving' : d.noteId ? 'save' : 'postShort'))}</button>
+                    <button class="primary post-button" type="submit">${esc(submitLabel)}</button>
                 </div>
                 <div class="composer-secondary" ${d.signing ? 'hidden' : ''}>
                     <span class="draft-label" title="${esc(t('draftScope'))}">${esc(t('draftShort'))}</span>
-                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${d.noteId ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
+                    <details class="note-options"><summary class="icon-button" title="${esc(t('more'))}" aria-label="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover">${d.noteId || batch ? '' : `<label for="note-status">${esc(t('status'))}</label><select id="note-status">${statusOptions(d.status, true)}</select>`}${button('discardDraft', 'discardDraft', 'quiet danger')}</div></details>
                 </div>
             </div>
             ${d.readingImages ? `<p class="muted small" role="status">${esc(t('addingImages'))}</p>` : ''}
@@ -1090,16 +1185,16 @@ function renderComposer() {
                 <div class="signature-step">
                     <label for="note-signature">${esc(t('signature'))}</label>
                     <input id="note-signature" autocomplete="off" maxlength="120" value="${esc(d.signature)}" aria-describedby="note-error" placeholder="${esc(t('yourName'))}">
-                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(t(d.saving ? 'saving' : d.noteId ? 'save' : 'postShort'))}</button></div>
+                    <div class="row signature-actions">${button('cancel', 'cancelSignature', 'quiet')}<button type="button" class="primary" data-action="confirmNote" ${d.saving || !d.signature.trim() ? 'disabled' : ''}>${esc(submitLabel)}</button></div>
                 </div>` : ''}
-            <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(t(d.error)) : ''}</div>
+            <div id="note-error" class="error" role="alert" ${d.error ? '' : 'hidden'}>${d.error ? esc(composerError(d)) : ''}</div>
             ${draftWarning('notes')}
             ${d.conflict ? button('reviewConflict', 'noteConflict', 'quiet') : ''}
         </form>`;
     const form = $('#note-form');
     let choosingImage = false;
     noteEditor = createNoteEditor($('#note-editor'), {
-        exhibitId: e.id,
+        exhibitId: batch ? '' : id,
         value: d.body, label: t('noteBody'), placeholder: t('writeNote'), disabled: Boolean(d.saving),
         onChange: value => { d.body = value; delete d.error; persistDrafts(); },
         onFocus: () => {
@@ -1113,7 +1208,7 @@ function renderComposer() {
         if (event.target.closest('[data-format]')) event.preventDefault();
     });
     form.addEventListener('focusout', event => {
-        if (!event.relatedTarget || form.contains(event.relatedTarget) || event.relatedTarget.closest('dialog, .selection-menu')) return;
+        if (batch || !event.relatedTarget || form.contains(event.relatedTarget) || event.relatedTarget.closest('dialog, .selection-menu')) return;
         setTimeout(() => {
             if (!form.isConnected || $('#dialog').open || document.activeElement?.closest('.selection-menu') || form.contains(document.activeElement) || d.body.trim() || d.images.length || d.existingImages.length || d.noteId || d.signing || choosingImage || d.readingImages) return;
             d.open = false;
@@ -1131,7 +1226,7 @@ function renderComposer() {
     $('#note-signature')?.addEventListener('keydown', ev => {
         if (ev.key === 'Enter') {
             ev.preventDefault();
-            postNote(e.id);
+            postNote(id);
         }
     });
     $('#note-status')?.addEventListener('change', ev => {
@@ -1148,7 +1243,7 @@ function renderComposer() {
     fileInput.addEventListener('change', event => {
         choosingImage = false;
         const files = [...event.target.files];
-        if (files.length) addImages(files, e.id);
+        if (files.length) addImages(files, id);
         else $('#note-body')?.focus();
     });
     fileInput.addEventListener('cancel', () => {
@@ -1159,18 +1254,19 @@ function renderComposer() {
         const files = [...(ev.clipboardData?.files || [])];
         if (files.length) {
             ev.preventDefault();
-            addImages(files, e.id);
+            addImages(files, id);
         }
     });
     form.addEventListener('dragover', ev => ev.preventDefault());
     form.addEventListener('drop', ev => {
         ev.preventDefault();
         d.open = true;
-        addImages([...ev.dataTransfer.files], e.id);
+        addImages([...ev.dataTransfer.files], id);
     });
     form.addEventListener('submit', ev => {
         ev.preventDefault();
-        if (d.readingImages) return;
+        if (d.readingImages || d.saving) return;
+        delete d.errorTarget;
         if (!d.body.trim() && !d.images.length && !d.existingImages.length) {
             d.error = 'bodyRequired';
             renderComposer();
@@ -1191,8 +1287,9 @@ async function addImages(files, id) {
     draft.open = true;
     draft.readingImages = true;
     delete draft.error;
+    delete draft.errorTarget;
     const redraw = () => {
-        if (drafts[id] === draft && selected === id && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
+        if (drafts[id] === draft && composerKey() === id && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
     };
     redraw();
     try {
@@ -1213,8 +1310,9 @@ async function addImages(files, id) {
 }
 async function postNote(id) {
     const d = drafts[id];
-    if (d.saving || d.readingImages) return;
+    if (!d || d.saving || d.readingImages) return;
     if (!d.signing) return;
+    delete d.errorTarget;
     if (!d.signature.trim()) {
         d.error = 'signatureRequired';
         renderComposer();
@@ -1228,6 +1326,7 @@ async function postNote(id) {
         return;
     }
     d.saving = true;
+    const batch = isContentBatch(), targets = batch ? batchTargets() : null;
     const signature = d.signature.trim();
     if (d.submissionSignature && d.submissionSignature !== signature) {
         d.images.forEach(image => { image.id = uid(); });
@@ -1238,38 +1337,31 @@ async function postNote(id) {
     d.submissionSignature = signature;
     persistDrafts();
     renderComposer();
-    const submit = $('#note-form button[type=submit]');
-    if (submit) {
-        submit.disabled = true;
-        submit.textContent = t('saving');
-    }
     try {
         const payload = {
             action: d.noteId ? 'correctNote' : 'note',
-            exhibitId: id,
-            baseRevision: d.baseRevision,
-            contentTag: d.contentTag,
+            ...(batch ? { targets } : { exhibitId: id, baseRevision: d.baseRevision, contentTag: d.contentTag }),
             requestId: d.requestId,
             signature,
             body: d.body,
             images: [...d.existingImages]
         };
         if (d.noteId) payload.noteId = d.noteId;
-        else if (d.status) payload.status = d.status;
+        else if (!batch && d.status) payload.status = d.status;
         const result = await api.postNote(payload, d.images);
         rememberSignature(signature);
         delete drafts[id];
         persistDrafts();
         acceptSnapshot(result.snapshot);
-        announce(t('saved'));
+        announce(batch ? selectionCount('savedToExhibits', targets.length) : t('saved'));
     } catch (error) {
         d.error = error.key || 'storage';
-        d.conflict = error.status === 409;
+        d.errorTarget = error.details?.exhibitId;
+        d.conflict = !batch && error.status === 409;
         persistDrafts();
-        if (id === selected && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
     } finally {
         d.saving = false;
-        if (drafts[id] && id === selected && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
+        if (drafts[id] === d && id === composerKey() && tab === 'notes' && !edit && $('#composer-slot')) renderComposer();
     }
 }
 
@@ -1302,7 +1394,12 @@ function acceptSnapshot(value) {
 
 function renderMobile() {
     const detail = Boolean(exhibit() || edit && (creationOpen || editConflict?.open));
-    $('#mobile-nav').innerHTML = [['list', 'list'], ['map', 'map'], ['detail', 'panel-right']].map(([key, name]) => `<button type="button" data-action="view:${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}>${icon(name)}<span>${esc(t(key === 'list' ? 'exhibits' : key))}</span></button>`).join('');
+    const focused = document.activeElement?.closest('#mobile-nav [data-action]')?.dataset.action;
+    $('#mobile-nav').innerHTML = [['list', 'list'], ['map', 'map'], ['detail', 'panel-right']].map(([key, name]) => {
+        const label = key === 'detail' && isContentBatch() ? selectionCount('selectionCount') : t(key === 'list' ? 'exhibits' : key);
+        return `<button type="button" data-action="view:${key}" class="${view === key ? 'active' : ''}" aria-current="${view === key ? 'page' : 'false'}" ${key === 'detail' && !detail ? 'disabled' : ''}>${icon(name)}<span>${esc(label)}</span></button>`;
+    }).join('');
+    if (focused) $(`#mobile-nav [data-action="${focused}"]`)?.focus({ preventScroll: true });
 }
 
 function renderEditBar() {
@@ -1336,7 +1433,8 @@ function editorActions(record) {
 }
 
 function hasJoinDraft(id) {
-    return hasNoteDraft(drafts[id]) || hasLinkDraft(linkDrafts[id]) ||
+    return Object.entries(drafts).some(([key, draft]) => hasNoteDraft(draft) && draftRecipients(key).includes(id)) ||
+        Object.entries(linkDrafts).some(([key, draft]) => hasLinkDraft(draft) && draftRecipients(key).includes(id)) ||
         Object.entries(dialogDrafts).some(([key, values]) => key.split(':')[1] === id &&
             Object.values(values).some(value => typeof value === 'string' && value.trim()));
 }
@@ -1360,7 +1458,7 @@ function openJoinSelection() {
     const records = selectedExhibits(), problem = joinProblem(records);
     if (problem) { announce(t(problem)); return; }
     const session = edit, generation = joinGeneration;
-    showDialog('joinTogether', `<div class="field"><label for="join-target">${esc(t('joinInto'))}</label><select id="join-target" name="target" ${editHelp('joinTargetHint')}>${options(records.map(record => [record.id, record.name]), selected)}</select></div>${footer('joinTogether')}`, async values => {
+    showDialog('joinTogether', `<div class="field"><label for="join-target">${esc(t('joinInto'))}</label><select id="join-target" name="target" data-exhibit-names ${editHelp('joinTargetHint')}>${options(records.map(record => [record.id, record.name]), selected)}</select></div>${footer('joinTogether')}`, async values => {
         if (edit !== session || generation !== joinGeneration) { closeDialog(); return; }
         const target = values.get('target');
         if (!editSelection.has(target)) return;
@@ -1426,8 +1524,9 @@ function renderEditInspector() {
     if (editConflict?.open) { renderEditConflict(); return; }
     if (!creationOpen && (editSelection.size > 1 || hardwareSelection.length > 1)) { renderSelectionInspector(Boolean(hardwareSelection.length)); return; }
     const record = exhibit();
-    const title = creationOpen ? t('newExhibit') : displayName(record);
-    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
+    const name = creationOpen ? '' : displayName(record);
+    const title = creationOpen ? esc(t('newExhibit')) : adaptiveExhibitName(name);
+    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 ${name ? `title="${esc(name)}" aria-label="${esc(name)}"` : ''}>${title}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
@@ -1454,17 +1553,26 @@ function render({ origin = 'other' } = {}) {
     renderHeader();
     if (!snapshot) return;
     if (!data().floors.some(f => f.id === floorId)) floorId = data().floors[0]?.id;
-    if (!data().exhibits.some(e => e.id === selected)) selected = null;
-    editSelection = new Set(edit ? [...editSelection].filter(id => data().exhibits.some(record => record.id === id)) : []);
-    if (edit && selected && !editSelection.size) editSelection.add(selected);
-    if (edit && editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
+    const available = new Set(data().exhibits.map(record => record.id));
+    if (!available.has(selected)) selected = null;
+    if (edit) {
+        editSelection = new Set([...editSelection].filter(id => available.has(id)));
+        if (selected && !editSelection.size) editSelection.add(selected);
+        if (editSelection.size && !editSelection.has(selected)) selected = [...editSelection][0];
+        contentSelection.clear();
+        selectingContent = false;
+    } else {
+        editSelection.clear();
+        contentSelection = new Set([...contentSelection].filter(id => available.has(id)));
+        selected ||= [...contentSelection][0] || null;
+        if (selected) contentSelection.add(selected);
+    }
     hardwareSelection = edit ? wholeHardwareSelection(editSelection, normalizeHardwareSelection(hardwareSelection, data(), floorId), data()) : [];
     activeInstance = Math.max(0, Math.min(activeInstance, (exhibit()?.models.length || 1) - 1));
     renderSidebar();
     renderInspector({ origin });
     renderMapUI();
     renderEditBar();
-    renderMobile();
     updateMap();
     $('#resizer').setAttribute('aria-label', t('resize'));
     document.documentElement.lang = lang();
@@ -2076,7 +2184,12 @@ function moveRenamedDrafts(session, saved) {
     for (const store of [drafts, linkDrafts, linkSearches]) {
         const entries = Object.entries(store);
         for (const key of Object.keys(store)) delete store[key];
-        for (const [key, value] of entries) store[renames.get(key) || key] = value;
+        for (const [key, value] of entries) {
+            const recipients = draftRecipients(key);
+            const renamedKey = recipients.length > 1 ? batchDraftKey(recipients.map(id => renames.get(id) || id)) : renames.get(key) || key;
+            if (recipients.length > 1 && renamedKey !== key && value.requestId) value.requestId = uid();
+            store[renamedKey] = value;
+        }
     }
     dialogDrafts = Object.assign(Object.create(null), Object.fromEntries(Object.entries(dialogDrafts).map(([key, value]) => {
         const parts = key.split(':');
@@ -2122,7 +2235,16 @@ async function confirmEditSave() {
     renderEditBar();
     syncEditTools();
     try {
-        const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision, requestId: save.requestId, signature, changes }, { signal: save.controller.signal });
+        const originals = new Map(session.base.exhibits.map(record => [record.id, record]));
+        const placed = changes.filter(change => change.op === 'put' && change.record.floorId && change.record.models.length &&
+            focusPlacement(change.record) !== focusPlacement(originals.get(change.id))).map(change => change.record);
+        let focusDirections;
+        if (placed.length) {
+            const { MapView } = await import('./map.js');
+            focusDirections = await MapView.prepareFocusDirections(session.value, session.base.exhibits, placed, map, save.controller.signal);
+        }
+        const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision,
+            requestId: save.requestId, signature, changes, focusDirections }, { signal: save.controller.signal });
         if (edit !== session) return;
         rememberSignature(signature);
         finishEditSave(session, result.snapshot);
@@ -2233,7 +2355,7 @@ function conflictValue(value) {
 function renderEditConflict() {
     const labels = { name: 'name', floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit', join: 'join' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p>${item.field === 'join' ? `<p class="small muted">${esc(t(item.unavailable ? 'joinMissing' : 'joinConflictHint'))}</p>` : ''}<div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ...(item.unavailable ? [] : [['mine', t('useMine')]])], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${item.kind === 'exhibits' ? adaptiveExhibitName(item.id) : esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p>${item.field === 'join' ? `<p class="small muted">${esc(t(item.unavailable ? 'joinMissing' : 'joinConflictHint'))}</p>` : ''}<div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ...(item.unavailable ? [] : [['mine', t('useMine')]])], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
         if (!event.target.dataset.conflictKey) return;
         editConflict.choices[event.target.dataset.conflictKey] = event.target.value;
@@ -2356,6 +2478,8 @@ const actions = {
     },
     refresh,
     enterEdit,
+    toggleContentSelection: () => setContentSelectionMode(!selectingContent),
+    clearContentSelection,
     resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },
     backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
     discardDraft: () => discardComposer('notes'),
@@ -2373,14 +2497,14 @@ const actions = {
     joinExhibits: openJoinSelection,
     cancelConflict: () => { editConflict.open = false; renderInspector(); renderMapUI(); syncEditTools(); },
     cancelSignature: () => {
-        drafts[selected].signing = false;
+        drafts[composerKey()].signing = false;
         persistDrafts();
         renderComposer();
     },
-    confirmNote: () => postNote(selected),
+    confirmNote: () => postNote(composerKey()),
     closeComposer: () => {
-        drafts[selected].open = false;
-        drafts[selected].signing = false;
+        drafts[composerKey()].open = false;
+        drafts[composerKey()].signing = false;
         persistDrafts();
         renderComposer();
     },
@@ -2463,17 +2587,17 @@ document.addEventListener('click', async event => {
         if (element.dataset.editLink) { editLink(element.dataset.editLink); return; }
         if (element.dataset.deleteLink) { deleteLink(element.dataset.deleteLink); return; }
         if (element.dataset.copy) {
-            const link = exhibit().links.find(l => l.id === element.dataset.copy);
-            try { await copyText(link.url); announce(t('copied')); }
+            try { await copyText(element.dataset.copy); announce(t('copied')); }
             catch { announce(t('copyFailed')); }
             return;
         }
         if (element.dataset.removeImage !== undefined) {
-            drafts[selected].images.splice(Number(element.dataset.removeImage), 1);
+            drafts[composerKey()].images.splice(Number(element.dataset.removeImage), 1);
             persistDrafts(); renderComposer(); return;
         }
         if (element.dataset.removeExisting) {
-            drafts[selected].existingImages = drafts[selected].existingImages.filter(id => id !== element.dataset.removeExisting);
+            const draft = drafts[composerKey()];
+            draft.existingImages = draft.existingImages.filter(id => id !== element.dataset.removeExisting);
             persistDrafts(); renderComposer(); return;
         }
         if (element.dataset.setView || element.dataset.resetView || element.dataset.previewView) {
@@ -2553,7 +2677,10 @@ document.addEventListener('keydown', event => {
         if (creationOpen) { event.preventDefault(); cancelCreation(); return; }
         if (editConflict?.open) { event.preventDefault(); actions.cancelConflict(); return; }
         if (edit && gizmo) { event.preventDefault(); gizmo = ''; syncEditTools(); renderMapUI(); return; }
-        if (!typing && !event.target.closest('.status-picker, .selection-menu')) select(null);
+        if (!typing && !event.target.closest('.status-picker, .selection-menu')) {
+            if (selectingContent || isContentBatch()) clearContentSelection();
+            else select(null);
+        }
     }
     if (edit && !typing && !editSave?.saving) {
         const key = event.key.toLowerCase();

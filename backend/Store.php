@@ -182,7 +182,7 @@ final class Store
     {
         if ($value instanceof stdClass) {
             // Keep vector objects distinct from arrays, including {"0": 0, "1": 0, "2": 0}.
-            if (in_array($key, ['position', 'rotation', 'scale', 'target'], true)) {
+            if (in_array($key, ['position', 'rotation', 'scale', 'target', 'direction'], true)) {
                 return $value;
             }
             $result = [];
@@ -316,6 +316,23 @@ final class Store
         return $views;
     }
 
+    private static function focusKey(?string $floor, array $transform, array $models, array $assetRevisions): ?string
+    {
+        if ($floor === null || !$models) return null;
+        $hardware = array_map(fn($item) => [$item, $assetRevisions[$item['model']] ?? null], $models);
+        return hash('sha256', json_encode([1, $floor, $assetRevisions['Floors/' . $floor . '/model.glb'] ?? null, $transform, $hardware], JSON_THROW_ON_ERROR));
+    }
+
+    private static function focusDirection(mixed $direction): ?array
+    {
+        if (!is_array($direction) || !array_is_list($direction) || count($direction) !== 3) return null;
+        foreach ($direction as $value) {
+            if ((!is_int($value) && !is_float($value)) || !is_finite($value) || abs($value) > 1) return null;
+        }
+        $direction = array_map(self::coordinateNumber(...), $direction);
+        return $direction[1] > 0 && ($direction[0] || $direction[2]) ? $direction : null;
+    }
+
     private function floorNames(): array
     {
         return $this->readJson($this->path($this->assets, 'Floors/.floors.json'));
@@ -399,14 +416,17 @@ final class Store
     {
         $modelFiles = $this->modelFiles();
         $assets = [];
+        $assetRevisions = [];
         foreach ($modelFiles as $file) {
             $path = $this->path($this->assets, $file);
+            $assetRevisions[$file] = filesize($path) . ':' . filemtime($path);
             $assets[] = [
                 'id' => $file,
                 'name' => pathinfo($file, PATHINFO_FILENAME),
                 'url' => 'api.php?action=asset&kind=model&id=' . rawurlencode($file),
                 'kind' => str_starts_with($file, 'Floors/') ? 'floor' : 'hardware',
-                'file' => $file
+                'file' => $file,
+                'revision' => $assetRevisions[$file]
             ];
         }
         $labels = $this->floorNames();
@@ -458,6 +478,9 @@ final class Store
             }
             $content = $this->human->read($id);
             $revision = hash('sha256', $raw ?: '');
+            $transform = self::readTransform($meta['transform'] ?? null);
+            $focus = $meta['automaticFocus'] ?? null;
+            $focusKey = isset($focus['placement']) ? self::focusKey($floorId, $transform, $models, $assetRevisions) : null;
             $exhibits[] = [
                 'id' => $id,
                 'name' => $id,
@@ -465,19 +488,20 @@ final class Store
                 'status' => in_array($meta['status'] ?? null, ['ok', 'problem', 'retired'], true) ? $meta['status'] : 'ok',
                 'lastEditedBy' => is_string($meta['lastEditedBy'] ?? null) ? $meta['lastEditedBy'] : '',
                 'createdAt' => is_string($meta['createdAt'] ?? null) ? $meta['createdAt'] : null,
-                'transform' => self::readTransform($meta['transform'] ?? null),
+                'transform' => $transform,
                 'models' => $models,
                 'placed' => $floorId !== null && count($models) > 0,
                 'views' => (object)self::readViews($meta['views'] ?? []),
+                'focusDirection' => $focusKey !== null && $focusKey === $focus['placement']
+                    ? self::focusDirection($focus['direction'] ?? null) : null,
                 'revision' => $revision,
                 ...$content
             ];
             $structureParts[] = 'exhibit:' . $id . ':' . $revision;
             $contentParts[] = $id . ':' . $content['contentTag'];
         }
-        foreach ($modelFiles as $file) {
-            $path = $this->path($this->assets, $file);
-            $structureParts[] = $file . ':' . filesize($path) . ':' . filemtime($path);
+        foreach ($assetRevisions as $file => $revision) {
+            $structureParts[] = $file . ':' . $revision;
         }
         $structureRevision = hash('sha256', implode("\n", $structureParts));
         return [
@@ -536,6 +560,9 @@ final class Store
         }
         $floorIds = array_column($snapshot['floors'], 'id');
         $modelIds = array_column($snapshot['assets'], 'id');
+        $assetRevisions = array_column($snapshot['assets'], 'revision', 'id');
+        // These supplemental directions may differ between retries if model availability changes.
+        $focusDirections = is_array($payload['focusDirections'] ?? null) ? $payload['focusDirections'] : [];
         $operations = [];
         $seen = [];
         $joined = [];
@@ -590,6 +617,16 @@ final class Store
                 $sourcePaths[] = $this->path($this->exhibits, $sourceId);
             }
             $meta = $this->exhibitMeta($record, $floorIds, $modelIds, $signature);
+            $floor = $meta['floor'] === null ? null : (string)$meta['floor'];
+            $focusKey = self::focusKey($floor, $meta['transform'], $meta['models'], $assetRevisions);
+            $direction = self::focusDirection($focusDirections[$id] ?? null);
+            if ($direction === null && ($old['focusDirection'] ?? null) !== null &&
+                $focusKey === self::focusKey($old['floorId'], $old['transform'], $old['models'], $assetRevisions)) {
+                $direction = $old['focusDirection'];
+            }
+            if ($focusKey !== null && $direction !== null) {
+                $meta['automaticFocus'] = ['placement' => $focusKey, 'direction' => $direction];
+            }
             if (!$old) $meta['createdAt'] = gmdate('Y-m-d\TH:i:s\Z');
             elseif ($old['createdAt'] !== null) $meta['createdAt'] = $old['createdAt'];
             $operations[] = ['putExhibit', $id, $meta, $name, (bool)$old, $sourcePaths];
@@ -634,8 +671,12 @@ final class Store
     {
         self::requestId($payload['requestId'] ?? null);
         $action = $payload['action'] ?? '';
+        if (!is_string($action)) throw new ApiError('invalidInput');
         $signed = !in_array($action, ['status', 'putLink', 'deleteLink'], true);
         $signature = $signed ? self::signature($payload['signature'] ?? null) : '';
+        if (array_key_exists('targets', $payload)) {
+            return $this->lock(fn() => $this->addBatchContent($payload, $signature, $uploads));
+        }
         $requests = new RequestCache($this->assets . "\n" . $this->exhibits . "\nstructure");
         $fingerprint = hash('sha256', json_encode([$payload['baseRevision'] ?? null, $payload['changes'] ?? null, $signature], JSON_THROW_ON_ERROR));
         if ($action === 'structure' && $requests->wasApplied($payload['requestId'], $fingerprint)) {
@@ -651,80 +692,7 @@ final class Store
                 if (!$record) {
                     throw new ApiError('notFound', 404);
                 }
-                if (in_array($action, ['status', 'correctNote', 'deleteNote', 'putLink', 'deleteLink'], true) &&
-                    ($payload['baseRevision'] ?? null) !== $record['revision']) {
-                    throw new ApiError('conflict', 409);
-                }
-                if (in_array($action, ['correctNote', 'deleteNote', 'putLink', 'deleteLink'], true) &&
-                    ($payload['contentTag'] ?? null) !== $record['contentTag']) {
-                    throw new ApiError('conflict', 409);
-                }
-                if ($action === 'putLink') {
-                    $this->human->putLink(
-                        $id,
-                        isset($payload['linkId']) ? self::text($payload['linkId']) : null,
-                        self::text($payload['title'] ?? null),
-                        self::url($payload['url'] ?? null),
-                        self::text($payload['description'] ?? '', 1000, false)
-                    );
-                } elseif ($action === 'deleteLink') {
-                    $this->human->deleteLink($id, self::text($payload['linkId'] ?? null));
-                } elseif ($action === 'status') {
-                    if (($payload['baseRevision'] ?? null) !== $record['revision']) {
-                        throw new ApiError('conflict', 409);
-                    }
-                    $this->status($id, $record, $payload['status'] ?? null);
-                } elseif (in_array($action, ['note', 'correctNote', 'deleteNote'], true)) {
-                    if ($action === 'deleteNote' && $uploads) throw new ApiError('invalidImage');
-                    if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
-                        if (($payload['baseRevision'] ?? null) !== $record['revision'] && $payload['status'] !== $record['status']) {
-                            throw new ApiError('conflict', 409);
-                        }
-                        if (!in_array($payload['status'], ['ok', 'problem', 'retired'], true)) {
-                            throw new ApiError('invalidStatus');
-                        }
-                    }
-                    $note = null;
-                    if ($action === 'note') {
-                        $images = $payload['images'] ?? [];
-                        if (!is_array($images) || count($images) > 8) {
-                            throw new ApiError('invalidImage');
-                        }
-                        $note = [
-                            'id' => $payload['requestId'],
-                            'body' => self::text($payload['body'] ?? '', 50000, false),
-                            'images' => $images
-                        ];
-                        if ($note['body'] === '' && !$images && !$uploads) {
-                            throw new ApiError('bodyRequired');
-                        }
-                    } else {
-                        $note = current(array_filter($record['notes'], fn($item) => $item['id'] === ($payload['noteId'] ?? null))) ?: null;
-                        if (!$note || isset($note['deleted'])) {
-                            throw new ApiError('notFound', 404);
-                        }
-                        if ($action === 'correctNote') {
-                            $note['body'] = self::text($payload['body'] ?? '', 50000, false);
-                            $note['images'] = $payload['images'] ?? [];
-                            if (!is_array($note['images']) || count($note['images']) > 8 ||
-                                ($note['body'] === '' && !$note['images'] && !$uploads)) {
-                                throw new ApiError('bodyRequired');
-                            }
-                        }
-                    }
-                    if (count($note['images']) + count($uploads) > 8) throw new ApiError('invalidImage');
-                    foreach ($uploads as $upload) {
-                        $photo = $this->human->savePhoto($id, $signature,
-                            self::requestId($upload['requestId'] ?? null), $upload['bytes'], $upload['mime']);
-                        $note['images'][] = $photo['id'];
-                    }
-                    $this->human->saveNote($id, $action, $note, $signature, $payload['requestId']);
-                    if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
-                        $this->status($id, $record, $payload['status']);
-                    }
-                } else {
-                    throw new ApiError('invalidInput');
-                }
+                $this->mutateExhibit($id, $record, $payload, $action, $signature, $uploads);
             }
             return ['saved' => true, 'requestId' => $payload['requestId'], 'snapshot' => $this->snapshot()];
         });
@@ -733,6 +701,129 @@ final class Store
             catch (Throwable $error) { error_log('Save receipt unavailable: ' . $error->getMessage()); }
         }
         return $result;
+    }
+
+    private function addBatchContent(array $payload, string $signature, array $uploads): array
+    {
+        $action = $payload['action'] ?? '';
+        $targets = $payload['targets'];
+        if (!in_array($action, ['note', 'putLink'], true) || !is_array($targets) ||
+            !array_is_list($targets) || count($targets) < 2 || isset($payload['linkId']) ||
+            ($payload['status'] ?? '') !== '' || ($payload['images'] ?? []) !== []) {
+            throw new ApiError('invalidInput');
+        }
+        $seen = [];
+        $ids = [];
+        foreach ($targets as $target) {
+            if (!is_array($target)) throw new ApiError('invalidInput');
+            $id = self::exhibitId($target['exhibitId'] ?? null);
+            if (isset($seen[$id])) throw new ApiError('invalidInput');
+            $seen[$id] = true;
+            $ids[] = $id;
+        }
+        $sortedIds = $ids;
+        sort($sortedIds, SORT_STRING);
+        $photos = array_map(fn($upload) => [$upload['requestId'], $upload['mime'], hash('sha256', $upload['bytes'])], $uploads);
+        $content = $action === 'note' ? [$payload['body'] ?? '', $signature, $photos] :
+            [$payload['title'] ?? null, $payload['url'] ?? null, $payload['description'] ?? ''];
+        $fingerprint = hash('sha256', json_encode([$action, $sortedIds, $content], JSON_THROW_ON_ERROR));
+        $requests = new RequestCache($this->assets . "\n" . $this->exhibits . "\nbatch-content");
+        $requestId = $payload['requestId'];
+        if ($requests->wasApplied($requestId, $fingerprint)) {
+            return ['saved' => true, 'requestId' => $requestId, 'snapshot' => $this->snapshot()];
+        }
+        $records = array_column($this->snapshot()['exhibits'], null, 'id');
+        foreach ($targets as $index => $target) {
+            $id = $ids[$index];
+            try {
+                $record = $records[$id] ?? throw new ApiError('notFound', 404);
+                $revisions = ['baseRevision' => $target['baseRevision'] ?? null, 'contentTag' => $target['contentTag'] ?? null];
+                $this->mutateExhibit($id, $record, $revisions + $payload, $action, $signature, $uploads);
+            } catch (ApiError $error) {
+                throw new ApiError($error->key, $error->status, ['exhibitId' => $id] + $error->details);
+            }
+        }
+        $result = ['saved' => true, 'requestId' => $requestId, 'snapshot' => $this->snapshot()];
+        $requests->remember($requestId, $fingerprint);
+        return $result;
+    }
+
+    private function mutateExhibit(string $id, array $record, array $payload, string $action, string $signature, array $uploads): void
+    {
+        if (in_array($action, ['status', 'correctNote', 'deleteNote', 'putLink', 'deleteLink'], true) &&
+            ($payload['baseRevision'] ?? null) !== $record['revision']) {
+            throw new ApiError('conflict', 409);
+        }
+        if (in_array($action, ['correctNote', 'deleteNote', 'putLink', 'deleteLink'], true) &&
+            ($payload['contentTag'] ?? null) !== $record['contentTag']) {
+            throw new ApiError('conflict', 409);
+        }
+        if ($action === 'putLink') {
+            $this->human->putLink(
+                $id,
+                isset($payload['linkId']) ? self::text($payload['linkId']) : null,
+                self::text($payload['title'] ?? null),
+                self::url($payload['url'] ?? null),
+                self::text($payload['description'] ?? '', 1000, false)
+            );
+        } elseif ($action === 'deleteLink') {
+            $this->human->deleteLink($id, self::text($payload['linkId'] ?? null));
+        } elseif ($action === 'status') {
+            if (($payload['baseRevision'] ?? null) !== $record['revision']) {
+                throw new ApiError('conflict', 409);
+            }
+            $this->status($id, $record, $payload['status'] ?? null);
+        } elseif (in_array($action, ['note', 'correctNote', 'deleteNote'], true)) {
+            if ($action === 'deleteNote' && $uploads) throw new ApiError('invalidImage');
+            if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
+                if (($payload['baseRevision'] ?? null) !== $record['revision'] && $payload['status'] !== $record['status']) {
+                    throw new ApiError('conflict', 409);
+                }
+                if (!in_array($payload['status'], ['ok', 'problem', 'retired'], true)) {
+                    throw new ApiError('invalidStatus');
+                }
+            }
+            $note = null;
+            if ($action === 'note') {
+                $images = $payload['images'] ?? [];
+                if (!is_array($images) || count($images) > 8) {
+                    throw new ApiError('invalidImage');
+                }
+                $note = [
+                    'id' => $payload['requestId'],
+                    'body' => self::text($payload['body'] ?? '', 50000, false),
+                    'images' => $images
+                ];
+                if ($note['body'] === '' && !$images && !$uploads) {
+                    throw new ApiError('bodyRequired');
+                }
+            } else {
+                $note = current(array_filter($record['notes'], fn($item) => $item['id'] === ($payload['noteId'] ?? null))) ?: null;
+                if (!$note || isset($note['deleted'])) {
+                    throw new ApiError('notFound', 404);
+                }
+                if ($action === 'correctNote') {
+                    $note['body'] = self::text($payload['body'] ?? '', 50000, false);
+                    $note['images'] = $payload['images'] ?? [];
+                    if (!is_array($note['images']) || count($note['images']) > 8 ||
+                        ($note['body'] === '' && !$note['images'] && !$uploads)) {
+                        throw new ApiError('bodyRequired');
+                    }
+                }
+            }
+            if (count($note['images']) + count($uploads) > 8) throw new ApiError('invalidImage');
+            foreach ($uploads as $upload) {
+                $photo = $this->human->savePhoto($id, $signature,
+                    self::requestId($upload['requestId'] ?? null), $upload['bytes'], $upload['mime']);
+                $note['images'][] = $photo['id'];
+            }
+            $this->human->saveNote($id, $action, $note, $signature, $payload['requestId']);
+            if ($action === 'note' && isset($payload['status']) && $payload['status'] !== '') {
+                $this->status($id, $record, $payload['status']);
+            }
+        } else {
+            throw new ApiError('invalidInput');
+        }
     }
 
     public function receipt(string $request): bool

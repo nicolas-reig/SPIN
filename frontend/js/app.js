@@ -875,15 +875,15 @@ function renderInspector({ origin = 'other', focusSelection = false, replaceSele
         return;
     }
     const ids = creationOpen || editConflict?.open ? [] : [...selectionIds()];
-    const context = isContentBatch() ? 'batch-content' : inspectorContext(
-        ids.map(id => ({ id })), creationOpen ? 'create' : editConflict?.open ? 'conflict' : 'exhibit');
+    const purpose = creationOpen ? 'create' : editConflict?.open ? 'conflict' : isContentBatch() ? 'batch-content' : 'exhibit';
+    const context = inspectorContext(ids.map(id => ({ id })), purpose);
     const sameContext = context === panelMotion.context;
     const navigation = sameContext ? inspectorNavigation.capture() : null;
     panelMotion.prepare(context, ids, { replace: replaceSelection });
     renderInspectorContent();
     if (edit && !creationOpen && !editConflict?.open) inspectorNavigation.update(editSelection, hardwareSelection, { previous: navigation, focus: focusSelection });
     else inspectorNavigation.reset();
-    if (panelMotion.update(context, ids, { origin, replace: replaceSelection }) || isContentBatch()) {
+    if (panelMotion.update(context, ids, { origin, replace: replaceSelection })) {
         const title = $('#inspector h1')?.textContent;
         const message = `${t('detail')}: ${title}`;
         if (title && $('#inspector-update').textContent !== message) $('#inspector-update').textContent = message;

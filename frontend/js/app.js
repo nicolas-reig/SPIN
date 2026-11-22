@@ -180,9 +180,10 @@ function bindSelectionFields() {
 
 function renderSelectionInspector(hardware) {
     const records = selectedExhibits();
-    const title = hardware ? `${hardwareSelection.length} ${t('hardwareComponents')}` : `${records.length} ${t('exhibits')}`;
+    const title = hardware ? selectionCount('hardwareComponentsSelected', hardwareSelection.length) :
+        selectionCount('exhibitsSelected', records.length);
     const problem = hardware ? '' : joinProblem(records);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(title)}</h1></div><div class="panel-content selection-panel" id="structure-panel">
+    $('#inspector').innerHTML = `${selectionHeader(records, title)}<div class="panel-content selection-panel" id="structure-panel">
         <form id="structure-form" novalidate>${selectionFields()}<div class="error" id="structure-error" role="alert" hidden></div></form></div>
         <div class="inspector-footer selection-footer"><div class="error" id="join-error" role="alert" ${problem ? '' : 'hidden'}>${esc(problem ? t(problem) : '')}</div>
         <div class="selection-actions">${button('cancel', 'cancelJoin', 'quiet')}${hardware ? '' : button('joinTogether', 'joinExhibits', 'primary', `${problem ? 'disabled' : ''} ${editHelp('joinHint')}`)}</div></div>`;
@@ -364,6 +365,19 @@ function displayName(record) {
     return record?.name || '';
 }
 
+function exhibitTag(record) {
+    return `<span class="exhibit-tag">${esc(displayName(record))}</span>`;
+}
+
+function selectionHeader(records, title, action = '') {
+    return `<div class="inspector-header">
+        <div class="inspector-tools"><h1>${esc(title)}</h1>${action}</div>
+        <ul class="selection-tags" role="list" aria-label="${esc(t('selectedExhibits'))}" tabindex="0">
+            ${records.map(record => `<li>${exhibitTag(record)}</li>`).join('')}
+        </ul>
+    </div>`;
+}
+
 function floorLabel(record) {
     return record.names[lang()];
 }
@@ -533,7 +547,7 @@ function fitSidebar() {
         const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
         measure.remove();
         // Reserve row padding, action or status space, and a scrollbar gutter.
-        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + (showContentChecks() ? 24 : 0) + 16);
+        const width = Math.ceil(contentWidth + padding + 24 + (edit ? 106 : 32) + 16);
         document.documentElement.style.setProperty('--list-content', width + 'px');
     });
 }
@@ -541,11 +555,8 @@ function fitSidebar() {
 window.addEventListener('resize', fitSidebar, { passive: true });
 document.fonts.ready.then(fitSidebar);
 
-const showContentChecks = () => !edit && (selectingContent || isContentBatch());
-
 function renderList() {
     const focused = document.activeElement?.closest('#exhibit-list [data-select]');
-    const showChecks = showContentChecks();
     const groups = groupExhibits(data().exhibits, lang());
     renderGroupFilter(groups);
     const q = query.trim().toLocaleLowerCase(lang());
@@ -583,7 +594,6 @@ function renderList() {
         <div class="exhibit-entry"><button type="button" class="exhibit-row ${active ? 'active' : ''}" data-select="${esc(e.id)}" aria-pressed="${active}" title="${esc([...details, t('multiSelectHint')].join(' · '))}">
             <span class="status-symbol ${e.status}" ${colorMode() === 'default' ? `aria-label="${esc(t(e.status))}"` : 'aria-hidden="true"'}></span>
             ${exhibitLabel(e)}
-            ${showChecks ? `<span class="content-selection-mark" aria-hidden="true">${active ? icon('check') : ''}</span>` : ''}
         </button></div>`;
     };
     $('#exhibit-list').innerHTML = records.length ? groupExhibits(records, lang()).map(group => {
@@ -801,25 +811,57 @@ function syncUrl() {
     history.replaceState(null, '', url);
 }
 
-function noteHTML(n) {
-    if (n.deleted) return `<article class="note tombstone"><p>${esc(t('noteBy'))} <strong>${esc(n.author)}</strong></p><p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p><time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time></article>`;
-    const shortDate = date(n.at);
+function contentSource(record) {
+    return `<div class="content-source">${exhibitTag(record)}</div>`;
+}
+
+function noteHTML(n, record, batch = false) {
+    const source = batch ? contentSource(record) : '';
+    if (n.deleted) return `<article class="note tombstone">
+        ${source}
+        <p>${esc(t('noteBy'))} <strong>${esc(n.author)}</strong></p>
+        <p>${esc(t('deletedBy'))} <strong>${esc(n.deleted.signature)}</strong></p>
+        <time datetime="${esc(n.deleted.at)}">${esc(date(n.deleted.at))}</time>
+    </article>`;
+    const correction = n.corrections?.at(-1);
     return `
         <article class="note">
+            ${source}
             <div class="note-meta">
                 <span class="note-author">${esc(n.author)}</span>
-                <time class="note-date" datetime="${esc(n.at)}" title="${esc(date(n.at, true))}">${esc(shortDate)}</time>
+                <time class="note-date" datetime="${esc(n.at)}" title="${esc(date(n.at, true))}">${esc(date(n.at))}</time>
             </div>
-            <div class="note-body">${markdown(n.body, selected)}</div>
+            <div class="note-body">${markdown(n.body, record.id)}</div>
             ${n.images.map(id => `<a href="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" target="_blank" rel="noopener"><img class="note-image" src="api.php?action=asset&kind=image&id=${encodeURIComponent(id)}" alt="${esc(t('image'))}" loading="lazy"></a>`).join('')}
-            <div class="note-footer">
-                ${n.corrections?.length ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(n.corrections.at(-1).signature)} · ${esc(date(n.corrections.at(-1).at))}</p></details>` : '<span></span>'}
-                <div class="item-actions">
+            ${correction || !batch ? `<div class="note-footer">
+                ${correction ? `<details class="edit-attribution"><summary>${esc(t('edited'))}</summary><p>${esc(t('editedBy'))} ${esc(correction.signature)} · ${esc(date(correction.at))}</p></details>` : '<span></span>'}
+                ${batch ? '' : `<div class="item-actions">
                     <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-correct="${esc(n.id)}">${icon('pencil-line')}<span>${esc(t('correct'))}</span></button></div></details>
                     <button type="button" class="icon-button danger" data-delete-note="${esc(n.id)}" aria-label="${esc(t('deleteNote'))}" title="${esc(t('deleteNote'))}">${icon('trash')}</button>
-                </div>
-            </div>
+                </div>`}
+            </div>` : ''}
         </article>`;
+}
+
+function linkHTML(link, source = null) {
+    return `<article class="link-card">
+        ${source ? contentSource(source) : ''}
+        <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">
+            <span class="document-label">
+                <span class="document-title">${esc(link.title)}</span>
+                <small class="document-url">${esc(link.url)}</small>
+            </span>
+            ${icon('link')}
+        </a>
+        ${link.description ? `<p>${esc(link.description)}</p>` : ''}
+        <div class="link-actions">
+            <button type="button" class="icon-button" data-copy="${esc(link.url)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>
+            ${source ? '' : `<div class="item-actions">
+                <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button></div></details>
+                <button type="button" class="icon-button danger" data-delete-link="${esc(link.id)}" aria-label="${esc(t('remove') + ': ' + link.title)}" title="${esc(t('remove'))}">${icon('trash')}</button>
+            </div>`}
+        </div>
+    </article>`;
 }
 
 function renderInspector({ origin = 'other', focusSelection = false, replaceSelection = false } = {}) {
@@ -867,18 +909,17 @@ function renderInspectorContent() {
     }
     const batch = isContentBatch();
     $('#inspector').innerHTML = `
-        <div class="inspector-header">
+        ${batch ? selectionHeader(selectedExhibits(), selectionCount('exhibitsSelected'), iconButton('clearSelection', 'clearContentSelection', 'x')) : `<div class="inspector-header">
             <div class="inspector-tools">
-                ${batch ? `<h1>${esc(selectionCount('exhibitsSelected'))}</h1>${iconButton('clearSelection', 'clearContentSelection', 'x')}` :
-                `<h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1><div class="status-picker">
+                <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
+                <div class="status-picker">
                     <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" aria-busy="${statusSaving}" title="${esc(t(e.status))}" ${statusSaving ? 'disabled' : ''}>${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
                         ${STATUSES.map(status => `<button type="button" class="status-choice" data-status-choice="${status}" role="menuitemradio" tabindex="-1" aria-label="${esc(t(status))}" aria-checked="${status === e.status}">${statusHTML(status)}</button>`).join('')}
                     </div>
-                </div>`}
+                </div>
             </div>
-            ${batch ? `<ul class="batch-recipients" aria-label="${esc(t('selectedExhibits'))}" tabindex="0">${selectedExhibits().map(record => `<li>${esc(displayName(record))}</li>`).join('')}</ul>` : ''}
-        </div>
+        </div>`}
         <div class="tabs" role="tablist" aria-label="${esc(t('detail'))}">
             ${['notes', 'documentation'].map(key => `<button role="tab" id="tab-${key}" aria-controls="inspector-content" aria-selected="${tab === key}" tabindex="${tab === key ? 0 : -1}" data-tab="${key}">${esc(t(key))}</button>`).join('')}
         </div>
@@ -959,22 +1000,27 @@ function renderPanel() {
     const el = $('#inspector-content');
     if (!e || !el) return;
     const id = composerKey(), batch = isContentBatch();
+    const records = batch ? selectedExhibits() : [e];
     if (tab === 'notes') {
-        el.innerHTML = `<div id="composer-slot"></div>${batch ? '' : e.notes.filter(n => drafts[id]?.noteId !== n.id || drafts[id]?.readOnly).map(noteHTML).join('')}`;
+        const editingNote = batch || drafts[id]?.readOnly ? null : drafts[id]?.noteId;
+        const notes = records.flatMap(record => record.notes.filter(note => note.id !== editingNote).map(note => ({ record, note })));
+        if (batch) notes.sort((a, b) => b.note.at.localeCompare(a.note.at));
+        el.innerHTML = `<div id="composer-slot"></div>${notes.map(({ record, note }) => noteHTML(note, record, batch)).join('')}`;
         if (!drafts[id]) {
             drafts[id] = newDraft(batch ? {} : e);
             drafts[id].open = batch;
         }
         renderComposer();
     } else {
-        renderLinks(e, el);
+        const links = records.flatMap(record => record.links.map(link => ({ record, link })));
+        if (batch) links.sort((a, b) => a.link.title.localeCompare(b.link.title, lang(), { sensitivity: 'base' }));
+        renderLinks(el, links, batch);
     }
 }
 
-function renderLinks(e, element) {
-    const id = composerKey(), batch = isContentBatch();
+function renderLinks(element, links, batch) {
+    const id = composerKey();
     const draft = linkDrafts[id] ||= { open: batch, id: null, title: '', url: '', description: '' };
-    const links = batch ? [] : e.links;
     const searchable = links.length > 6;
     if (!searchable) delete linkSearches[id];
     element.innerHTML = `
@@ -992,24 +1038,7 @@ function renderLinks(e, element) {
             <p class="link-error" role="alert" ${draft.error ? '' : 'hidden'}>${draft.error ? esc(composerError(draft)) : ''}</p>
             ${draftWarning('links')}
         </form>
-        <div id="link-results">${links.map(link => `
-            <article class="link-card">
-                <a class="document-open" href="${esc(link.url)}" ${opensInBrowser(link.url) ? 'target="_blank"' : ''} rel="noopener noreferrer" title="${esc(link.url)}">
-                    <span class="document-label">
-                        <span class="document-title">${esc(link.title)}</span>
-                        <small class="document-url">${esc(link.url)}</small>
-                    </span>
-                    ${icon('link')}
-                </a>
-                ${link.description ? `<p>${esc(link.description)}</p>` : ''}
-                <div class="link-actions">
-                    <button type="button" class="icon-button" data-copy="${esc(link.id)}" aria-label="${esc(t('copy') + ': ' + link.title)}" title="${esc(t('copy'))}">${icon('copy')}</button>
-                    <div class="item-actions">
-                        <details class="note-options"><summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary><div class="popover"><button type="button" data-edit-link="${esc(link.id)}">${icon('pencil-line')}<span>${esc(t('edit'))}</span></button></div></details>
-                        <button type="button" class="icon-button danger" data-delete-link="${esc(link.id)}" aria-label="${esc(t('remove') + ': ' + link.title)}" title="${esc(t('remove'))}">${icon('trash')}</button>
-                    </div>
-                </div>
-            </article>`).join('')}
+        <div id="link-results">${links.map(({ record, link }) => linkHTML(link, batch ? record : null)).join('')}
             <p id="link-no-results" class="empty" role="status" hidden>${esc(t('noLinkResults'))}</p>
         </div>`;
     const search = element.querySelector('#link-search');
@@ -1018,8 +1047,8 @@ function renderLinks(e, element) {
     const filterLinks = () => {
         const query = search?.value.trim().toLocaleLowerCase() || '';
         cards.forEach((card, index) => {
-            const link = links[index];
-            card.hidden = ![link.title, link.url, link.description].join(' ').toLocaleLowerCase().includes(query);
+            const { link, record } = links[index];
+            card.hidden = ![link.title, link.url, link.description, batch ? displayName(record) : ''].join(' ').toLocaleLowerCase().includes(query);
         });
         empty.hidden = !query || cards.some(card => !card.hidden);
     };
@@ -2443,7 +2472,7 @@ const actions = {
     },
     refresh,
     enterEdit,
-    toggleContentSelection: () => { setContentSelectionMode(!selectingContent); renderList(); },
+    toggleContentSelection: () => setContentSelectionMode(!selectingContent),
     clearContentSelection,
     resumeNote: () => { drafts[selected].readOnly = false; renderPanel(); },
     backToNote: () => { drafts[selected].readOnly = true; persistDrafts(); renderPanel(); },
@@ -2552,8 +2581,7 @@ document.addEventListener('click', async event => {
         if (element.dataset.editLink) { editLink(element.dataset.editLink); return; }
         if (element.dataset.deleteLink) { deleteLink(element.dataset.deleteLink); return; }
         if (element.dataset.copy) {
-            const link = exhibit().links.find(l => l.id === element.dataset.copy);
-            try { await copyText(link.url); announce(t('copied')); }
+            try { await copyText(element.dataset.copy); announce(t('copied')); }
             catch { announce(t('copyFailed')); }
             return;
         }

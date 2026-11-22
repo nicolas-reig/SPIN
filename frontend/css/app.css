@@ -560,21 +560,6 @@ summary {
     background: #e4e7eb;
 }
 
-.content-selection-mark {
-    display: grid;
-    place-items: center;
-    width: 17px;
-    height: 17px;
-    flex: none;
-    border: 1px solid currentColor;
-    border-radius: 4px;
-}
-
-.content-selection-mark svg {
-    width: 13px;
-    height: 13px;
-}
-
 .exhibit-label {
     display: flex;
     flex-direction: column;
@@ -973,7 +958,7 @@ summary {
     color: #858b92;
 }
 
-.batch-recipients {
+.selection-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
@@ -985,14 +970,23 @@ summary {
     list-style: none;
 }
 
-.batch-recipients li {
-    padding: 3px 7px;
+.selection-tags li {
     min-width: 0;
+}
+
+.exhibit-tag {
+    display: inline-block;
+    max-width: 100%;
+    padding: 3px 7px;
     border: 1px solid var(--line);
     border-radius: 5px;
     background: var(--paper);
     font-size: .75rem;
     overflow-wrap: anywhere;
+}
+
+.content-source {
+    margin-bottom: 8px;
 }
 
 .compact-status {

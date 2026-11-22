@@ -1,7 +1,17 @@
-export function exhibitGroup(name = '') {
+function groupSeparator(name) {
     const separator = name.indexOf('-');
-    if (separator < 1 || !name.slice(separator + 1).trim()) return '';
-    return name.slice(0, separator).trim();
+    if (separator < 1 || !name.slice(0, separator).trim() || !name.slice(separator + 1).trim()) return -1;
+    return separator;
+}
+
+export function exhibitGroup(name = '') {
+    const separator = groupSeparator(name);
+    return separator === -1 ? '' : name.slice(0, separator).trim();
+}
+
+export function exhibitNameSuffix(name) {
+    const separator = groupSeparator(name);
+    return separator === -1 ? name : name.slice(separator + 1).trimStart();
 }
 
 export const exhibitGroupKey = name => exhibitGroup(name).normalize('NFC').toLowerCase();

@@ -3,6 +3,7 @@ import { t } from './locale.js';
 import { vectorFields, editHelp } from './edit.js';
 import { icon } from './icons.js';
 import { identity } from './domain.js';
+import { adaptiveExhibitName } from './exhibit-label.js';
 
 export function selectionParameters({ owner = null, available = true } = {}) {
     const content = available ? `${vectorFields(identity(), 'data-selection-delta', 'selection', {
@@ -28,7 +29,7 @@ export function hardwareParameters(record, instanceIndex, assets, scope, { selec
 export function exhibitParameters(record, scope, { active = false, showName = false, hardware = false, assets = [], placement = record.transform, unavailableHint = 'mapLoading' } = {}) {
     if (record.models.length < 2) return '';
     return `<details class="exhibit-transform ${active ? 'active' : ''}" data-exhibit-placement="${esc(record.id)}" ${active ? 'open' : ''}>
-        <summary ${editHelp('wholeExhibitHint')}>${esc(showName ? record.name : t('exhibitTransform'))}</summary>
+        <summary ${editHelp('wholeExhibitHint')}>${showName ? adaptiveExhibitName(record.name) : esc(t('exhibitTransform'))}</summary>
         ${!placement ? `<p class="small muted" data-placement-loading>${esc(t(unavailableHint))}</p>` : ''}
         ${vectorFields(placement || { ...record.transform, position: [null, null, null] }, `data-group-vector data-exhibit="${esc(record.id)}"`, scope, { group: true, disabled: !placement })}
         ${hardware && record.models.length ? `<div class="exhibit-hardware-choices"><span class="small muted">${esc(t('modelInstances'))}</span>${record.models.map((instance, index) => `<button type="button" class="quiet" data-edit-instance="${index}" data-exhibit="${esc(record.id)}" aria-pressed="false" ${editHelp('selectHardwareHint')}>${esc(assets.find(asset => asset.id === instance.model)?.name || instance.model)} ${index + 1}</button>`).join('')}</div>` : ''}

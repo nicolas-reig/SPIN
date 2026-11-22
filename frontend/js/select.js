@@ -1,4 +1,5 @@
 import { icon } from './icons.js';
+import { adaptiveExhibitName } from './exhibit-label.js';
 
 let active = null;
 let activePopover = null;
@@ -72,6 +73,11 @@ function openPopover(details) {
 
 function enhance(select) {
     if (select.dataset.custom) return;
+    const exhibitNames = select.hasAttribute('data-exhibit-names');
+    const setLabel = (element, text) => {
+        if (exhibitNames) element.innerHTML = adaptiveExhibitName(text);
+        else element.textContent = text;
+    };
     select.dataset.custom = 'true';
     select.hidden = true;
     const button = document.createElement('button');
@@ -90,7 +96,7 @@ function enhance(select) {
     const sync = () => {
         button.replaceChildren();
         const text = document.createElement('span');
-        text.textContent = select.selectedOptions[0]?.textContent || '';
+        setLabel(text, select.selectedOptions[0]?.textContent || '');
         button.append(text);
         button.insertAdjacentHTML('beforeend', icon('chevron-down', 'status-chevron'));
         button.disabled = select.disabled;
@@ -112,7 +118,7 @@ function enhance(select) {
         for (const option of select.options) {
             const item = document.createElement('button');
             item.type = 'button';
-            item.textContent = option.textContent;
+            setLabel(item, option.textContent);
             item.setAttribute('role', 'option');
             item.setAttribute('aria-selected', option.selected);
             item.tabIndex = -1;

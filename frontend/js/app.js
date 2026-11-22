@@ -37,9 +37,11 @@ import { InspectorNavigation } from './inspector-navigation.js';
 import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 import { groupExhibits, matchesExhibitGroup, ExhibitGroupState } from './exhibit-groups.js';
+import { adaptiveExhibitName, installAdaptiveExhibitNames } from './exhibit-label.js';
 let noteEditor = null;
 installSelects();
 installControlMotion();
+installAdaptiveExhibitNames();
 const $ = s => document.querySelector(s),
     api = new Api();
 const panelMotion = new PanelMotion($('#inspector'), $('#resizer'), $('#inspector-stack'), {
@@ -404,7 +406,7 @@ function removeExhibit(id, origin = 'other') {
     const createdAt = Date.parse(record.createdAt);
     const needsWarning = record.notes.length || record.links.length || !Number.isFinite(createdAt) || Date.now() - createdAt > 10 * 60 * 1000;
     if (!needsWarning) { remove(); return; }
-    showDialog('deleteExhibit', `<p>${esc(record.name)}</p><p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('deleteExhibit')}`, remove);
+    showDialog('deleteExhibit', `<p>${adaptiveExhibitName(record.name)}</p><p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p><p class="small muted deletion-hint">${esc(t('deleteOnSave'))}</p>${footer('deleteExhibit')}`, remove);
     $('#dialog button[type=submit]').className = 'danger';
 }
 
@@ -513,17 +515,10 @@ function renderSidebar() {
 
 function exhibitLabel(record, editable = false) {
     const text = displayName(record);
-    const name = value => `<span class="exhibit-name" ${editable ? 'aria-hidden="true"' : ''}>${esc(value)}</span>`;
-    let title = name(text);
-    if (editable) {
-        if (record.id === selected && editSelection.size === 1) {
-            const end = text.search(/\S+$/u);
-            title = `${name(text.slice(0, end))}<span class="exhibit-name-end">${name(text.slice(end))}<button type="button" class="icon-button exhibit-rename" data-rename-exhibit="${esc(record.id)}" aria-label="${esc(t('renameExhibit') + ': ' + text)}" ${editHelp('renameExhibitHint')}>${icon('pencil-line')}</button></span>`;
-        }
-        title = `<span class="exhibit-title-line">${title}</span>`;
-    }
+    const rename = editable && record.id === selected && editSelection.size === 1
+        ? `<button type="button" class="icon-button exhibit-rename" data-rename-exhibit="${esc(record.id)}" aria-label="${esc(t('renameExhibit') + ': ' + text)}" ${editHelp('renameExhibitHint')}>${icon('pencil-line')}</button>` : '';
     return `<span class="exhibit-label">
-        ${title}
+        <span class="exhibit-name${editable ? ' exhibit-title-line' : ''}" ${editable && !rename ? 'aria-hidden="true"' : ''}>${adaptiveExhibitName(text, rename)}</span>
         ${!edit && colorMode() !== 'default' ? `<span class="exhibit-status-name">${esc(t(record.status))}</span>` : ''}
         ${record.models.length ? '' : `<span class="unplaced-flag" title="${esc(t('unplaced'))}">${esc(t('unplacedShort'))}</span>`}
     </span>`;
@@ -912,7 +907,7 @@ function renderInspectorContent() {
     $('#inspector').innerHTML = `
         ${batch ? selectionHeader(selectedExhibits(), selectionCount('exhibitsSelected'), iconButton('clearSelection', 'clearContentSelection', 'x')) : `<div class="inspector-header">
             <div class="inspector-tools">
-                <h1 title="${esc(titleFloor(e.floorId))}">${esc(displayName(e))}</h1>
+                <h1 title="${esc(titleFloor(e.floorId))}" aria-label="${esc(displayName(e))}">${adaptiveExhibitName(displayName(e))}</h1>
                 <div class="status-picker">
                     <button type="button" class="status-toggle" aria-label="${esc(t('changeStatus') + ': ' + t(e.status))}" aria-expanded="false" aria-controls="status-menu" aria-haspopup="menu" aria-busy="${statusSaving}" title="${esc(t(e.status))}" ${statusSaving ? 'disabled' : ''}>${statusHTML(e.status)}${icon('chevron-down', 'status-chevron')}</button>
                     <div class="status-menu" id="status-menu" role="menu" aria-label="${esc(t('changeStatus'))}" aria-hidden="true" inert>
@@ -1463,7 +1458,7 @@ function openJoinSelection() {
     const records = selectedExhibits(), problem = joinProblem(records);
     if (problem) { announce(t(problem)); return; }
     const session = edit, generation = joinGeneration;
-    showDialog('joinTogether', `<div class="field"><label for="join-target">${esc(t('joinInto'))}</label><select id="join-target" name="target" ${editHelp('joinTargetHint')}>${options(records.map(record => [record.id, record.name]), selected)}</select></div>${footer('joinTogether')}`, async values => {
+    showDialog('joinTogether', `<div class="field"><label for="join-target">${esc(t('joinInto'))}</label><select id="join-target" name="target" data-exhibit-names ${editHelp('joinTargetHint')}>${options(records.map(record => [record.id, record.name]), selected)}</select></div>${footer('joinTogether')}`, async values => {
         if (edit !== session || generation !== joinGeneration) { closeDialog(); return; }
         const target = values.get('target');
         if (!editSelection.has(target)) return;
@@ -1529,8 +1524,9 @@ function renderEditInspector() {
     if (editConflict?.open) { renderEditConflict(); return; }
     if (!creationOpen && (editSelection.size > 1 || hardwareSelection.length > 1)) { renderSelectionInspector(Boolean(hardwareSelection.length)); return; }
     const record = exhibit();
-    const title = creationOpen ? t('newExhibit') : displayName(record);
-    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 title="${esc(creationOpen ? '' : record?.name || '')}">${esc(title)}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
+    const name = creationOpen ? '' : displayName(record);
+    const title = creationOpen ? esc(t('newExhibit')) : adaptiveExhibitName(name);
+    $('#inspector').innerHTML = `<div class="inspector-header edit-inspector-header"><div class="edit-exhibit-title"><h1 ${name ? `title="${esc(name)}" aria-label="${esc(name)}"` : ''}>${title}</h1>${record && !creationOpen ? iconButton('renameExhibit', 'renameExhibit', 'pencil-line', '', 'renameExhibitHint') : ''}</div>${creationOpen ? '' : editorActions(record)}</div><div class="panel-content" id="structure-panel"><div id="structure-slot"></div></div>`;
     if (creationOpen) { renderCreation(); return; }
     if (!record) return;
     const hardware = data().assets.filter(asset => asset.kind === 'hardware');
@@ -2359,7 +2355,7 @@ function conflictValue(value) {
 function renderEditConflict() {
     const labels = { name: 'name', floorId: 'floor', models: 'modelInstances', transform: 'placement', 'views.2D': 'view2D', 'views.3D': 'view3D', record: 'editExhibit', join: 'join' };
     const ready = editConflict.conflicts.every(item => editConflict.choices[item.key]);
-    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p>${item.field === 'join' ? `<p class="small muted">${esc(t(item.unavailable ? 'joinMissing' : 'joinConflictHint'))}</p>` : ''}<div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ...(item.unavailable ? [] : [['mine', t('useMine')]])], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
+    $('#inspector').innerHTML = `<div class="inspector-header"><h1>${esc(t('resolveChanges'))}</h1></div><div class="panel-content"><form id="conflict-form" novalidate>${editConflict.conflicts.map((item, index) => `<article class="conflict-card"><h3>${item.kind === 'exhibits' ? adaptiveExhibitName(item.id) : esc(item.id)}</h3>${item.yours === null && item.current ? `<p class="deletion-warning">${esc(t('deleteExhibitWarning'))}</p>` : ''}<p class="small muted">${esc(t(labels[item.field] || 'placement'))}</p>${item.field === 'join' ? `<p class="small muted">${esc(t(item.unavailable ? 'joinMissing' : 'joinConflictHint'))}</p>` : ''}<div class="conflict-values"><div><span class="small muted">${esc(t('current'))}</span><p>${esc(conflictValue(item.current))}</p></div><div><span class="small muted">${esc(t('yours'))}</span><p>${esc(conflictValue(item.yours))}</p></div></div><label class="sr-only" for="conflict-${index}">${esc(t('chooseVersion'))}</label><select id="conflict-${index}" data-conflict-key="${esc(item.key)}">${options([['', t('chooseVersion')], ['current', t('keepCurrent')], ...(item.unavailable ? [] : [['mine', t('useMine')]])], editConflict.choices[item.key] || '')}</select></article>`).join('')}<div class="creation-actions">${button('cancel', 'cancelConflict', 'quiet')}<button type="submit" class="primary" id="resolve-edit" ${ready ? '' : 'disabled'}>${esc(t('resolveChanges'))}</button></div></form></div>`;
     $('#conflict-form').addEventListener('change', event => {
         if (!event.target.dataset.conflictKey) return;
         editConflict.choices[event.target.dataset.conflictKey] = event.target.value;

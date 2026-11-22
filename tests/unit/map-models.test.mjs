@@ -153,6 +153,67 @@ test('actual setData loads and smooths a repeated unskinned asset once, with sep
     view.destroy();
 });
 
+test('automatic 3D exhibit focus reuses the search across recentering, resizing and unrelated edits', async () => {
+    const { view } = makeView();
+    const data = dataset();
+    await view.setData(data, 'floor', 'first');
+    let rays = 0;
+    const obstacle = new THREE.Object3D();
+    obstacle.raycast = () => { rays++; };
+    view.root.add(obstacle);
+
+    const initial = view.fallbackView(['first'], 'perspective');
+    const initialRays = rays;
+    assert.ok(initialRays > 0, 'the first focus searches for a visible direction');
+    assert.deepEqual(view.fallbackView(['first'], 'perspective'), initial);
+
+    const unrelated = structuredClone(data);
+    unrelated.exhibits[0].status = 'problem';
+    unrelated.exhibits[1].transform.position[0] += 2;
+    await view.setData(unrelated, 'floor', 'first');
+    view.container.clientWidth = 200;
+    view.container.clientHeight = 800;
+    const narrow = view.fallbackView(['first'], 'perspective');
+    const distance = preset => new THREE.Vector3(...preset.position).distanceTo(new THREE.Vector3(...preset.target));
+    const direction = preset => new THREE.Vector3(...preset.position).sub(new THREE.Vector3(...preset.target)).normalize();
+    assert.ok(distance(narrow) > distance(initial), 'narrow viewports get more stand-off distance');
+    assert.ok(direction(narrow).dot(direction(initial)) > .999999, 'viewport-specific framing reuses the direction');
+    assert.equal(rays, initialRays);
+    view.destroy();
+});
+
+test('signed placement save prepares a fresh direction and subsequent focus uses the persisted value', async () => {
+    const { view } = makeView();
+    const data = dataset();
+    data.exhibits[0].focusDirection = [0, .6, -.8];
+    await view.setData(data, 'floor', 'first');
+    let rays = 0;
+    const obstacle = new THREE.Object3D();
+    obstacle.raycast = () => { rays++; };
+    view.root.add(obstacle);
+    view.fallbackView(['first'], 'perspective');
+    assert.equal(rays, 0, 'persisted directions skip searching');
+
+    const draft = structuredClone(data);
+    draft.exhibits[0].models[0].transform.position[0] += 3;
+    await view.setData(draft, 'floor', 'first', true, { savedExhibits: data.exhibits });
+    view.fallbackView(['first'], 'perspective');
+    assert.equal(rays, 0, 'reframing a draft waits for signed Save before searching');
+    const focusDirections = await MapView.prepareFocusDirections(draft, data.exhibits, [draft.exhibits[0]], view);
+    const saveRays = rays;
+    assert.ok(saveRays > 0, 'moving a component makes its exhibit search during Save');
+    assert.equal(Object.keys(focusDirections).length, 1);
+    assert.equal(focusDirections.first.length, 3);
+    assert.notDeepEqual(focusDirections.first, data.exhibits[0].focusDirection);
+
+    draft.exhibits[0].focusDirection = focusDirections.first;
+    await view.setData(draft, 'floor', 'first');
+    view.focusDirections.clear();
+    view.fallbackView(['first'], 'perspective');
+    assert.equal(rays, saveRays, 'the saved direction works without a browser cache');
+    view.destroy();
+});
+
 test('whole placement derives from loaded component centers and follows component edits before moving all hardware together', async () => {
     const { view } = makeView(); const data = dataset(6);
     await view.setData(data, 'floor', 'first', true, { selection: ['first'] });

@@ -218,6 +218,7 @@ The full supported structure is:
 | `transform` | Shared placement applied to the whole exhibit. | Identity: no movement or rotation, scale 1. |
 | `models` | Hardware instances, each with a `model` path and optional `transform`. | No hardware. |
 | `views` | Optional `2D` and `3D` camera presets. | Automatic framing of the exhibit's hardware. |
+| `automaticFocus` | App-generated 3D focus direction and its placement fingerprint. | The browser calculates the direction the first time it needs it. |
 | `lastEditedBy` | The name from the last signed structural Save in edit mode. It is a single attribution, not a history. Status changes do not update it. | Empty. |
 | `createdAt` | Creation time in ISO 8601 format, recorded by the server when the app creates an exhibit. | Unknown age. Deleting the exhibit requires confirmation. |
 
@@ -268,6 +269,8 @@ Older files using `top` and `three` are still read as `2D` and `3D`. If both nam
 The app ignores invalid individual presets and uses automatic framing instead. Selecting an exhibit that is outside the visible map uses its preset for the current mode, or calculates a view from its hardware if none is saved. The Focus control uses the same presets. Floor framing uses its saved view when available, otherwise the building bounds.
 
 In edit mode, **Focus** frames the selected hardware or exhibits. Saved views take priority for a single whole exhibit. Component and multiple selections use automatic framing.
+
+When a signed Save changes an exhibit's placement, the app records the automatic 3D viewing direction as `automaticFocus`. This field contains a `direction` vector and a `placement` fingerprint based on the floor, hardware models, and their transforms. Leave it out when writing metadata by hand. The app ignores it if the placement or referenced model files change. The camera fits the cached direction to the space available in the viewport, and a manually saved 3D preset still takes priority.
 
 The app calculates identifiers, revision hashes and content tags while reading files. Do not add `id`, `name`, `floorId`, `placed`, `revision`, `structureRevision`, `contentTag` or journal records to these JSON files. Structural saves rewrite `.exhibit.json` with the supported fields listed above; extra custom fields will not be preserved by that save.
 

@@ -7,7 +7,7 @@ import {
 } from 'three/addons/controls/OrbitControls.js';
 import { TransformController } from './transform-controller.js';
 import { transformKey, geometryCenter, exhibitPlacement, ExhibitPlacementTransaction, TransformTransaction, selectionFieldDelta } from './transform-math.js';
-import { coordinateNumber, coordinateVector } from './domain.js';
+import { coordinateNumber, coordinateVector, focusPlacement } from './domain.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -19,6 +19,7 @@ import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clip
 import { focusGeometry, nextBestView, birdFocusView } from './camera-focus.js';
 
 const radians = v => v * Math.PI / 180;
+const perspectiveFocusPadding = .72;
 
 function applyTransform(object, t) {
     object.position.fromArray(t.position);
@@ -67,6 +68,7 @@ export class MapView {
         this.scene.add(this.root);
         this.boundsDirty = true;
         this.objects = new Map();
+        this.focusDirections = new Map();
         this.materials = Object.fromEntries(Object.entries(colorScheme().materials).map(([name, color]) => {
             const material = new THREE.MeshStandardMaterial({
                 color,
@@ -281,10 +283,12 @@ export class MapView {
         this.requestRender();
     }
     async setData(data, floorId, selected, editing = false, {
-        reset = false, selection = selected ? [selected] : [], hardwareSelection = []
+        reset = false, selection = selected ? [selected] : [], hardwareSelection = [], savedExhibits = data.exhibits
     } = {}) {
         this.cancelTransform();
+        if (this.data?.assets !== data.assets) this.assetRevisions = new Map(data.assets.map(asset => [asset.id, asset.revision]));
         this.data = data;
+        this.savedExhibits = savedExhibits;
         this.selected = selected;
         this.selection = new Set(selection);
         this.hardwareSelection = hardwareSelection;
@@ -625,19 +629,83 @@ export class MapView {
         };
     }
     fallbackView(ids, mode = this.mode) {
-        return this.automaticView(ids.map(id => this.objects.get(id)).filter(Boolean), mode);
+        const exhibit = ids.length === 1 ? this.data?.exhibits.find(record => record.id === ids[0]) : null;
+        return this.automaticView(ids.map(id => this.objects.get(id)).filter(Boolean), mode, exhibit);
     }
-    automaticView(objects, mode = this.mode) {
+    focusDirection(record, object, preparingSave = false) {
+        const placement = focusPlacement(record);
+        const saved = this.savedExhibits.find(exhibit => exhibit.id === record.id);
+        const savedPlacement = focusPlacement(saved);
+        if (saved?.focusDirection && savedPlacement === placement) return saved.focusDirection;
+        const models = [this.floor.modelId, ...record.models.map(instance => instance.model)];
+        const key = JSON.stringify([this.data.datasetKey, placement, models.map(id => this.assetRevisions.get(id))]);
+        const cached = this.focusDirections.get(record.id);
+        if (cached?.key === key) return cached.direction;
+        // In edit mode a draft can change many times before the signed save.
+        if (!preparingSave && this.editing && placement !== savedPlacement) {
+            return saved?.focusDirection || (cached?.placement === savedPlacement ? cached.direction : null);
+        }
+
+        this.root.updateMatrixWorld(true);
+        const view = nextBestView(focusGeometry([object]), {
+            direction: this.framingDirection('perspective'), occluders: this.root.children,
+            padding: { horizontal: perspectiveFocusPadding, vertical: perspectiveFocusPadding }
+        });
+        if (!view) return null;
+        const direction = coordinateVector(new THREE.Vector3(...view.position).sub(new THREE.Vector3(...view.target)).normalize().toArray());
+        this.focusDirections.set(record.id, { key, placement, direction });
+        return direction;
+    }
+    static async prepareFocusDirections(data, savedExhibits, records, displayed, signal) {
+        const result = new Map();
+        for (const floorId of new Set(records.map(record => record.floorId))) {
+            signal?.throwIfAborted();
+            const current = displayed?.data === data && displayed.floor?.id === floorId && displayed.key === displayed.installedKey;
+            const view = current ? displayed : new MapView({});
+            const abort = () => { view.generation++; };
+            if (!current) signal?.addEventListener('abort', abort, { once: true });
+            try {
+                if (!current) await view.setData(data, floorId, null, false, { savedExhibits });
+                signal?.throwIfAborted();
+                for (const record of records.filter(item => item.floorId === floorId)) {
+                    const object = view.objects.get(record.id);
+                    if (!object || object.children.some(holder => !holder.children.length) ||
+                        view.floor.modelId && !view.root.children.some(child => child.userData.floor)) continue;
+                    try {
+                        const direction = view.focusDirection(record, object, true);
+                        if (direction) result.set(record.id, direction);
+                    } catch (error) {
+                        console.warn('Could not prepare automatic exhibit focus.', error);
+                    }
+                }
+            } finally {
+                if (!current) {
+                    signal?.removeEventListener('abort', abort);
+                    view.destroy();
+                }
+            }
+        }
+        return Object.fromEntries(result);
+    }
+    automaticView(objects, mode = this.mode, exhibit = null) {
         mode = cameraMode(mode);
+        const padding = this.framingPadding(), aspect = this.framingAspect();
+        const factor = mode === 'top' ? .82 : perspectiveFocusPadding;
+        const focusPadding = { horizontal: padding.horizontal * factor, vertical: padding.vertical * factor };
+        if (mode === 'perspective' && exhibit && objects.length === 1 && this.floor && this.key === this.installedKey) {
+            const box = new THREE.Box3().setFromObject(objects[0]);
+            const cached = box.isEmpty() ? null : this.focusDirection(exhibit, objects[0]);
+            const direction = cached ? new THREE.Vector3(...cached) : this.framingDirection(mode);
+            return frameBounds(box.isEmpty() ? this.sceneBounds() : box, direction, aspect, focusPadding);
+        }
         this.root.updateMatrixWorld(true);
         const geometry = focusGeometry(objects);
         if (!geometry.points.length) {
             geometry.box.copy(this.sceneBounds());
             geometry.points = boundsCorners(geometry.box);
         }
-        const padding = this.framingPadding();
-        const options = { aspect: this.framingAspect(), direction: this.camera.position.clone().sub(this.controls.target),
-            padding: { horizontal: padding.horizontal * .82, vertical: padding.vertical * .82 }, occluders: this.root.children };
+        const options = { aspect, direction: this.camera.position.clone().sub(this.controls.target),
+            padding: focusPadding, occluders: this.root.children };
         return (mode === 'top' ? birdFocusView : nextBestView)(geometry, options) ||
             frameBounds(geometry.box, this.framingDirection(mode), options.aspect, { perspective: mode !== 'top', ...padding });
     }
@@ -727,7 +795,7 @@ export class MapView {
         });
         const preset = objects.length === 1 ? exhibit?.views?.[viewKey(this.mode)] : null;
         if (preset) this.applyView(this.focusView(exhibit.id, preset));
-        else this.applyView(this.automaticView(objects), this.mode, { orbit: true });
+        else this.applyView(this.automaticView(objects, this.mode, objects.length === 1 ? exhibit : null), this.mode, { orbit: true });
     }
     focusFloor() {
         const ids = this.data.exhibits.filter(exhibit => exhibit.floorId === this.floor.id).map(exhibit => exhibit.id);

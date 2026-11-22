@@ -7,7 +7,7 @@ import {
     EditSession,
     identity,
     STATUSES,
-    normalizeStatus, validTransform, normalizeTransform
+    normalizeStatus, validTransform, normalizeTransform, focusPlacement
 } from './domain.js';
 import {
     t,
@@ -656,7 +656,8 @@ async function initializeMap() {
 }
 async function updateMap(reset = false) {
     if (map) await map.setData(data(), floorId, selected, Boolean(edit), {
-        reset, selection: edit ? [...editSelection] : selected ? [selected] : [], hardwareSelection: edit ? hardwareSelection : []
+        reset, selection: edit ? [...editSelection] : selected ? [selected] : [], hardwareSelection: edit ? hardwareSelection : [],
+        savedExhibits: (edit?.base || snapshot).exhibits
     });
     updateTransformFields(null, { groupsOnly: true });
 }
@@ -2122,7 +2123,16 @@ async function confirmEditSave() {
     renderEditBar();
     syncEditTools();
     try {
-        const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision, requestId: save.requestId, signature, changes }, { signal: save.controller.signal });
+        const originals = new Map(session.base.exhibits.map(record => [record.id, record]));
+        const placed = changes.filter(change => change.op === 'put' && change.record.floorId && change.record.models.length &&
+            focusPlacement(change.record) !== focusPlacement(originals.get(change.id))).map(change => change.record);
+        let focusDirections;
+        if (placed.length) {
+            const { MapView } = await import('./map.js');
+            focusDirections = await MapView.prepareFocusDirections(session.value, session.base.exhibits, placed, map, save.controller.signal);
+        }
+        const result = await api.save({ action: 'structure', baseRevision: session.base.structureRevision,
+            requestId: save.requestId, signature, changes, focusDirections }, { signal: save.controller.signal });
         if (edit !== session) return;
         rememberSignature(signature);
         finishEditSave(session, result.snapshot);

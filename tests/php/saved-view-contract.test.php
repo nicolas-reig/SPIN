@@ -60,7 +60,43 @@ try {
     testCheck(array_keys($stored['views']) === ['2D', '3D'] && !isset($stored['views']['2D']['mode']), 'New saves must use current keys and omit the obsolete mode');
     $snapshot = testStructure($store, ['id' => 'Synthetic', 'name' => 'Synthetic', 'models' => [], 'views' => []], 'automatic_view_001');
     testCheck((array)testExhibit($snapshot, 'Synthetic')['views'] === [], 'Empty view maps must keep automatic framing');
-    echo "Saved-view numeric, shape and compatibility contracts passed\n";
+    $hardware = 'HardwareModels/Focus.glb';
+    mkdir($assets . '/HardwareModels');
+    testWrite($assets . '/' . $hardware, 'synthetic model file');
+    $record = [
+        'id' => 'Synthetic', 'name' => 'Synthetic', 'floorId' => '4',
+        'models' => [['model' => $hardware, 'transform' => [
+            'position' => [0, 0, 0], 'rotation' => [0, 0, 0], 'scale' => [1, 1, 1]
+        ]]], 'views' => ['3D' => $boundary]
+    ];
+    $persist = function (array $record, string $requestId, array $focusDirections = []) use ($store) {
+        $before = $store->snapshot();
+        $exhibit = testExhibit($before, $record['id']);
+        $result = $store->mutate([
+            'action' => 'structure', 'signature' => 'Synthetic editor',
+            'baseRevision' => $before['structureRevision'], 'requestId' => $requestId, 'focusDirections' => $focusDirections,
+            'changes' => [['kind' => 'exhibits', 'op' => 'put', 'id' => $record['id'], 'baseRevision' => $exhibit['revision'], 'record' => $record]]
+        ]);
+        return testExhibit($result['snapshot'], $record['name']);
+    };
+    $direction = [.123456789, .6, -.8];
+    $saved = $persist($record, 'focus_direction_001', ['Synthetic' => $direction]);
+    testCheck($saved['focusDirection'] === [.123457, .6, -.8], 'Signed saves persist the rounded generated direction');
+    testCheck(((array)$saved['views'])['3D'] == $boundary, 'Automatic focus leaves manually saved views intact');
+    $record['name'] = 'Renamed';
+    $saved = $persist($record, 'focus_direction_002');
+    testCheck($saved['focusDirection'] === [.123457, .6, -.8], 'A rename preserves the existing direction');
+    $renamedPath = $exhibits . '/Renamed/.exhibit.json';
+    $meta = json_decode(file_get_contents($renamedPath), true, 128, JSON_THROW_ON_ERROR);
+    $edited = $meta;
+    $edited['models'][0]['transform']['rotation'][1] = 45;
+    testWrite($renamedPath, json_encode($edited, JSON_THROW_ON_ERROR));
+    testCheck(testExhibit($store->snapshot(), 'Renamed')['focusDirection'] === null, 'An external component edit invalidates the cached direction');
+    testWrite($renamedPath, json_encode($meta, JSON_THROW_ON_ERROR));
+    testWrite($assets . '/' . $hardware, 'replacement model with a different size');
+    clearstatcache();
+    testCheck(testExhibit($store->snapshot(), 'Renamed')['focusDirection'] === null, 'A replaced model invalidates the direction');
+    echo "Saved-view and automatic-focus contracts passed\n";
 } finally {
     testRemoveTree($root);
 }

@@ -182,7 +182,7 @@ final class Store
     {
         if ($value instanceof stdClass) {
             // Keep vector objects distinct from arrays, including {"0": 0, "1": 0, "2": 0}.
-            if (in_array($key, ['position', 'rotation', 'scale', 'target'], true)) {
+            if (in_array($key, ['position', 'rotation', 'scale', 'target', 'direction'], true)) {
                 return $value;
             }
             $result = [];
@@ -316,6 +316,23 @@ final class Store
         return $views;
     }
 
+    private static function focusKey(?string $floor, array $transform, array $models, array $assetRevisions): ?string
+    {
+        if ($floor === null || !$models) return null;
+        $hardware = array_map(fn($item) => [$item, $assetRevisions[$item['model']] ?? null], $models);
+        return hash('sha256', json_encode([1, $floor, $assetRevisions['Floors/' . $floor . '/model.glb'] ?? null, $transform, $hardware], JSON_THROW_ON_ERROR));
+    }
+
+    private static function focusDirection(mixed $direction): ?array
+    {
+        if (!is_array($direction) || !array_is_list($direction) || count($direction) !== 3) return null;
+        foreach ($direction as $value) {
+            if ((!is_int($value) && !is_float($value)) || !is_finite($value) || abs($value) > 1) return null;
+        }
+        $direction = array_map(self::coordinateNumber(...), $direction);
+        return $direction[1] > 0 && ($direction[0] || $direction[2]) ? $direction : null;
+    }
+
     private function floorNames(): array
     {
         return $this->readJson($this->path($this->assets, 'Floors/.floors.json'));
@@ -399,14 +416,17 @@ final class Store
     {
         $modelFiles = $this->modelFiles();
         $assets = [];
+        $assetRevisions = [];
         foreach ($modelFiles as $file) {
             $path = $this->path($this->assets, $file);
+            $assetRevisions[$file] = filesize($path) . ':' . filemtime($path);
             $assets[] = [
                 'id' => $file,
                 'name' => pathinfo($file, PATHINFO_FILENAME),
                 'url' => 'api.php?action=asset&kind=model&id=' . rawurlencode($file),
                 'kind' => str_starts_with($file, 'Floors/') ? 'floor' : 'hardware',
-                'file' => $file
+                'file' => $file,
+                'revision' => $assetRevisions[$file]
             ];
         }
         $labels = $this->floorNames();
@@ -458,6 +478,9 @@ final class Store
             }
             $content = $this->human->read($id);
             $revision = hash('sha256', $raw ?: '');
+            $transform = self::readTransform($meta['transform'] ?? null);
+            $focus = $meta['automaticFocus'] ?? null;
+            $focusKey = isset($focus['placement']) ? self::focusKey($floorId, $transform, $models, $assetRevisions) : null;
             $exhibits[] = [
                 'id' => $id,
                 'name' => $id,
@@ -465,19 +488,20 @@ final class Store
                 'status' => in_array($meta['status'] ?? null, ['ok', 'problem', 'retired'], true) ? $meta['status'] : 'ok',
                 'lastEditedBy' => is_string($meta['lastEditedBy'] ?? null) ? $meta['lastEditedBy'] : '',
                 'createdAt' => is_string($meta['createdAt'] ?? null) ? $meta['createdAt'] : null,
-                'transform' => self::readTransform($meta['transform'] ?? null),
+                'transform' => $transform,
                 'models' => $models,
                 'placed' => $floorId !== null && count($models) > 0,
                 'views' => (object)self::readViews($meta['views'] ?? []),
+                'focusDirection' => $focusKey !== null && $focusKey === $focus['placement']
+                    ? self::focusDirection($focus['direction'] ?? null) : null,
                 'revision' => $revision,
                 ...$content
             ];
             $structureParts[] = 'exhibit:' . $id . ':' . $revision;
             $contentParts[] = $id . ':' . $content['contentTag'];
         }
-        foreach ($modelFiles as $file) {
-            $path = $this->path($this->assets, $file);
-            $structureParts[] = $file . ':' . filesize($path) . ':' . filemtime($path);
+        foreach ($assetRevisions as $file => $revision) {
+            $structureParts[] = $file . ':' . $revision;
         }
         $structureRevision = hash('sha256', implode("\n", $structureParts));
         return [
@@ -536,6 +560,9 @@ final class Store
         }
         $floorIds = array_column($snapshot['floors'], 'id');
         $modelIds = array_column($snapshot['assets'], 'id');
+        $assetRevisions = array_column($snapshot['assets'], 'revision', 'id');
+        // These supplemental directions may differ between retries if model availability changes.
+        $focusDirections = is_array($payload['focusDirections'] ?? null) ? $payload['focusDirections'] : [];
         $operations = [];
         $seen = [];
         $joined = [];
@@ -590,6 +617,16 @@ final class Store
                 $sourcePaths[] = $this->path($this->exhibits, $sourceId);
             }
             $meta = $this->exhibitMeta($record, $floorIds, $modelIds, $signature);
+            $floor = $meta['floor'] === null ? null : (string)$meta['floor'];
+            $focusKey = self::focusKey($floor, $meta['transform'], $meta['models'], $assetRevisions);
+            $direction = self::focusDirection($focusDirections[$id] ?? null);
+            if ($direction === null && ($old['focusDirection'] ?? null) !== null &&
+                $focusKey === self::focusKey($old['floorId'], $old['transform'], $old['models'], $assetRevisions)) {
+                $direction = $old['focusDirection'];
+            }
+            if ($focusKey !== null && $direction !== null) {
+                $meta['automaticFocus'] = ['placement' => $focusKey, 'direction' => $direction];
+            }
             if (!$old) $meta['createdAt'] = gmdate('Y-m-d\TH:i:s\Z');
             elseif ($old['createdAt'] !== null) $meta['createdAt'] = $old['createdAt'];
             $operations[] = ['putExhibit', $id, $meta, $name, (bool)$old, $sourcePaths];

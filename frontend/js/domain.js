@@ -214,6 +214,13 @@ export function structural(record) {
     return normalizePlacement(Object.fromEntries(keys.map(key => [key, structuredClone(record[key] ?? null)])), false);
 }
 
+export function focusPlacement(record) {
+    if (!record?.floorId || !record.models?.length) return null;
+    const vectors = transform => [transform.position, transform.rotation, transform.scale];
+    return JSON.stringify([record.floorId, vectors(record.transform),
+        record.models.map(instance => [instance.model, vectors(instance.transform)])]);
+}
+
 export class EditSession {
     constructor(snapshot) {
         const collections = structuredClone({ floors: snapshot.floors, assets: snapshot.assets });

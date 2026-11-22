@@ -558,9 +558,49 @@ summary {
 }
 
 .exhibit-name {
+    max-width: 100%;
     font-size: .9375rem;
     font-weight: 500;
     overflow-wrap: anywhere;
+}
+
+.adaptive-exhibit-name {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.adaptive-exhibit-name > span {
+    grid-area: 1 / 1;
+}
+
+.exhibit-name-text {
+    position: relative;
+}
+
+/* Keep the full name's preferred width while clipping the measuring row. */
+.exhibit-name-probe {
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    white-space: nowrap;
+}
+
+.exhibit-name-probe > span {
+    display: inline-block;
+    width: max-content;
+}
+
+.exhibit-name-probe > span::before {
+    content: attr(data-full-exhibit-name);
+}
+
+.exhibit-name-probe > .with-exhibit-action::after {
+    content: '';
+    display: inline-block;
+    width: calc(var(--exhibit-action-size) + 2px);
 }
 
 .exhibit-row > .status-symbol {
@@ -2288,6 +2328,10 @@ html[data-color-mode]:not([data-color-mode=default]) {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.select-button .exhibit-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .select-button .status-chevron {
     margin-right: 3px;
 }
@@ -2712,18 +2756,15 @@ body.editing .exhibit-entry > .exhibit-label {
     max-width: 100%;
 }
 
-.exhibit-title-line .exhibit-name, .exhibit-name-end {
-    vertical-align: middle;
-}
-
 .exhibit-name-end {
     display: inline-flex;
     align-items: center;
     max-width: 100%;
     gap: 2px;
+    vertical-align: middle;
 }
 
-.exhibit-name-end > .exhibit-name {
+.exhibit-name-end > span {
     min-width: 0;
 }
 

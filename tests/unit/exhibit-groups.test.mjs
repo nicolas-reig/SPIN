@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { exhibitGroup, exhibitGroupKey, groupExhibits, matchesExhibitGroup, ExhibitGroupState } from '../../frontend/js/exhibit-groups.js';
+import { exhibitGroup, exhibitGroupKey, exhibitNameSuffix, groupExhibits, matchesExhibitGroup, ExhibitGroupState } from '../../frontend/js/exhibit-groups.js';
 
 const record = name => ({ id: name, name });
 
@@ -19,6 +19,13 @@ test('group filters distinguish all groups, a named group and optional ungrouped
     assert.deepEqual(records.filter(record => matchesExhibitGroup(record.name, '')).map(record => record.name), ['Station 5']);
     assert.equal(matchesExhibitGroup('PIC-Station 2', 'pic'), true);
     assert.notEqual(JSON.stringify(null), JSON.stringify(''));
+});
+
+test('adaptive labels remove only a valid first group prefix', () => {
+    for (const [name, suffix] of [['Pic-Station-Left', 'Station-Left'], ['Pic - Station 5', 'Station 5'],
+        ['Station 5', 'Station 5'], ['-Station', '-Station'], ['Pic-  ', 'Pic-  '], [' - Station', ' - Station']]) {
+        assert.equal(exhibitNameSuffix(name), suffix);
+    }
 });
 
 test('grouped sections keep full names, references and IDs intact, with natural ordering and ungrouped rows last', () => {

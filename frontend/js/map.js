@@ -95,6 +95,8 @@ export class MapView {
         this.scene.add(light);
         this.camera = new THREE.PerspectiveCamera(38, 1, .05, 2000);
         this.camera.position.set(28, 27, 33);
+        this.exhibitRay = new THREE.Raycaster();
+        this.pointerPosition = new THREE.Vector2();
     }
     async init() {
         const params = new URLSearchParams(location.search);
@@ -142,42 +144,102 @@ export class MapView {
             }
         });
         this.controls.listenToKeyEvents(canvas);
-        canvas.addEventListener('pointerdown', e => {
+        this.bindPointerEvents(canvas);
+        this.resize();
+        return this;
+    }
+    bindPointerEvents(canvas) {
+        this.pointerEvents = new AbortController();
+        const listen = (target, type, handler, capture = false) =>
+            target.addEventListener(type, handler, { capture, signal: this.pointerEvents.signal });
+        const movedPointer = (event, start) => Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) > 5;
+
+        const clearHover = () => {
+            this.hoverPointer = null;
+            delete canvas.dataset.exhibitHover;
+        };
+        const queueHover = event => {
+            if (event.pointerType === 'touch') return;
+            this.hoverPointer = event;
+            if (this.hoverFrame) return;
+            this.hoverFrame = requestAnimationFrame(() => {
+                this.hoverFrame = 0;
+                const pointer = this.hoverPointer;
+                this.hoverPointer = null;
+                if (pointer && !canvas.dataset.cameraDragging && !this.transform.active &&
+                    (this.editing || !pointer.shiftKey) && this.pickExhibit(pointer)) canvas.dataset.exhibitHover = 'true';
+                else delete canvas.dataset.exhibitHover;
+            });
+        };
+        listen(canvas, 'pointerdown', e => {
             e.preventDefault();
             canvas.focus({ preventScroll: true });
             getSelection()?.removeAllRanges();
-            this.pointerId = e.pointerId;
-            this.down = [e.clientX, e.clientY];
-            this.orbitFromTop = navigationGesture(e.button, e.shiftKey, this.mode).leaveTop ? { button: e.button, shiftKey: e.shiftKey, clientX: e.clientX, clientY: e.clientY } : null;
+            const supportedButton = e.button >= 0 && e.button <= 2;
+            this.down = { id: e.pointerId, clientX: e.clientX, clientY: e.clientY, supportedButton,
+                orbitFromTop: supportedButton && navigationGesture(e.button, e.shiftKey, this.mode).leaveTop ? e : null };
         });
-        canvas.addEventListener('pointermove', e => {
-            if (!this.orbitFromTop || !e.buttons || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) <= 5) return;
-            const gesture = this.orbitFromTop;
-            this.orbitFromTop = null;
-            this.setView('perspective', true);
-            this.controls._onMouseDown(gesture);
-        }, true);
-        canvas.addEventListener('pointercancel', () => { this.down = null; this.orbitFromTop = null; });
-        canvas.addEventListener('pointerup', e => {
-            this.orbitFromTop = null;
-            if (e.button !== 0 || !this.editing && e.shiftKey || !this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5 || this.transform.active) return;
-            const r = canvas.getBoundingClientRect();
-            const pointer = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
-            const ray = new THREE.Raycaster();
-            ray.setFromCamera(pointer, this.camera);
-            const hits = ray.intersectObjects([...this.objects.values()], true);
-            for (const h of hits) {
-                let o = h.object;
-                while (o && !o.userData.exhibitId) o = o.parent;
-                if (o) {
-                    this.onSelect(o.userData.exhibitId, o.userData.instanceIndex ?? 0, e.shiftKey, this.editing);
-                    return;
+        listen(canvas, 'pointerenter', queueHover);
+        listen(canvas, 'pointerleave', clearHover);
+        listen(canvas, 'pointermove', e => {
+            const down = this.down;
+            if (down?.id === e.pointerId && e.buttons && (down.dragged || movedPointer(e, down))) {
+                down.dragged = true;
+                if (down.orbitFromTop) {
+                    const gesture = down.orbitFromTop;
+                    down.orbitFromTop = null;
+                    this.setView('perspective', true);
+                    this.down = down;
+                    this.controls._onMouseDown(gesture);
                 }
+                if (e.pointerType !== 'touch' && this.controls.enabled && down.supportedButton) {
+                    clearHover();
+                    canvas.dataset.cameraDragging = 'true';
+                }
+            } else if (!e.buttons) {
+                if (down?.id === e.pointerId) this.resetPointerDrag();
+                queueHover(e);
             }
-            this.onSelect(null, 0, e.shiftKey);
+        }, true);
+        listen(canvas, 'pointerup', e => {
+            const down = this.down;
+            if (down?.id !== e.pointerId) return;
+            this.resetPointerDrag();
+            if (e.button === 0 && (this.editing || !e.shiftKey) && !down.dragged && !movedPointer(e, down) && !this.transform.active) {
+                const exhibit = this.pickExhibit(e);
+                if (exhibit) this.onSelect(exhibit.exhibitId, exhibit.instanceIndex ?? 0, e.shiftKey, this.editing);
+                else this.onSelect(null, 0, e.shiftKey);
+            }
+            queueHover(e);
         });
-        this.resize();
-        return this;
+        listen(canvas, 'pointercancel', event => {
+            if (this.down?.id === event.pointerId) this.resetPointerDrag();
+            clearHover();
+        });
+        listen(canvas, 'lostpointercapture', event => {
+            if (this.down?.id === event.pointerId) this.resetPointerDrag();
+            if (!event.buttons) queueHover(event);
+        });
+        listen(canvas, 'wheel', queueHover);
+        listen(window, 'blur', () => { this.resetPointerDrag(); clearHover(); });
+    }
+    resetPointerDrag() {
+        this.down = null;
+        if (this.renderer) delete this.renderer.domElement.dataset.cameraDragging;
+    }
+    pickExhibit(event) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width;
+        const y = (event.clientY - rect.top) / rect.height;
+        if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return null;
+        this.camera.updateMatrixWorld();
+        this.exhibitRay.setFromCamera(this.pointerPosition.set(x * 2 - 1, 1 - y * 2), this.camera);
+        for (const hit of this.exhibitRay.intersectObjects([...this.objects.values()], true)) {
+            let object = hit.object;
+            while (object && !object.userData.exhibitId) object = object.parent;
+            if (object) return object.userData;
+        }
+        return null;
     }
     resize() {
         if (!this.renderer) return;
@@ -441,10 +503,14 @@ export class MapView {
     }
     cancelTransform() {
         const cancelled = this.transform?.cancel?.() || false;
-        this.down = null; this.orbitFromTop = null;
+        this.resetPointerDrag();
         return cancelled;
     }
-    beginTransform(mode) { cancelAnimationFrame(this.cameraFrame); return this.transform?.begin(mode) || false; }
+    beginTransform(mode) {
+        cancelAnimationFrame(this.cameraFrame);
+        this.resetPointerDrag();
+        return this.transform?.begin(mode) || false;
+    }
     transformKey(event) { return this.transform?.key(event) || false; }
     exhibitPlacement(id) {
         const group = this.objects.get(id);
@@ -884,6 +950,8 @@ export class MapView {
         this.generation++;
         cancelAnimationFrame(this.frame);
         cancelAnimationFrame(this.cameraFrame);
+        cancelAnimationFrame(this.hoverFrame);
+        this.pointerEvents?.abort();
         this.observer?.disconnect();
         this.controls?.dispose();
         this.transform?.dispose();

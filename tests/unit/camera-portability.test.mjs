@@ -247,7 +247,10 @@ test('Focus uses the selected components or exhibits together and preserves auth
         view.hardwareSelection = []; view.focus();
         assert.deepEqual(view.focusObjects(), [parent, otherParent]);
         assert.ok(view.controls.target.x > 50, 'whole-exhibit selection includes its distant hardware');
-        view.editing = false; view.selected = 'box'; view.focus();
+        view.editing = false;
+        view.selection.add('on-another-floor');
+        assert.deepEqual(view.focusObjects(), [parent, otherParent], 'browse-mode focus includes the selected exhibits on this floor');
+        view.selection = new Set(['box']); view.selected = 'box'; view.focus();
         vectorNear(view.camera.position.toArray(), preset.position, 1e-8, 'authored preset takes priority');
         parent.remove(unselected);
         view.editing = true; view.selection = new Set(['box']); view.hardwareSelection = [{ exhibitId: 'box', instanceIndex: 0 }];
@@ -295,7 +298,7 @@ test('Focus fits the clear map rectangle between floating panels and controls in
     ]) for (const mode of ['perspective', 'top']) {
         const view = makeView([10, 7, 3], [10, 1, -5], layout.canvas.width / layout.canvas.height);
         view.viewportBounds = () => clearViewport(layout.canvas, layout.overlays);
-        view.selected = 'box'; view.data = { exhibits: [{ id: 'box', views: {} }] };
+        view.selection = new Set(['box']); view.data = { exhibits: [{ id: 'box', views: {} }] };
         view.setView(mode); view.focus();
         const bounds = view.viewportBounds();
         assert.ok(bounds.right > bounds.left && bounds.top > bounds.bottom);
@@ -325,7 +328,7 @@ test('focus framing uses the settled panel layout while its entry spring is stil
         const bounds = view.viewportBounds();
         near(bounds.left, 307 / 1600 * 2 - 1);
         near(bounds.right, 1222 / 1600 * 2 - 1);
-        view.selected = 'box'; view.data = { exhibits: [{ id: 'box' }] };
+        view.selection = new Set(['box']); view.data = { exhibits: [{ id: 'box' }] };
         view.focus(); framed(view);
         const stack = { ...inspector, id: 'inspector-stack', offsetLeft: 1210, offsetWidth: 390, getAttribute: () => 'true' };
         workspace.querySelectorAll = () => [sidebar, inspector, stack];

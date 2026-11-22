@@ -167,7 +167,7 @@ export class MapView {
                 const pointer = this.hoverPointer;
                 this.hoverPointer = null;
                 if (pointer && !canvas.dataset.cameraDragging && !this.transform.active &&
-                    (this.editing || !pointer.shiftKey) && this.pickExhibit(pointer)) canvas.dataset.exhibitHover = 'true';
+                    this.pickExhibit(pointer)) canvas.dataset.exhibitHover = 'true';
                 else delete canvas.dataset.exhibitHover;
             });
         };
@@ -205,7 +205,7 @@ export class MapView {
             const down = this.down;
             if (down?.id !== e.pointerId) return;
             this.resetPointerDrag();
-            if (e.button === 0 && (this.editing || !e.shiftKey) && !down.dragged && !movedPointer(e, down) && !this.transform.active) {
+            if (e.button === 0 && !down.dragged && !movedPointer(e, down) && !this.transform.active) {
                 const exhibit = this.pickExhibit(e);
                 if (exhibit) this.onSelect(exhibit.exhibitId, exhibit.instanceIndex ?? 0, e.shiftKey, this.editing);
                 else this.onSelect(null, 0, e.shiftKey);
@@ -848,12 +848,11 @@ export class MapView {
     }
     focusObjects() {
         if (this.editing) return this.transformEntries().map(entry => entry.object);
-        const object = this.objects.get(this.selected);
-        return object ? [object] : [];
+        return [...this.selection].map(id => this.objects.get(id)).filter(Boolean);
     }
     focus(onlyWhenHidden = false) {
         const objects = this.focusObjects();
-        if (!objects.length || (onlyWhenHidden && objects.length === 1 && this.isVisible(this.selected))) return;
+        if (!objects.length || (onlyWhenHidden && objects.every(object => this.isVisible(object.userData.exhibitId)))) return;
         this.cancelTransform();
         const exhibit = this.data?.exhibits.find(record => {
             const group = this.objects.get(record.id);

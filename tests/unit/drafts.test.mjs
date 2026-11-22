@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { editSnapshot, restoreEditSnapshot } from '../../frontend/js/drafts.js';
+import { batchDraftKey, draftRecipients, editSnapshot, restoreEditSnapshot } from '../../frontend/js/drafts.js';
 
 function fixture() {
     return {
@@ -11,6 +11,18 @@ function fixture() {
             notes: [{ id: 'old-note' }], links: [{ id: 'old-link' }], revision: 'base-revision' }]
     };
 }
+
+test('batch draft keys preserve the same recipients across selection order and renames', () => {
+    const alpha = 'Alpha, Nord';
+    const beta = 'Béta';
+    const key = batchDraftKey(new Set([beta, alpha]));
+    assert.equal(key, batchDraftKey([alpha, beta]));
+    assert.deepEqual(draftRecipients(key), [alpha, beta]);
+    assert.deepEqual(draftRecipients(alpha), [alpha]);
+    const renamed = batchDraftKey(draftRecipients(key).map(id => id === beta ? 'East' : id));
+    assert.deepEqual(draftRecipients(renamed), [alpha, 'East']);
+    assert.deepEqual(draftRecipients(':malformed'), []);
+});
 
 test('persisted edit snapshots omit read-only collections and content while keeping edit state', () => {
     const input = fixture();

@@ -67,6 +67,8 @@ The [content format reference](backend/content-format.md) covers JSON fields and
 | **Posts** | Write formatted maintenance notes and attach photos by choosing, pasting, or dropping files. Publish with a name and optionally update the exhibit's status with the post. Edits record the latest editor. Deleting a post leaves an attribution marker and keeps its photos on disk. |
 | **Documentation** | Open, copy, add, edit, or remove links. The tab adds a search field when an exhibit has more than six links. Each link has a title, destination, and optional description. Destinations can include websites, network or local files, and applications, depending on the browser and device. |
 
+Shift-click list entries or map models to select several exhibits. You can also turn on **Select** and tap exhibits individually. On a narrow screen, tap the selection count to open the inspector. **Posts** shows every selected exhibit's posts newest first, and **Documentation** lists their links alphabetically. Each item shows its source exhibit. Use **Post to all** or **Add to all** to add the same item to every selected exhibit. A batch draft reopens when you select the same exhibits again.
+
 ### Edit exhibits and placement
 
 1. Open **Edit mode** from the exhibit list's options menu. Use the list to create, rename, duplicate, or delete an exhibit. Duplicating copies its hardware placement and saved views. Posts, photos, and links stay with the original.

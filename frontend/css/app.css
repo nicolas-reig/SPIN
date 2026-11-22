@@ -707,6 +707,15 @@ summary {
     width: 100%;
     height: 100%;
     touch-action: none;
+    cursor: grab;
+}
+
+#map-canvas canvas[data-exhibit-hover] {
+    cursor: pointer;
+}
+
+#map-canvas canvas[data-camera-dragging] {
+    cursor: grabbing !important;
 }
 
 #map-canvas canvas:focus-visible {

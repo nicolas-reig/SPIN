@@ -119,6 +119,71 @@ function geometryMemory(object) {
     return { geometries: geometries.size, buffers: buffers.size, bytes: [...buffers].reduce((sum, buffer) => sum + buffer.byteLength, 0) };
 }
 
+test('viewport hover and clicks agree, while camera drags retain priority through release or cancellation', t => {
+    const previousFrame = globalThis.requestAnimationFrame;
+    const previousSelection = globalThis.getSelection;
+    let frame;
+    globalThis.requestAnimationFrame = callback => { frame = callback; return 1; };
+    globalThis.getSelection = () => null;
+    t.after(() => {
+        globalThis.requestAnimationFrame = previousFrame;
+        globalThis.getSelection = previousSelection;
+    });
+    const { view } = makeView();
+    const canvas = Object.assign(new EventTarget(), {
+        dataset: {}, focus() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 })
+    });
+    view.renderer = { domElement: canvas };
+    view.controls = { enabled: true };
+    view.transform = { active: false };
+    view.camera.position.set(0, 0, 10);
+    view.camera.lookAt(0, 0, 0);
+    const group = new THREE.Group();
+    const component = new THREE.Group();
+    component.userData = { exhibitId: 'nested exhibit', instanceIndex: 2 };
+    component.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), view.materials.ok));
+    group.add(component);
+    group.updateMatrixWorld(true);
+    view.objects.set('nested exhibit', group);
+    const picks = [];
+    view.onSelect = (...selection) => picks.push(selection);
+    view.bindPointerEvents(canvas);
+    t.after(() => { view.pointerEvents.abort(); view.stopColorUpdates(); });
+
+    const pointer = (type, changes = {}) => canvas.dispatchEvent(Object.assign(new Event(type), {
+        pointerId: 1, pointerType: 'mouse', button: 0, buttons: 0, clientX: 50, clientY: 50, ...changes
+    }));
+    const render = () => { const next = frame; frame = null; next?.(); };
+    pointer('pointerenter');
+    pointer('pointermove', { clientX: 0 });
+    render();
+    assert.equal(canvas.dataset.exhibitHover, undefined, 'only the latest hover is picked within a frame');
+    pointer('pointermove');
+    render();
+    assert.equal(canvas.dataset.exhibitHover, 'true');
+
+    pointer('pointerdown', { buttons: 1 });
+    pointer('pointermove', { buttons: 1, clientX: 70 });
+    assert.equal(canvas.dataset.cameraDragging, 'true');
+    assert.equal(canvas.dataset.exhibitHover, undefined);
+    pointer('pointermove', { buttons: 1 });
+    pointer('pointerup');
+    render();
+    assert.equal(canvas.dataset.cameraDragging, undefined);
+    assert.equal(canvas.dataset.exhibitHover, 'true');
+    assert.deepEqual(picks, [], 'returning to the press point after a drag is still a drag');
+
+    pointer('pointerdown', { buttons: 1 });
+    pointer('pointerup');
+    assert.deepEqual(picks[0]?.slice(0, 2), ['nested exhibit', 2]);
+    pointer('pointerdown', { buttons: 2, button: 2 });
+    pointer('pointermove', { buttons: 2, clientX: 70 });
+    assert.equal(canvas.dataset.cameraDragging, 'true');
+    pointer('pointercancel');
+    render();
+    assert.deepEqual(canvas.dataset, {});
+});
+
 test('actual setData loads and smooths a repeated unskinned asset once, with separate object transforms and materials', async () => {
     const { view, calls, records } = makeView();
     const data = dataset();

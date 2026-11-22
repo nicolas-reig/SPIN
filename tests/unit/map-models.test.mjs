@@ -176,6 +176,13 @@ test('viewport hover and clicks agree, while camera drags retain priority throug
     pointer('pointerdown', { buttons: 1 });
     pointer('pointerup');
     assert.deepEqual(picks[0]?.slice(0, 2), ['nested exhibit', 2]);
+    view.editing = false;
+    pointer('pointermove', { shiftKey: true });
+    render();
+    assert.equal(canvas.dataset.exhibitHover, 'true', 'PR 10 Shift-click remains clickable in service mode');
+    pointer('pointerdown', { buttons: 1, shiftKey: true });
+    pointer('pointerup', { shiftKey: true });
+    assert.deepEqual(picks[1], ['nested exhibit', 2, true, false]);
     pointer('pointerdown', { buttons: 2, button: 2 });
     pointer('pointermove', { buttons: 2, clientX: 70 });
     assert.equal(canvas.dataset.cameraDragging, 'true');

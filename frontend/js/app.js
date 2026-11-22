@@ -368,7 +368,7 @@ function displayName(record) {
 }
 
 function exhibitTag(record) {
-    return `<span class="exhibit-tag">${esc(displayName(record))}</span>`;
+    return `<span class="exhibit-tag">${adaptiveExhibitName(displayName(record))}</span>`;
 }
 
 function selectionHeader(records, title, action = '') {

@@ -51,6 +51,10 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
         pending = { input, x: event.clientX, lastX: event.clientX, delta: 0,
             pointerId: event.pointerId, mouse: event.pointerType === 'mouse', started: false };
     });
+    // The mouse press starts native input text selection before the drag threshold.
+    listen(root, 'mousedown', event => {
+        if (pending?.mouse && event.button === 0 && event.target === pending.input) event.preventDefault();
+    });
     const scrub = (drag, event, pixels) => {
         event.preventDefault(); getSelection()?.removeAllRanges();
         const step = { position: .01, rotation: .5, scale: .01 }[drag.input.dataset.vector];
@@ -96,7 +100,13 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
     });
     // Suppress the click produced at the end of a scrub, retaining normal clicks.
     root.addEventListener('click', event => {
-        if (suppressClick) { event.preventDefault(); event.stopImmediatePropagation(); }
+        if (suppressClick) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+        }
+        const input = event.target.closest('input[data-vector]');
+        if (event.detail > 0 && input && !input.disabled && !input.readOnly) input.focus();
     }, { capture: true, signal: abort.signal });
     const dispose = () => { finish(false); abort.abort(); fills.disconnect(); };
     dispose.cancel = () => finish(false);

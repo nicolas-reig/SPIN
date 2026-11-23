@@ -23,6 +23,7 @@ class Input {
     hasAttribute() { return this.relative; }
     closest(selector) { return selector === '.axis-value' ? this.field : selector === 'input[data-vector]' ? this : null; }
     matches(selector) { return selector === ':focus' ? this.focused : selector === 'input[data-vector]'; }
+    focus() { this.focused = true; }
     blur() { this.focused = false; this.onBlur?.(); }
     setPointerCapture(id) { this.captured.add(id); }
     hasPointerCapture(id) { return this.captured.has(id); }
@@ -167,5 +168,18 @@ test('a lock granted after the slider finishes releases immediately', () => {
     document.pointerLockElement = f.root;
     document.emit('pointerlockchange');
     assert.equal(document.pointerLockElement, null);
+    f.dispose();
+});
+
+test('mouse press blocks native text selection and a plain click still focuses the field', () => {
+    const f = setup({});
+    let prevented = false;
+    f.pointer('pointerdown', 0, { pointerType: 'mouse' });
+    f.root.emit('mousedown', { target: f.input, button: 0, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(f.input.focused, false);
+    f.pointer('pointerup');
+    f.root.emit('click', { target: f.input, detail: 1 });
+    assert.equal(f.input.focused, true);
     f.dispose();
 });

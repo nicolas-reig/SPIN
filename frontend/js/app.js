@@ -933,7 +933,7 @@ function renderInspectorContent() {
 }
 
 function closeStatusPicker(returnFocus = false) {
-    const picker = $('.status-picker');
+    const picker = $('#inspector .status-picker');
     if (!picker) return;
     picker.classList.remove('open');
     picker.querySelector('.status-toggle').setAttribute('aria-expanded', 'false');
@@ -943,7 +943,8 @@ function closeStatusPicker(returnFocus = false) {
 }
 
 function bindStatusPicker() {
-    const picker = $('.status-picker');
+    // The outgoing inspector can contain an inert copy of this picker.
+    const picker = $('#inspector .status-picker');
     const toggle = picker.querySelector('.status-toggle');
     const menu = picker.querySelector('.status-menu');
     const choices = [...menu.querySelectorAll('button')];
@@ -1643,7 +1644,7 @@ async function changeStatus(chosenStatus) {
     const record = exhibit();
     if (!record || edit || statusSaving || chosenStatus === record.status) return;
     statusSaving = true;
-    const toggle = $('.status-toggle');
+    const toggle = $('#inspector .status-toggle');
     const restoreFocus = document.activeElement === toggle;
     if (toggle) {
         toggle.disabled = true;
@@ -1668,7 +1669,7 @@ async function changeStatus(chosenStatus) {
         } else announce(errorText(error));
     } finally {
         statusSaving = false;
-        const currentToggle = $('.status-toggle');
+        const currentToggle = $('#inspector .status-toggle');
         if (currentToggle) {
             currentToggle.disabled = false;
             currentToggle.setAttribute('aria-busy', 'false');

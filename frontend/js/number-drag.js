@@ -71,7 +71,7 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
             if (start(drag) === false) { pending = null; return; }
             drag.input.setPointerCapture(event.pointerId);
             document.body.classList.add('dragging-number');
-            if (drag.mouse) drag.lock = startInfiniteDrag(root, { x: event.clientX, y: event.clientY }, () => finish(false), true);
+            if (drag.mouse) drag.lock = startInfiniteDrag(root, { x: event.clientX, y: event.clientY }, () => finish(false));
         }
         drag.lock?.sync({ x: event.clientX, y: event.clientY });
         const pixels = event.clientX - drag.lastX;

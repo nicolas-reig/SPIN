@@ -1,7 +1,7 @@
 let owner = null;
 const wrap = (value, span) => ((value % span) + span) % span;
 
-export function startInfiniteDrag(target, initial, onLost, slider = false) {
+export function startInfiniteDrag(target, initial, onLost) {
     if (owner || document.pointerLockElement || !target.requestPointerLock || !document.exitPointerLock) return null;
     const events = new AbortController();
     let { x, y } = initial;
@@ -40,7 +40,7 @@ export function startInfiniteDrag(target, initial, onLost, slider = false) {
         if (stopped) { document.exitPointerLock(); return; }
         if (!cursor) {
             cursor = document.createElement('div');
-            cursor.className = slider ? 'wrapped-drag-cursor wrapped-drag-slider' : 'wrapped-drag-cursor';
+            cursor.className = 'wrapped-drag-cursor';
             cursor.setAttribute('aria-hidden', 'true');
             document.body.append(cursor);
         }

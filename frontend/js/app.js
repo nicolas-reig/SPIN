@@ -1483,6 +1483,7 @@ async function joinSelection(target = selected) {
         const joined = joinExhibits(records, target);
         joined.joinedFrom = joined.joinedFrom.filter(id => session.base.exhibits.some(record => record.id === id));
         if (!joined.joinedFrom.length) delete joined.joinedFrom;
+        if (!await preparePlacement(joined) || generation !== joinGeneration || primary !== selected) return;
         map?.cancelTransform();
         selected = target;
         hardwareSelection = [];
@@ -1783,7 +1784,16 @@ function validEditorFields() {
     return false;
 }
 
-function applyEditorField(input) {
+async function preparePlacement(record, instanceIndex) {
+    const session = edit, value = session.value;
+    if (record.floorId && record.models.length) {
+        const { MapView } = await import('./map.js');
+        await MapView.groundPlacement(value, record, instanceIndex);
+    }
+    return edit === session && edit.value === value && !editSave?.saving;
+}
+
+async function applyEditorField(input) {
     if (!edit || editSave?.saving) return;
     const record = data().exhibits.find(record => record.id === (input.dataset.exhibit || selected));
     if (!record) return;
@@ -1830,29 +1840,61 @@ function applyEditorField(input) {
         map?.cancelTransform();
         const value = transformNumber(Number(input.value));
         input.value = value;
-        const changes = fieldTargets(input).map(entry => {
-            const transform = structuredClone(entry.transform);
-            transform[input.dataset.vector][Number(input.dataset.axis)] = value;
-            return { ...entry, transform };
-        });
-        if (changes.some(entry => !validTransform(entry.transform))) { structureError('invalidTransform', input); return; }
-        commitTransforms(changes);
-        if ($('#structure-error')) $('#structure-error').hidden = true;
+        const [entry] = fieldTargets(input);
+        const key = input.dataset.vector, axis = Number(input.dataset.axis);
+        if (!entry || value === entry.transform[key][axis]) return;
+        const transform = structuredClone(entry.transform);
+        transform[key][axis] = value;
+        try {
+            if (!validTransform(transform)) throw Error('invalidTransform');
+            let change = { ...entry, transform };
+            if (map?.floor?.id === record.floorId && map.key === map.installedKey) {
+                [change] = map.previewTransforms([change], { grounded: true });
+            } else {
+                const next = structuredClone(record);
+                next.models[entry.instanceIndex].transform = transform;
+                if (!await preparePlacement(next, entry.instanceIndex)) return;
+                change.transform = next.models[entry.instanceIndex].transform;
+            }
+            input.value = transformNumber(change.transform[key][axis]);
+            commitTransforms([change]);
+            if ($('#structure-error')) $('#structure-error').hidden = true;
+        } catch (error) { structureError(error.message, input); }
         return;
     }
     if ($('#structure-error')) $('#structure-error').hidden = true;
-    const reset = input.id === 'ex-floor' && Boolean(input.value) && input.value !== floorId;
-    const previousFloor = floorId;
+    const index = input.dataset.instanceModel === undefined ? undefined : Number(input.dataset.instanceModel);
+    const isFloor = input.id === 'ex-floor';
+    if (!isFloor && !record.models[index]) return;
+    const previous = isFloor ? record.floorId || '' : record.models[index].model;
+    if (input.value === previous) return;
+    const next = structuredClone(record);
+    const syncSelect = value => {
+        input.value = value;
+        input.dispatchEvent(new Event('change'));
+    };
     try {
-        if (reset) floorId = input.value;
+        if (isFloor) {
+            if (next.models.length && !input.value) throw Error('invalidFloor');
+            next.floorId = input.value || null;
+        } else next.models[index].model = input.value;
+        if (!await preparePlacement(next, index)) {
+            const current = data()?.exhibits.find(item => item.id === record.id);
+            syncSelect((isFloor ? current?.floorId : current?.models[index]?.model) || previous);
+            return;
+        }
+        const reset = isFloor && selected === record.id && Boolean(next.floorId) && next.floorId !== floorId;
+        if (reset) floorId = next.floorId;
         applyEdit(state => {
             const target = state.exhibits.find(item => item.id === record.id);
-            if (input.id === 'ex-floor') {
-                if (target.models.length && !input.value) throw Error('invalidFloor');
-                target.floorId = input.value || null;
-            } else if (input.dataset.instanceModel !== undefined) target.models[Number(input.dataset.instanceModel)].model = input.value;
+            if (isFloor) { target.floorId = next.floorId; target.transform = next.transform; }
+            else target.models[index] = next.models[index];
         }, { reset });
-    } catch (error) { floorId = previousFloor; structureError(error.key || error.message, input); }
+        updateTransformFields();
+    } catch (error) {
+        syncSelect(previous);
+        structureError(error.message, input);
+    }
 }
 
 function updateTransformFields(preview = null, { groupsOnly = false } = {}) {
@@ -1892,7 +1934,12 @@ numberDrag = installNumberDrag($('#inspector'), {
                 return true;
             } catch (error) { structureError(error.message, drag.input); return false; }
         }
+        if (!map || map.key !== map.installedKey) {
+            structureError(map ? 'mapLoading' : 'mapUnavailable', drag.input);
+            return false;
+        }
         drag.entries = fieldTargets(drag.input).map(entry => ({ ...entry, transform: structuredClone(entry.transform) }));
+        drag.groundCache = new WeakMap();
         return drag.entries.length > 0;
     },
     preview(drag, event) {
@@ -1937,17 +1984,31 @@ numberDrag = installNumberDrag($('#inspector'), {
             }
             return;
         }
-        drag.changes = drag.entries.map(entry => {
+        const changes = drag.entries.map(entry => {
             const transform = structuredClone(entry.transform);
             let value = entry.transform[key][axis] + drag.delta;
             if (snap || event.ctrlKey) value = Math.round(value / step) * step;
             transform[key][axis] = Math.max(-limit, Math.min(limit, value));
             return { ...entry, transform };
         });
-        map?.previewTransforms(drag.changes); updateTransformFields(drag.changes);
+        try {
+            drag.changes = map.previewTransforms(changes, { grounded: true, cache: drag.groundCache });
+            drag.error = null;
+            if ($('#structure-error')) $('#structure-error').hidden = true;
+            updateTransformFields(drag.changes);
+        } catch (error) {
+            drag.error = error.message;
+            drag.changes = null;
+            map.previewTransforms(drag.entries);
+            updateTransformFields();
+        }
     },
     commit(drag) {
-        if (drag.error) { map.restoreSelectionField(drag.selectionPreview || drag.exhibitPreview); structureError(drag.error, drag.input); }
+        if (drag.error) {
+            const preview = drag.selectionPreview || drag.exhibitPreview;
+            if (preview) map.restoreSelectionField(preview);
+            structureError(drag.error, drag.input);
+        }
         else if (drag.changes) commitTransforms(drag.changes);
         updateTransformFields();
     },
@@ -2071,10 +2132,18 @@ function addHardware(model) {
     const transform = identity();
     const previous = record.models[activeInstance];
     transform.position = previous ? [previous.transform.position[0] + 1.5, previous.transform.position[1], previous.transform.position[2]] : map?.placementPosition(record.transform) || [0, 0, 0];
-    activeInstance = record.models.length;
-    hardwareSelection = [{ exhibitId: record.id, instanceIndex: activeInstance }];
-    gizmo = 'combined';
-    applyEdit(state => state.exhibits.find(item => item.id === record.id).models.push({ model, transform }), { rebuild: true });
+    return appendHardware(record, { model, transform }, 'combined');
+}
+
+async function appendHardware(record, instance, tool = gizmo) {
+    const index = record.models.length;
+    const next = { ...record, models: [...record.models, instance] };
+    if (!await preparePlacement(next, index) || selected !== record.id) return;
+    map?.cancelTransform();
+    activeInstance = index;
+    hardwareSelection = [{ exhibitId: record.id, instanceIndex: index }];
+    gizmo = tool;
+    applyEdit(state => state.exhibits.find(item => item.id === record.id).models.push(instance), { rebuild: true });
 }
 
 function removeHardware(index) {
@@ -2098,9 +2167,7 @@ function duplicateHardware(index) {
     map?.cancelTransform();
     const copy = structuredClone(record.models[index]);
     copy.transform.position[0] += 1.5;
-    activeInstance = record.models.length;
-    hardwareSelection = [{ exhibitId: record.id, instanceIndex: activeInstance }];
-    applyEdit(state => state.exhibits.find(item => item.id === record.id).models.push(copy), { rebuild: true });
+    return appendHardware(record, copy);
 }
 
 function cancelEdit() {
@@ -2229,6 +2296,7 @@ async function confirmEditSave() {
     if (creation || !validEditorFields()) return;
     if (pendingJoinDrafts()) { announce(t('joinHasDrafts')); return; }
     map?.cancelTransform();
+    numberDrag?.cancel();
     const session = edit, save = editSave, changes = session.changes(), signature = save.signature.trim();
     save.controller = new AbortController();
     save.saving = true;
@@ -2450,12 +2518,15 @@ function recoverEdit() {
     announce(t('editsRestored'));
 }
 
-function duplicateSelected(id = selected, origin = 'other') {
+async function duplicateSelected(id = selected, origin = 'other') {
     if (!edit || editSave?.saving) return;
     const record = data().exhibits.find(item => item.id === id);
     if (!record) return;
     map?.cancelTransform();
     const copy = duplicateExhibit(record, data().exhibits);
+    const primary = selected;
+    if (!await preparePlacement(copy) || selected !== primary) return;
+    map?.cancelTransform();
     selected = copy.id;
     hardwareSelection = [];
     editSelection = new Set([copy.id]);
@@ -2628,15 +2699,15 @@ document.addEventListener('click', async event => {
             return;
         }
         if (element.dataset.tool) { setEditTool(element.dataset.tool); return; }
-        if (element.dataset.duplicateExhibit) { duplicateSelected(element.dataset.duplicateExhibit, origin); return; }
-        if (element.dataset.addHardware) { addHardware(element.dataset.addHardware); return; }
+        if (element.dataset.duplicateExhibit) { await duplicateSelected(element.dataset.duplicateExhibit, origin); return; }
+        if (element.dataset.addHardware) { await addHardware(element.dataset.addHardware); return; }
         if (element.hasAttribute('data-select-parent-exhibits')) { selectParentExhibits([...new Set(hardwareSelection.map(entry => entry.exhibitId))]); return; }
         if (element.dataset.selectParent) { selectParentExhibits([element.dataset.selectParent]); return; }
         if (element.dataset.editInstance !== undefined) {
             select(element.dataset.exhibit || selected, Number(element.dataset.editInstance), event.shiftKey, true); return;
         }
         if (element.dataset.removeInstance !== undefined) { removeHardware(Number(element.dataset.removeInstance)); return; }
-        if (element.dataset.duplicateInstance !== undefined) { duplicateHardware(Number(element.dataset.duplicateInstance)); return; }
+        if (element.dataset.duplicateInstance !== undefined) { await duplicateHardware(Number(element.dataset.duplicateInstance)); return; }
         if (element.dataset.format) {
             if (element.dataset.format === 'link') noteLinkDialog();
             else noteEditor?.command(element.dataset.format);
@@ -2651,13 +2722,17 @@ document.addEventListener('click', async event => {
     }
 });
 
-document.addEventListener('keydown', event => {
+document.addEventListener('keydown', async event => {
     if ($('#dialog').open || event.defaultPrevented) return;
     const typing = event.target.closest('input, textarea, [contenteditable]');
     if (edit && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         if (editSave?.saving) return;
-        if (event.target.matches('#structure-form input')) applyEditorField(event.target);
+        if (event.target.matches('#structure-form input')) {
+            const session = edit;
+            await applyEditorField(event.target);
+            if (edit !== session) return;
+        }
         editSave?.signing ? confirmEditSave() : saveExit();
         return;
     }
@@ -2668,7 +2743,7 @@ document.addEventListener('keydown', event => {
             const value = input.hasAttribute('data-selection-delta') ? input.dataset.vector === 'scale' ? 1 : 0 : inspectorFieldTransform(input)?.[input.dataset.vector][Number(input.dataset.axis)];
             input.value = value == null ? '' : transformNumber(value);
         } else {
-            applyEditorField(input);
+            await applyEditorField(input);
             if (!input.checkValidity() || !input.value.trim()) return;
         }
         input.blur();

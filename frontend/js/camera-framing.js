@@ -53,6 +53,22 @@ export function aimCamera(camera, target) {
     camera.up.copy(up);
 }
 
+export function limitCameraHeight(position, target, top = false) {
+    if (position.y >= 0) return false;
+    const distance = position.distanceTo(target);
+    if (top) {
+        position.set(target.x, Math.max(0, target.y + distance), target.z);
+    } else {
+        const x = position.x - target.x, z = position.z - target.z;
+        const horizontal = Math.hypot(x, z);
+        // Stop on the same orbit at ground level when it intersects the plane.
+        const run = Math.sqrt(Math.max(0, (distance - Math.abs(target.y)) * (distance + Math.abs(target.y))));
+        position.set(target.x + (horizontal ? x / horizontal * run : 0), 0,
+            target.z + (horizontal ? z / horizontal * run : run));
+    }
+    return true;
+}
+
 // Solve the perspective inequalities at every corner rather than assuming the
 // horizontal footprint also describes a model's height or its projected width.
 export function frameBounds(box, direction, aspect, { distance = 0, span = 0, perspective = true, horizontal = .94, vertical = .94 } = {}) {
@@ -83,6 +99,7 @@ export function frameBounds(box, direction, aspect, { distance = 0, span = 0, pe
         requiredDistance = Math.max(requiredDistance, depth + (perspective ? Math.max(width, height) / halfFov : 0));
     }
     distance = Math.max(distance, requiredDistance + margin);
+    if (center.y < 0 && backward.y > 0) distance = Math.max(distance, -center.y / backward.y);
     span = Math.max(span, requiredSpan * (1 + 1e-6), margin);
     return { target: center.toArray(), position: center.clone().addScaledVector(backward, distance).toArray(), span };
 }

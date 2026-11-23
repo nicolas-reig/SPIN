@@ -1,8 +1,83 @@
-import { Box3, Euler, Matrix4, Quaternion, Vector3, MathUtils } from 'three';
-import { validTransform, normalizeTransform } from './domain.js';
+import { Box3, Euler, Matrix3, Matrix4, Quaternion, Vector3, MathUtils } from 'three';
+import { coordinateNumber, coordinateVector, validTransform, normalizeTransform } from './domain.js';
 
 export const transformKey = ({ exhibitId, instanceIndex }) => JSON.stringify([exhibitId, instanceIndex ?? null]);
 export const axisVector = axis => new Vector3(...({ X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[axis]));
+
+export function applyTransform(object, transform) {
+    object.position.fromArray(transform.position);
+    object.rotation.set(...transform.rotation.map(MathUtils.degToRad));
+    object.scale.fromArray(transform.scale);
+}
+
+const groundTolerance = 1e-9;
+
+function minimumPlacementY(object, cache) {
+    object.updateWorldMatrix(true, false);
+    const matrix = object.matrixWorld.elements;
+    const x = matrix[1], y = matrix[5], z = matrix[9], height = matrix[13];
+    const previous = cache?.get(object);
+    if (previous && previous.x === x && previous.y === y && previous.z === z) {
+        const minimum = previous.minimum + (height - previous.height);
+        if (previous.precise || minimum >= -groundTolerance) return minimum;
+    }
+    const box = new Box3().setFromObject(object);
+    if (box.isEmpty()) return height;
+    const precise = box.min.y < -groundTolerance;
+    if (precise) box.setFromObject(object, true);
+    cache?.set(object, { x, y, z, height, minimum: box.min.y, precise });
+    return box.min.y;
+}
+
+export const belowGround = object => minimumPlacementY(object) < -groundTolerance;
+
+function liftPosition(object, position, lift) {
+    const parent = object.parent?.matrixWorld || new Matrix4();
+    const worldY = [1, 5, 9].map(index => parent.elements[index]);
+    const strongest = worldY.reduce((axis, value, index) => Math.abs(value) > Math.abs(worldY[axis]) ? index : axis, 0);
+    const heightPerUnit = worldY[strongest];
+    if (!heightPerUnit) throw Error('transformCollapsedParent');
+    // A collapsed parent can still move a component along a surviving local axis.
+    const up = parent.determinant() === 0 ? new Vector3().setComponent(strongest, 1 / heightPerUnit) :
+        new Vector3(0, 1, 0).applyMatrix3(new Matrix3().setFromMatrix4(parent.clone().invert()));
+    const next = coordinateVector(new Vector3(...position).addScaledVector(up, lift).toArray());
+    const gained = worldY.reduce((height, value, axis) => height + value * (next[axis] - position[axis]), 0);
+    // A saved position has six decimals. Round toward the ground's safe side if needed.
+    if (gained < lift - groundTolerance) {
+        const units = Math.ceil((lift - gained) * 1e6 / Math.abs(heightPerUnit));
+        next[strongest] = coordinateNumber(next[strongest] + Math.sign(heightPerUnit) * units / 1e6);
+    }
+    return next;
+}
+
+export function applyGroundedTransforms(entries, transforms, cache) {
+    const next = transforms.map(normalizeTransform);
+    if (next.some(transform => !validTransform(transform))) throw Error('invalidTransform');
+    const previous = entries.map(({ object }) => [object.position.clone(), object.rotation.clone(), object.scale.clone()]);
+    try {
+        entries.forEach(({ object }, index) => applyTransform(object, next[index]));
+        const lift = -Math.min(...entries.map(({ object }) => minimumPlacementY(object, cache)));
+        if (lift > groundTolerance) entries.forEach(({ object }, index) => {
+            const transform = next[index];
+            transform.position = liftPosition(object, transform.position, lift);
+            if (!validTransform(transform)) throw Error('invalidTransform');
+            object.position.fromArray(transform.position);
+        });
+    } catch (error) {
+        entries.forEach(({ object }, index) => {
+            const [position, rotation, scale] = previous[index];
+            object.position.copy(position);
+            object.rotation.copy(rotation);
+            object.scale.copy(scale);
+            object.updateMatrixWorld(true);
+        });
+        throw error;
+    }
+    return entries.map(({ exhibitId, instanceIndex, object }, index) => {
+        object.updateMatrixWorld(true);
+        return { exhibitId, instanceIndex, transform: next[index] };
+    });
+}
 
 export function geometryCenter(object) {
     object.updateWorldMatrix(true, true);
@@ -92,7 +167,8 @@ export function decomposeTransform(matrix, reference = new Quaternion(), retainO
 }
 
 export class TransformTransaction {
-    constructor(entries) {
+    constructor(entries, { grounded = false } = {}) {
+        this.groundCache = grounded ? new WeakMap() : null;
         this.entries = entries.map(entry => {
             const { object } = entry;
             object.updateWorldMatrix(true, true);
@@ -116,6 +192,7 @@ export class TransformTransaction {
             }
             return decomposeTransform(entry.inverse.clone().multiply(delta).multiply(entry.world), reference, Boolean(rotation));
         });
+        if (this.groundCache) return applyGroundedTransforms(this.entries, next.map(value => value.transform), this.groundCache);
         next.forEach((value, index) => {
             const object = this.entries[index].object;
             object.position.copy(value.position);
@@ -134,11 +211,10 @@ export class TransformTransaction {
             if (!validTransform(transform)) throw Error('invalidTransform');
             return transform;
         });
+        if (this.groundCache) return applyGroundedTransforms(this.entries, next, this.groundCache);
         next.forEach((transform, index) => {
             const object = this.entries[index].object;
-            object.position.fromArray(transform.position);
-            object.rotation.set(...transform.rotation.map(MathUtils.degToRad));
-            object.scale.fromArray(transform.scale);
+            applyTransform(object, transform);
             object.updateMatrixWorld(true);
         });
         return this.changes();
@@ -157,8 +233,8 @@ export class TransformTransaction {
 }
 
 export class ExhibitPlacementTransaction extends TransformTransaction {
-    constructor(exhibitId, group) {
-        super([{ exhibitId, object: group }]);
+    constructor(exhibitId, group, options) {
+        super([{ exhibitId, object: group }], options);
         this.pivot = componentMedian(group);
         this.placement = exhibitPlacement(group);
         this.anchor = new Vector3(...this.placement.position);
@@ -173,10 +249,9 @@ export class ExhibitPlacementTransaction extends TransformTransaction {
         const offset = this.pivot.clone().multiply(new Vector3(...next.scale)).applyQuaternion(quaternion);
         const transform = normalizeTransform({ ...next, position: new Vector3(...next.position).sub(offset).toArray() });
         if (!validTransform(transform)) throw Error('invalidTransform');
+        if (this.groundCache) return applyGroundedTransforms(this.entries, [transform], this.groundCache);
         const group = this.entries[0].object;
-        group.position.fromArray(transform.position);
-        group.rotation.set(...transform.rotation.map(MathUtils.degToRad));
-        group.scale.fromArray(transform.scale);
+        applyTransform(group, transform);
         group.updateMatrixWorld(true);
         return this.changes();
     }

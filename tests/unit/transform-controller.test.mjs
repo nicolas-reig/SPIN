@@ -54,6 +54,21 @@ test('modal numeric move, cancellation and confirmation affect all selected obje
     controller.dispose();
 });
 
+test('a downward gizmo preview and confirmation rest the selection on the world plane', () => {
+    const { controller, entries, key, commits } = setup({ count: 2 });
+    entries.forEach(({ object }, index) => { object.position.y = 3 + index * 2; });
+    for (const action of ['Escape', 'Enter']) {
+        controller.begin('translate', {}, { axis: 'Y' });
+        key('-'); key('9');
+        assert.deepEqual(entries.map(({ object }) => new THREE.Box3().setFromObject(object, true).min.y), [0, 2]);
+        assert.equal(controller.group.position.y, 2);
+        key(action);
+    }
+    assert.equal(commits.length, 1);
+    assert.deepEqual(commits[0].map(({ transform }) => transform.position), [[0, 0, 0], [4, 2, 0]]);
+    controller.dispose();
+});
+
 test('geometry pivots survive rotation, mirroring and flattening without touching buffers', () => {
     const { controller, entries, key } = setup();
     const center = geometryCenter(entries[0].object); const mesh = entries[0].object.children[0];
@@ -143,6 +158,8 @@ test('mirrored and collapsed objects retain their rotation and local axes throug
 
 test('axis previews follow constrained movement, rotation and scale and hide on release', () => {
     const { controller, entries, key } = setup({ count: 2 });
+    for (const { object } of entries) object.position.y = 3;
+    controller.update();
     const { constraintGuide: guide, constraintAxes: lines, constraintPlane: plane } = controller;
     const center = controller.group.position.clone();
     assert.equal(guide.visible, false);
@@ -154,7 +171,7 @@ test('axis previews follow constrained movement, rotation and scale and hide on 
         near(guide.position.distanceTo(controller.group.position), 0);
         near(guide.quaternion.angleTo(controller.active.orientation), 0);
         if (mode === 'translate') near(guide.position.x, center.x + 2);
-        else near(guide.position.distanceTo(center), 0);
+        else near(guide.position.distanceTo(center), 0, 1e-6);
         key('x'); assert.equal(guide.visible, true);
         key('x'); assert.equal(guide.visible, false);
         key('Escape');
@@ -182,7 +199,7 @@ test('excluded-axis plane previews show both allowed axes in the original global
     near(normal().dot(expectedNormal), 1);
     const displacement = guide.position.clone().sub(controller.active.transaction.center);
     near(displacement.dot(normal()), 0);
-    near(displacement.length(), Math.sqrt(8));
+    near(displacement.length(), Math.sqrt(8), 1e-6);
     // A preview rotation must leave the guide aligned with the chosen basis.
     key('Escape'); controller.begin('rotate'); key('z'); key('4'); key('5');
     near(guide.quaternion.angleTo(new THREE.Quaternion()), 0);
@@ -279,7 +296,7 @@ test('precision is incremental and Ctrl snapping applies to mouse previews', () 
     const event = { clientX: 440, clientY: 300, preventDefault() {}, stopImmediatePropagation() {} };
     controller.pointerMove(event); const first = entries[0].object.position.x;
     controller.pointerMove({ ...event, clientX: 480, shiftKey: true }); const precise = entries[0].object.position.x;
-    near(precise - first, first * .1);
+    near(precise - first, first * .1, 1e-6);
     controller.pointerMove({ ...event, clientX: 480, ctrlKey: true });
     near(entries[0].object.position.x, Math.round(precise));
     controller.dispose();

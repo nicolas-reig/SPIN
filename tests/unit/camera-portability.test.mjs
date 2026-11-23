@@ -20,7 +20,7 @@ globalThis.cancelAnimationFrame = () => {};
 globalThis.matchMedia = () => ({ matches: true });
 
 const THREE = await import('three');
-const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+const { MapOrbitControls } = await import('../../frontend/js/map-orbit-controls.js');
 const { MapView } = await import('../../frontend/js/map.js');
 const { boundsCorners, frameBounds, controlLimits, clippingPlanes, clearViewport } = await import('../../frontend/js/camera-framing.js');
 const { focusGeometry } = await import('../../frontend/js/camera-focus.js');
@@ -34,8 +34,8 @@ function makeView(size = [20, 2, 12], center = [0, 0, 0], aspect = 2) {
         domElement: { dataset: {}, getBoundingClientRect: () => ({ width: container.clientWidth, height: container.clientHeight }), remove() {} }
     };
     view.transform = { camera: view.camera, dispose() {} };
-    view.controls = new OrbitControls(view.camera, null);
-    view.controls.domElement = { style: {}, removeEventListener() {}, getRootNode: () => ({ removeEventListener() {} }) };
+    view.controls = new MapOrbitControls(view.camera, null);
+    view.controls.domElement = { style: {}, clientHeight: 800, removeEventListener() {}, getRootNode: () => ({ removeEventListener() {} }) };
     view.controls.maxPolarAngle = Math.PI / 2;
     view.controls.minPolarAngle = .000001;
     view.controls.addEventListener('change', () => view.updateCameraClipping());
@@ -59,6 +59,7 @@ function vectorNear(actual, expected, tolerance, message) {
 
 function framed(view, box = view.sceneBounds(), label = '') {
     view.camera.updateMatrixWorld();
+    assert.ok(view.camera.position.y >= 0, `${label}: camera stays above world ground`);
     assert.ok(Number.isFinite(view.camera.near) && view.camera.near > 0, `${label}: positive finite near`);
     assert.ok(Number.isFinite(view.camera.far) && view.camera.far > view.camera.near, `${label}: finite far > near`);
     const bounds = view.viewportBounds();
@@ -140,13 +141,13 @@ test('saved camera distances and spans survive controls updates, zoom and mode c
     }
 });
 
-test('accepted below-target, near-pole and exact-pole saved views retain coordinates and angular freedom', () => {
+test('above-ground presets retain below-target and exact-pole viewing angles', () => {
     const directions = [[.2, -.7, 1], [1e-9, 1, 1e-9], [0, 1, 0], [1e-9, -1, 1e-9], [0, -1, 0]];
     for (const scale of [1e-6, 1000]) for (const mode of ['perspective', 'top']) for (const input of directions) {
-        const target = [13 * scale, 27 * scale, -19 * scale];
+        const target = [13 * scale, 40 * scale, -19 * scale];
         const view = makeView([scale, scale, scale], target, 1);
         const direction = new THREE.Vector3(...input).normalize();
-        const distance = 70 * scale;
+        const distance = 35 * scale;
         const preset = { target, position: new THREE.Vector3(...target).addScaledVector(direction, distance).toArray(), span: 10 * scale };
         assert.ok([...preset.position, ...preset.target, preset.span].every(value => Math.abs(value) <= 100000), 'imported preset respects the source numeric contract');
         view.applyView(preset, mode);
@@ -167,12 +168,41 @@ test('legal distant exact-pole presets aim at a miniature target with a narrow o
         const view = makeView([1e-7, 1e-7, 1e-7], [0, 0, 0], 1);
         const preset = { position: [0, height, 0], target: [0, 0, 0], span: 1e-6 };
         view.applyView(preset, 'top');
-        vectorNear(view.camera.position.toArray(), preset.position, 1e-12, 'exact pole coordinates');
+        vectorNear(view.camera.position.toArray(), [0, Math.abs(height), 0], 1e-12, 'exact pole above ground');
         vectorNear(view.camera.up.toArray(), [0, 1, 0], 1e-12, 'standard controls up axis');
         framed(view, view.sceneBounds(), `exact pole ${height}`);
         assert.equal(view.focusView('box', preset), preset, 'visible pure-pole preset remains unchanged');
         view.destroy();
     }
+});
+
+test('orbit and pan stop at world ground with a target below it', () => {
+    const view = makeView();
+    const target = [3, -4, 7];
+    view.applyView({ position: [3, 2, 15], target, span: 10 });
+    const distance = view.camera.position.distanceTo(view.controls.target);
+    for (let index = 0; index < 5; index++) {
+        view.controls._rotateUp(-Math.PI / 6);
+        view.controls.update();
+        assert.equal(view.camera.position.y, 0);
+        near(view.camera.position.distanceTo(view.controls.target), distance);
+    }
+    assert.deepEqual(view.controls.target.toArray(), target);
+    const offset = view.camera.position.clone().sub(view.controls.target);
+    view.controls._pan(0, -500);
+    view.controls.update();
+    assert.equal(view.camera.position.y, 0);
+    vectorNear(view.camera.position.clone().sub(view.controls.target).toArray(), offset.toArray(), 1e-10, 'pan retains the viewing angle');
+    view.controls._rotateUp(Math.PI / 8);
+    view.controls.update();
+    assert.ok(view.camera.position.y > 0, 'orbit can return above ground');
+
+    const legacy = { position: [3, -10, 15], target, span: 10 };
+    view.applyView(legacy);
+    assert.equal(view.camera.position.y, 0);
+    assert.equal(view.captureView().position[1], 0);
+    near(view.camera.position.distanceTo(view.controls.target), distance);
+    view.destroy();
 });
 
 test('focus keeps a visible distant preset and fits hidden or behind-camera geometry in both screen axes', () => {

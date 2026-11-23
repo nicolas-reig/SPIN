@@ -2,11 +2,9 @@ import * as THREE from 'three';
 import {
     GLTFLoader
 } from 'three/addons/loaders/GLTFLoader.js';
-import {
-    OrbitControls
-} from 'three/addons/controls/OrbitControls.js';
+import { MapOrbitControls } from './map-orbit-controls.js';
 import { TransformController } from './transform-controller.js';
-import { transformKey, geometryCenter, exhibitPlacement, ExhibitPlacementTransaction, TransformTransaction, selectionFieldDelta } from './transform-math.js';
+import { applyTransform, applyGroundedTransforms, belowGround, transformKey, geometryCenter, exhibitPlacement, ExhibitPlacementTransaction, TransformTransaction, selectionFieldDelta } from './transform-math.js';
 import { coordinateNumber, coordinateVector, focusPlacement } from './domain.js';
 
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -15,18 +13,11 @@ import { cameraMode, cameraOffset, navigationGesture, orbitState, orbitOffset, v
 import { colorMode, colorScheme, onColorModeChange } from './colors.js';
 import { TopView } from './top-view.js';
 import { dispose, disposeMaterials, replaceMaterials } from './model-resources.js';
-import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clippingPlanes, clearViewport } from './camera-framing.js';
+import { boundsScale, boundsCorners, aimCamera, limitCameraHeight, frameBounds, controlLimits, clippingPlanes, clearViewport } from './camera-framing.js';
 import { focusGeometry, nextBestView, birdFocusView } from './camera-focus.js';
 import { MapOverlays } from './map-overlays.js';
 
-const radians = v => v * Math.PI / 180;
 const perspectiveFocusPadding = .72;
-
-function applyTransform(object, t) {
-    object.position.fromArray(t.position);
-    object.rotation.set(...t.rotation.map(radians));
-    object.scale.fromArray(t.scale);
-}
 
 function smoothNormals(object) {
     const geometries = new Map();
@@ -119,7 +110,7 @@ export class MapView {
         if (this.overlayPreferences.topCircle || this.overlayPreferences.groupLabels) {
             this.overlays = new MapOverlays(this.container, (id, extend) => this.onSelect(id, 0, extend, false));
         }
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls = new MapOrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
         this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE };
         this.controls.keys = { LEFT: 'ArrowRight', UP: 'ArrowDown', RIGHT: 'ArrowLeft', BOTTOM: 'ArrowUp' };
@@ -535,7 +526,7 @@ export class MapView {
         if (this.key !== this.installedKey) throw Error('mapLoading');
         const group = this.objects.get(id);
         if (!group?.children.length) throw Error('mapUnavailable');
-        const transaction = new ExhibitPlacementTransaction(id, group);
+        const transaction = new ExhibitPlacementTransaction(id, group, { grounded: true });
         return { transaction, placement: transaction.placement };
     }
     previewExhibitPlacement(preview, key, axis, value) {
@@ -550,7 +541,7 @@ export class MapView {
         if (this.key !== this.installedKey) throw Error('mapLoading');
         const entries = this.transformEntries();
         if (entries.length < 2) throw Error('mapUnavailable');
-        return { transaction: new TransformTransaction(entries), orientation: this.transform.orientation() };
+        return { transaction: new TransformTransaction(entries, { grounded: true }), orientation: this.transform.orientation() };
     }
     previewSelectionField(preview, key, axis, value) {
         const delta = selectionFieldDelta(preview.transaction.center, key, axis, value, preview.orientation);
@@ -567,13 +558,23 @@ export class MapView {
         this.transform?.update(); this.requestRender();
         this.onTransformPreview(preview.transaction.changes());
     }
-    previewTransforms(changes) {
-        for (const { exhibitId, instanceIndex, transform } of changes) {
+    previewTransforms(changes, { grounded = false, cache } = {}) {
+        const entries = changes.map(({ exhibitId, instanceIndex }) => {
             const group = this.objects.get(exhibitId);
             const object = instanceIndex == null ? group : group?.children[instanceIndex];
-            if (object) { applyTransform(object, transform); object.updateMatrixWorld(true); }
+            return { exhibitId, instanceIndex, object };
+        });
+        if (grounded) {
+            if (this.key !== this.installedKey) throw Error('mapLoading');
+            if (entries.some(({ object }) => !object?.children.length)) throw Error('mapPartial');
+            changes = applyGroundedTransforms(entries, changes.map(change => change.transform), cache);
+        } else {
+            entries.forEach(({ object }, index) => {
+                if (object) { applyTransform(object, changes[index].transform); object.updateMatrixWorld(true); }
+            });
         }
         this.boundsDirty = true; this.transform?.update(); this.requestRender();
+        return changes;
     }
     placementPosition(transform) {
         if (!this.controls) return [0, 0, 0];
@@ -643,7 +644,8 @@ export class MapView {
         const offset = this.framingDirection().multiplyScalar(distance);
         const startTarget = this.controls.target.clone();
         const startPosition = this.camera.position.clone();
-        const endPosition = position || center.clone().add(offset);
+        const endPosition = position?.clone() || center.clone().add(offset);
+        if (limitCameraHeight(endPosition, center, this.mode === 'top')) distance = center.distanceTo(endPosition);
         const startSpan = this.orthoSpan || span;
         const startZoom = this.camera.zoom;
         const startOrbit = new THREE.Spherical().setFromVector3(startPosition.clone().sub(startTarget));
@@ -664,6 +666,7 @@ export class MapView {
                 this.orthoSpan = startSpan + (span - startSpan) * ease;
             }
             this.camera.zoom = startZoom + (1 - startZoom) * ease;
+            limitCameraHeight(this.camera.position, this.controls.target);
             this.controlAngles(this.camera.position);
             this.updateCameraLimits(distance);
             this.resize();
@@ -671,7 +674,7 @@ export class MapView {
             // OrbitControls makes exact poles safe by tilting them 1e-6 radians.
             // Keep the coordinates of an explicitly requested saved view exact.
             if (position && p === 1) {
-                this.camera.position.copy(position);
+                this.camera.position.copy(endPosition);
                 aimCamera(this.camera, center);
                 this.updateCameraClipping();
             }
@@ -699,13 +702,15 @@ export class MapView {
     }
     captureView(mode = this.mode) {
         mode = cameraMode(mode);
-        const target = this.controls.target.toArray();
-        const distance = this.camera.position.distanceTo(this.controls.target);
+        const target = this.controls.target;
+        const distance = this.camera.position.distanceTo(target);
         const top = mode === 'top';
-        const offset = orbitOffset(distance, this.navigationState().heading, top ? 90 : 35);
+        const position = mode === this.mode ? this.camera.position.clone() :
+            target.clone().add(new THREE.Vector3(...orbitOffset(distance, this.navigationState().heading, top ? 90 : 35)));
+        limitCameraHeight(position, target, top);
         return {
-            position: coordinateVector((top && this.mode !== 'top') || (!top && this.mode === 'top') ? target.map((value, index) => value + offset[index]) : this.camera.position.toArray()),
-            target: coordinateVector(target),
+            position: coordinateVector(position.toArray()),
+            target: coordinateVector(target.toArray()),
             span: coordinateNumber(this.camera.isOrthographicCamera ? this.orthoSpan / this.camera.zoom : Math.max(3 * Math.min(1, boundsScale(this.sceneBounds()) / 10), distance * .36))
         };
     }
@@ -737,8 +742,26 @@ export class MapView {
         this.focusDirections.set(record.id, { key, placement, direction });
         return direction;
     }
+    static async groundPlacement(data, record, instanceIndex) {
+        const floor = data.floors.find(floor => floor.id === record.floorId);
+        if (!floor) throw Error('invalidFloor');
+        const exhibit = instanceIndex == null ? record : { ...record, models: [record.models[instanceIndex]] };
+        const view = new MapView({});
+        try {
+            await view.setData({ ...data, floors: [{ ...floor, modelId: null }], exhibits: [exhibit] }, floor.id, null);
+            const group = view.objects.get(record.id);
+            if (!group || group.children.some(holder => !holder.children.length)) throw Error('mapPartial');
+            const object = instanceIndex == null ? group : group.children[0];
+            const placement = instanceIndex == null ? record : record.models[instanceIndex];
+            const [change] = applyGroundedTransforms([{ exhibitId: record.id, instanceIndex, object }], [placement.transform]);
+            placement.transform = change.transform;
+        } finally {
+            view.destroy();
+        }
+    }
     static async prepareFocusDirections(data, savedExhibits, records, displayed, signal) {
         const result = new Map();
+        const originals = new Map(savedExhibits.map(record => [record.id, record]));
         for (const floorId of new Set(records.map(record => record.floorId))) {
             signal?.throwIfAborted();
             const current = displayed?.data === data && displayed.floor?.id === floorId && displayed.key === displayed.installedKey;
@@ -750,6 +773,11 @@ export class MapView {
                 signal?.throwIfAborted();
                 for (const record of records.filter(item => item.floorId === floorId)) {
                     const object = view.objects.get(record.id);
+                    const original = originals.get(record.id);
+                    const unchanged = original?.floorId === floorId && JSON.stringify(original.transform) === JSON.stringify(record.transform) ?
+                        new Set(original.models.map(model => JSON.stringify(model))) : new Set();
+                    if (object?.children.some((holder, index) => holder.children.length &&
+                        !unchanged.has(JSON.stringify(record.models[index])) && belowGround(holder))) throw Error('placementBelowGround');
                     if (!object || object.children.some(holder => !holder.children.length) ||
                         view.floor.modelId && !view.root.children.some(child => child.userData.floor)) continue;
                     try {
@@ -787,8 +815,9 @@ export class MapView {
         }
         const options = { aspect, direction: this.camera.position.clone().sub(this.controls.target),
             padding: focusPadding, occluders: this.root.children };
-        return (mode === 'top' ? birdFocusView : nextBestView)(geometry, options) ||
-            frameBounds(geometry.box, this.framingDirection(mode), options.aspect, { perspective: mode !== 'top', ...padding });
+        const view = (mode === 'top' ? birdFocusView : nextBestView)(geometry, options);
+        return view?.position[1] >= 0 ? view : frameBounds(geometry.box, this.framingDirection(mode), options.aspect,
+            { perspective: mode !== 'top', ...padding });
     }
     applyView(preset, mode = this.mode, options = {}) {
         if (!preset) return;
@@ -850,6 +879,7 @@ export class MapView {
             new THREE.OrthographicCamera(-preset.span * aspect, preset.span * aspect, preset.span, -preset.span, .05, 2000);
         const target = new THREE.Vector3(...preset.target);
         camera.position.fromArray(preset.position);
+        limitCameraHeight(camera.position, target, !perspective);
         aimCamera(camera, target);
         camera.updateMatrixWorld();
         if (this.isVisible(id, camera, camera.position.distanceTo(target))) return preset;

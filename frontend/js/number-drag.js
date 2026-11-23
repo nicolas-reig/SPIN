@@ -1,3 +1,5 @@
+import { startInfiniteDrag } from './infinite-drag.js';
+
 export function updateNumberFill(input) {
     const field = input.closest('.axis-value');
     if (!field) return;
@@ -33,6 +35,7 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
         if (!pending) return;
         const drag = pending; pending = null;
         if (drag.started) {
+            drag.lock?.stop();
             accept ? commit(drag) : cancel(drag);
             if (drag.input.hasPointerCapture(drag.pointerId)) drag.input.releasePointerCapture(drag.pointerId);
             suppressClick = true;
@@ -44,11 +47,20 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
     listen(root, 'pointerdown', event => {
         const input = event.target.closest('input[data-vector]') || event.target.closest('label[data-number-drag]')?.control;
         if (!input || input.disabled || input.readOnly || event.button !== 0) return;
-        pending = { input, x: event.clientX, lastX: event.clientX, delta: 0, pointerId: event.pointerId, started: false };
+        if (pending) return;
+        pending = { input, x: event.clientX, lastX: event.clientX, delta: 0,
+            pointerId: event.pointerId, mouse: event.pointerType === 'mouse', started: false };
     });
+    const scrub = (drag, event, pixels) => {
+        event.preventDefault(); getSelection()?.removeAllRanges();
+        const step = { position: .01, rotation: .5, scale: .01 }[drag.input.dataset.vector];
+        drag.delta += pixels * step * (event.shiftKey ? .1 : 1);
+        preview(drag, event);
+        updateNumberFills(root);
+    };
     listen(window, 'pointermove', event => {
         const drag = pending;
-        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (!drag || event.pointerId !== drag.pointerId || drag.lock?.locked) return;
         if (!drag.started && Math.abs(event.clientX - drag.x) < 4) return;
         if (!drag.started) {
             // Blur commits any typed edit before the drag captures its baseline.
@@ -59,17 +71,25 @@ export function installNumberDrag(root, { start, preview, commit, cancel }) {
             if (start(drag) === false) { pending = null; return; }
             drag.input.setPointerCapture(event.pointerId);
             document.body.classList.add('dragging-number');
+            if (drag.mouse) drag.lock = startInfiniteDrag(root, { x: event.clientX, y: event.clientY }, () => finish(false), true);
         }
-        event.preventDefault(); getSelection()?.removeAllRanges();
-        const step = { position: .01, rotation: .5, scale: .01 }[drag.input.dataset.vector];
-        drag.delta += (event.clientX - drag.lastX) * step * (event.shiftKey ? .1 : 1);
+        drag.lock?.sync({ x: event.clientX, y: event.clientY });
+        const pixels = event.clientX - drag.lastX;
         drag.lastX = event.clientX;
-        preview(drag, event);
-        updateNumberFills(root);
+        scrub(drag, event, pixels);
+    });
+    listen(window, 'mousemove', event => {
+        const drag = pending;
+        if (!drag?.lock?.locked) return;
+        drag.lock.move(event.movementX, event.movementY);
+        scrub(drag, event, event.movementX);
     });
     listen(window, 'pointerup', event => { if (pending?.pointerId === event.pointerId) finish(true); });
-    listen(window, 'pointercancel', () => finish(false));
-    listen(root, 'lostpointercapture', () => { if (pending?.started) finish(false); });
+    listen(window, 'mouseup', event => { if (pending?.lock?.locked && event.button === 0) finish(true); });
+    listen(window, 'pointercancel', event => { if (pending?.pointerId === event.pointerId) finish(false); });
+    listen(root, 'lostpointercapture', event => {
+        if (pending?.started && pending.pointerId === event.pointerId && !pending.lock?.locked) finish(false);
+    });
     listen(window, 'blur', () => finish(false));
     listen(document, 'keydown', event => {
         if (event.key === 'Escape' && pending?.started) { event.preventDefault(); event.stopImmediatePropagation(); finish(false); }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TransformTransaction, transformDelta, axisVector, selectionCenter } from './transform-math.js';
 import { TransformInput } from './transform-input.js';
+import { startInfiniteDrag } from './infinite-drag.js';
 
 const axes = ['X', 'Y', 'Z'];
 const unit = () => new THREE.Vector3(1, 1, 1);
@@ -38,10 +39,14 @@ export class TransformController {
         listen(canvas, 'pointerdown', event => this.pointerDown(event), true);
         listen(canvas, 'pointermove', event => this.pointerMove(event), true);
         listen(canvas, 'pointerup', event => this.pointerUp(event), true);
+        listen(canvas, 'mousemove', event => { if (this.active?.drag?.locked) this.pointerMove(event, true); }, true);
+        listen(canvas, 'mousedown', event => { if (this.active?.drag?.locked) this.pointerDown(event); }, true);
         listen(canvas, 'pointercancel', () => this.cancel(), true);
         listen(canvas, 'lostpointercapture', () => { if (this.active && !this.active.modal) this.cancel(); });
         listen(canvas, 'contextmenu', event => { if (this.active) { event.preventDefault(); this.cancel(); } }, true);
-        listen(window, 'pointermove', event => { this.pointer = { x: event.clientX, y: event.clientY }; });
+        listen(window, 'pointermove', event => {
+            if (!this.active?.drag?.locked) this.pointer = { x: event.clientX, y: event.clientY };
+        });
         listen(window, 'blur', () => this.cancel());
         listen(document, 'visibilitychange', () => { if (document.hidden) this.cancel(); });
         listen(canvas, 'wheel', event => { if (this.active) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
@@ -189,17 +194,32 @@ export class TransformController {
         this.canvas.setPointerCapture(event.pointerId);
         this.active.pointerId = event.pointerId;
     }
-    pointerMove(event) {
+    pointerMove(event, relative = false) {
         if (!this.active) {
             this.canvas.style.cursor = this.pick(event) ? 'grab' : '';
             return;
         }
         this.consume(event);
         const active = this.active;
+        if (Boolean(active.drag?.locked) !== relative) return;
         const precision = event.shiftKey ? .1 : 1;
-        active.dx += (event.clientX - active.last.x) * precision;
-        active.dy += (event.clientY - active.last.y) * precision;
-        active.last = { x: event.clientX, y: event.clientY };
+        const dx = (relative ? event.movementX : event.clientX - active.last.x) * precision;
+        const dy = (relative ? event.movementY : event.clientY - active.last.y) * precision;
+        if (relative && active.mode === 'rotate') {
+            const axis = this.rotationAxis(active);
+            active.dragAngle ??= this.pointerAngle(active, axis, active.start,
+                { x: active.start.x + active.dx, y: active.start.y + active.dy });
+            // Accumulate before wrapping so the jump to the far edge adds no rotation.
+            const start = active.last;
+            active.dragAngle += this.pointerAngle(active, axis, start, { x: start.x + dx, y: start.y + dy });
+        }
+        active.dx += dx;
+        active.dy += dy;
+        if (relative) active.last = active.drag.move(event.movementX, event.movementY);
+        else {
+            active.last = { x: event.clientX, y: event.clientY };
+            active.drag?.sync(active.last);
+        }
         this.preview(event);
     }
     pointerUp(event) {
@@ -210,9 +230,11 @@ export class TransformController {
         }
     }
 
-    begin(mode, event = {}, { axis = '', modal = true } = {}) {
+    begin(mode, event = {}, { axis = '', modal = true, wrapCursor = false } = {}) {
+        const drag = modal && wrapCursor ? this.active?.drag : null;
+        if (drag) this.active.drag = null;
         this.cancel();
-        if (!this.entries.length || !this.mode) return false;
+        if (!this.entries.length || !this.mode) { drag?.stop(); return false; }
         const transaction = new TransformTransaction(this.entries);
         const rect = this.canvas.getBoundingClientRect();
         const pointer = { x: event.clientX ?? this.pointer?.x ?? rect.left + rect.width / 2,
@@ -228,6 +250,7 @@ export class TransformController {
         this.canvas.style.cursor = 'grabbing';
         this.canvas.dataset.transform = mode;
         this.canvas.focus({ preventScroll: true });
+        if (modal && wrapCursor) this.active.drag = drag || startInfiniteDrag(this.canvas, pointer, () => this.cancel());
         this.group.position.copy(transaction.center); this.group.quaternion.copy(this.active.orientation);
         this.preview(event); return true;
     }
@@ -251,7 +274,7 @@ export class TransformController {
             const mode = { g: 'translate', r: 'rotate', s: 'scale' }[event.key.toLowerCase()];
             if (mode === 'rotate' && active.mode === 'rotate') {
                 active.axis = active.axis === 'TRACKBALL' ? '' : 'TRACKBALL'; this.preview(event);
-            } else this.begin(mode, { clientX: active.last.x, clientY: active.last.y });
+            } else this.begin(mode, { clientX: active.last.x, clientY: active.last.y }, { wrapCursor: true });
         } else if (active.input.key(event)) this.preview(event);
         else return true; // Modal editing owns viewport keys, including undo and camera keys.
         return true;
@@ -284,6 +307,28 @@ export class TransformController {
         return movement;
     }
 
+    rotationAxis({ axis, orientation, viewAxis }) {
+        if (axes.includes(axis)) return axisVector(axis).applyQuaternion(orientation);
+        if (axis.length === 2) return axisVector(axes.find(value => !axis.includes(value))).applyQuaternion(orientation);
+        return viewAxis;
+    }
+
+    pointerAngle(active, axis, from, to) {
+        const sx = from.x - active.center.x, sy = from.y - active.center.y;
+        const dx = to.x - from.x, dy = to.y - from.y;
+        if (Math.hypot(sx, sy) <= 15) return (dx - dy) * .01;
+        const pivot = active.transaction.center;
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(axis, pivot);
+        const start = this.ray({ clientX: from.x, clientY: from.y }).ray.intersectPlane(plane, new THREE.Vector3());
+        const end = this.ray({ clientX: to.x, clientY: to.y }).ray.intersectPlane(plane, new THREE.Vector3());
+        if (start && end && start.distanceToSquared(pivot) > 1e-8) {
+            start.sub(pivot).normalize(); end.sub(pivot).normalize();
+            return Math.atan2(axis.dot(start.clone().cross(end)), start.dot(end));
+        }
+        const angle = Math.atan2(-sy - dy, sx + dx) - Math.atan2(-sy, sx);
+        return axis.dot(active.viewAxis) < 0 ? -angle : angle;
+    }
+
     preview(event = {}) {
         const a = this.active;
         if (!a) return;
@@ -306,27 +351,17 @@ export class TransformController {
                     translation.set(...translation.toArray().map(value => round(value, 1))).applyQuaternion(orientation);
                 }
             } else if (a.mode === 'rotate') {
-                let rotationAxis = axes.includes(axis) ? axisVector(axis).applyQuaternion(orientation) : a.viewAxis;
-                if (axis.length === 2) rotationAxis = axisVector(axes.find(value => !axis.includes(value))).applyQuaternion(orientation);
-                let angle;
-                const sx = a.start.x - a.center.x, sy = a.start.y - a.center.y;
-                const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(rotationAxis, transaction.center);
-                const start = this.ray({ clientX: a.start.x, clientY: a.start.y }).ray.intersectPlane(plane, new THREE.Vector3());
-                const end = this.ray({ clientX: a.start.x + a.dx, clientY: a.start.y + a.dy }).ray.intersectPlane(plane, new THREE.Vector3());
-                if (start && end && start.distanceToSquared(transaction.center) > 1e-8 && Math.hypot(sx, sy) > 15) {
-                    start.sub(transaction.center).normalize(); end.sub(transaction.center).normalize();
-                    angle = Math.atan2(rotationAxis.dot(start.clone().cross(end)), start.dot(end));
-                } else if (Math.hypot(sx, sy) > 15) {
-                    angle = Math.atan2(-sy - a.dy, sx + a.dx) - Math.atan2(-sy, sx);
-                    if (rotationAxis.dot(a.viewAxis) < 0) angle *= -1;
-                } else angle = (a.dx - a.dy) * .01;
-                if (input.used) angle = THREE.MathUtils.degToRad(values[0]);
-                else if (snapping) angle = round(angle, Math.PI / 12);
+                const rotationAxis = this.rotationAxis(a);
                 if (axis === 'TRACKBALL' && !input.used) {
                     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
                     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
                     rotation.setFromAxisAngle(up, a.dx * .01).multiply(new THREE.Quaternion().setFromAxisAngle(right, a.dy * .01));
-                } else rotation.setFromAxisAngle(rotationAxis, angle);
+                } else {
+                    let angle = input.used ? THREE.MathUtils.degToRad(values[0]) : a.dragAngle ??
+                        this.pointerAngle(a, rotationAxis, a.start, { x: a.start.x + a.dx, y: a.start.y + a.dy });
+                    if (snapping && !input.used) angle = round(angle, Math.PI / 12);
+                    rotation.setFromAxisAngle(rotationAxis, angle);
+                }
             } else {
                 let amount;
                 if (axes.includes(axis)) {
@@ -352,11 +387,13 @@ export class TransformController {
     finish() {
         const active = this.active;
         this.active = null;
+        const locked = active.drag?.locked;
+        active.drag?.stop();
         this.controls.enabled = active.oldControls;
         delete this.canvas.dataset.transform;
         if (active.pointerId != null && this.canvas.hasPointerCapture(active.pointerId)) this.canvas.releasePointerCapture(active.pointerId);
         this.update();
-        this.canvas.style.cursor = this.pick({ clientX: active.last.x, clientY: active.last.y }) ? 'grab' : '';
+        this.canvas.style.cursor = !locked && this.pick({ clientX: active.last.x, clientY: active.last.y }) ? 'grab' : '';
         this.onChange(); return active;
     }
     confirm() {

@@ -2692,6 +2692,7 @@ document.addEventListener('keydown', event => {
             event.preventDefault();
             const tool = { g: 'translate', r: 'rotate', s: 'scale' }[key];
             if (selectionTransforms().length && !creationOpen && !editConflict?.open) {
+                numberDrag?.cancel();
                 gizmo = tool; syncEditTools(); renderTransformToolbar(); map?.beginTransform(tool); persistEdit();
             }
         }

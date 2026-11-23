@@ -3091,6 +3091,26 @@ body.editing .exhibit-entry.active .icon-button.danger {
 :is(#structure-panel, [data-snapshot-id="structure-panel"]) .axis-value input:focus { outline: none; cursor: text; }
 .axis-value input::-webkit-inner-spin-button { -webkit-appearance: none; }
 .dragging-number, .dragging-number * { cursor: ew-resize !important; user-select: none !important; }
+
+.wrapped-drag-cursor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid #fff;
+    border-radius: 50%;
+    background: #202831;
+    color: #fff;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+.wrapped-drag-cursor::before { content: '+'; font: 600 18px/1 sans-serif; }
+.wrapped-drag-slider::before { content: '↔'; }
 .transform-tools .icon-button[aria-pressed=true] {
     color: var(--accent);
     background: var(--accent-soft);

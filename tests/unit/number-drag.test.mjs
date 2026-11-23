@@ -23,6 +23,7 @@ class Input {
     hasAttribute() { return this.relative; }
     closest(selector) { return selector === '.axis-value' ? this.field : selector === 'input[data-vector]' ? this : null; }
     matches(selector) { return selector === ':focus' ? this.focused : selector === 'input[data-vector]'; }
+    focus() { this.focused = true; }
     blur() { this.focused = false; this.onBlur?.(); }
     setPointerCapture(id) { this.captured.add(id); }
     hasPointerCapture(id) { return this.captured.has(id); }
@@ -122,4 +123,63 @@ test('disabled or read-only numeric controls cannot start a drag', () => {
         f.pointer('pointerdown'); f.pointer('pointermove', 100); f.pointer('pointerup', 100);
         assert.equal(starts, 0); assert.equal(f.classes.has('dragging-number'), false); f.dispose();
     }
+});
+
+test('mouse scrubbing wraps both edges and commits relative motion once on release', () => {
+    let committed, cancellations = 0, requests = 0;
+    const f = setup({ start() {}, preview(drag) { drag.input.value = String(drag.delta); },
+        commit(drag) { committed = drag.delta; }, cancel() { cancellations++; } });
+    const cursor = { style: {}, setAttribute() {}, remove() { this.removed = true; } };
+    window.innerWidth = 100; window.innerHeight = 80;
+    document.createElement = () => cursor;
+    document.body.append = () => {};
+    document.exitPointerLock = () => { document.pointerLockElement = null; document.emit('pointerlockchange'); };
+    f.root.requestPointerLock = () => { requests++; };
+
+    f.pointer('pointerdown', 90, { pointerType: 'mouse', clientY: 4 });
+    f.pointer('pointerup', 90);
+    assert.equal(requests, 0, 'a click can still start typing');
+    f.pointer('pointerdown', 90, { pointerType: 'mouse', clientY: 4 });
+    f.pointer('pointermove', 97, { clientY: 4 });
+    assert.equal(requests, 1);
+    document.pointerLockElement = f.root;
+    f.root.emit('lostpointercapture', { pointerId: 1 });
+    document.emit('pointerlockchange');
+    window.emit('mousemove', { movementX: 12, movementY: -10 });
+    assert.equal(cursor.style.translate, '9px 74px');
+    f.pointer('pointermove', 97);
+    window.emit('mousemove', { movementX: 10, movementY: 0, shiftKey: true });
+    window.emit('mouseup', { button: 0 });
+    f.pointer('pointerup', 97);
+    assert.ok(Math.abs(committed - .2) < 1e-10);
+    assert.equal(cancellations, 0);
+    assert.equal(cursor.removed, true);
+    assert.equal(document.pointerLockElement, null);
+    f.dispose();
+});
+
+test('a lock granted after the slider finishes releases immediately', () => {
+    const f = setup({ start() {}, preview() {}, commit() {}, cancel() {} });
+    f.root.requestPointerLock = () => {};
+    document.exitPointerLock = () => { document.pointerLockElement = null; document.emit('pointerlockchange'); };
+    f.pointer('pointerdown', 0, { pointerType: 'mouse' });
+    f.pointer('pointermove', 10);
+    f.pointer('pointerup', 10);
+    document.pointerLockElement = f.root;
+    document.emit('pointerlockchange');
+    assert.equal(document.pointerLockElement, null);
+    f.dispose();
+});
+
+test('mouse press blocks native text selection and a plain click still focuses the field', () => {
+    const f = setup({});
+    let prevented = false;
+    f.pointer('pointerdown', 0, { pointerType: 'mouse' });
+    f.root.emit('mousedown', { target: f.input, button: 0, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(f.input.focused, false);
+    f.pointer('pointerup');
+    f.root.emit('click', { target: f.input, detail: 1 });
+    assert.equal(f.input.focused, true);
+    f.dispose();
 });

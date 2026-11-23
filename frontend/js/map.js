@@ -523,7 +523,7 @@ export class MapView {
     beginTransform(mode) {
         cancelAnimationFrame(this.cameraFrame);
         this.resetPointerDrag();
-        return this.transform?.begin(mode) || false;
+        return this.transform?.begin(mode, {}, { wrapCursor: true }) || false;
     }
     transformKey(event) { return this.transform?.key(event) || false; }
     exhibitPlacement(id) {

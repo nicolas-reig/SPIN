@@ -38,6 +38,7 @@ import { installNumberDrag, updateNumberFills } from './number-drag.js';
 import { rememberedSignature, rememberSignature } from './signature.js';
 import { groupExhibits, matchesExhibitGroup, ExhibitGroupState } from './exhibit-groups.js';
 import { adaptiveExhibitName, installAdaptiveExhibitNames } from './exhibit-label.js';
+import { readMapPreferences } from './map-preferences.js';
 let noteEditor = null;
 installSelects();
 installControlMotion();
@@ -77,6 +78,7 @@ let contentSelection = new Set(), selectingContent = false;
 let hardwareSelection = [];
 let transformSpace = 'local';
 let numberDrag;
+let settingsNavigation = false;
 let joinGeneration = 0;
 let editSave = null, cancelledEdit = null;
 let recoverableEdit = null;
@@ -490,7 +492,7 @@ function renderSidebar() {
                 ${edit ? '' : `<details class="app-menu">
                     <summary class="icon-button" aria-label="${esc(t('more'))}" title="${esc(t('more'))}">${icon('ellipsis')}</summary>
                     <div class="popover app-menu-popover">
-                        ${menuButton('accessibility', 'accessibility', 'eye', `title="${esc(t('accessibilityHint'))}"`)}
+                        ${menuButton('settings', 'settings', 'sliders-horizontal')}
                         ${menuButton('editStructure', 'enterEdit', 'pencil-line')}
                     </div>
                 </details>`}
@@ -674,6 +676,7 @@ async function initializeMap() {
             MapView
         } = await import('./map.js');
         instance = new MapView($('#map-canvas'), {
+            overlayPreferences: readMapPreferences(),
             onSelect: (id, index, extend, hardware) => select(id, index, extend, hardware, 'viewport'),
             onMode: mode => { mapMode = mode; syncUrl(); mapControls?.update(); },
             onCamera: () => mapControls?.update(),
@@ -2472,9 +2475,10 @@ function setEditTool(tool) {
 }
 
 const actions = {
-    accessibility: () => {
-        const url = new URL('accessibility.html', location.href);
+    settings: () => {
+        const url = new URL('settings.html', location.href);
         url.searchParams.set('return', location.pathname + location.search + location.hash);
+        settingsNavigation = true;
         location.assign(url.href);
     },
     refresh,
@@ -2758,9 +2762,16 @@ resizer.addEventListener('keydown', event => {
     const width = $('#inspector').clientWidth + (event.key === 'ArrowLeft' ? 24 : -24);
     resizeInspector(width);
 });
-window.addEventListener('pagehide', () => {
+function persistLocalWork() {
     if (document.activeElement?.closest('#structure-form')) applyEditorField(document.activeElement);
     persistDrafts(); persistLinks(); persistEdit();
+}
+window.addEventListener('pagehide', persistLocalWork);
+window.addEventListener('pageshow', event => {
+    if (!settingsNavigation || !event.persisted) return;
+    // A browser-back restore can still hold drafts and preferences cleared in Settings.
+    window.removeEventListener('pagehide', persistLocalWork);
+    location.reload();
 });
 setView('list');
 renderHeader();

@@ -284,3 +284,52 @@ test('precision is incremental and Ctrl snapping applies to mouse previews', () 
     near(entries[0].object.position.x, Math.round(precise));
     controller.dispose();
 });
+
+test('hotkey transforms keep applying relative movement across wraps and release on cancel or confirmation', () => {
+    const { controller, entries, key, commits } = setup();
+    let requests = 0, cursor;
+    window.innerWidth = 800; window.innerHeight = 600;
+    document.createElement = () => ({ style: {}, setAttribute() {}, remove() { this.removed = true; } });
+    document.body = { append(element) { cursor = element; } };
+    document.exitPointerLock = () => {
+        document.pointerLockElement = null;
+        document.dispatchEvent(new Event('pointerlockchange'));
+    };
+    controller.canvas.requestPointerLock = () => {
+        requests++;
+        document.pointerLockElement = controller.canvas;
+        document.dispatchEvent(new Event('pointerlockchange'));
+    };
+    const move = (event, relative = true) => controller.pointerMove({
+        clientX: 790, clientY: 100, preventDefault() {}, stopImmediatePropagation() {}, ...event
+    }, relative);
+    const options = { wrapCursor: true }, point = { clientX: 790, clientY: 100 };
+    controller.begin('translate', point, { modal: false });
+    assert.equal(requests, 0, 'gizmos use ordinary pointer capture');
+    controller.begin('translate', point, options);
+    move({ movementX: 25, movementY: 0 });
+    assert.equal(cursor.style.translate, '15px 100px');
+    move({}, false);
+    move({ movementX: 800, movementY: 0, shiftKey: true });
+    assert.equal(controller.active.dx, 105);
+    assert.notEqual(entries[0].object.position.x, 0);
+
+    key('r');
+    assert.equal(requests, 1, 'switching tools keeps the existing lock');
+    move({ movementX: 790, movementY: 0 });
+    const angle = controller.active.dragAngle;
+    move({ movementX: 800, movementY: 0 });
+    assert.ok(Math.abs(controller.active.dragAngle) > Math.abs(angle), 'rotation continues through another wrap');
+    document.exitPointerLock();
+    assert.equal(controller.active, null);
+    assert.equal(cursor.removed, true);
+    assert.equal(entries[0].object.position.x, 0);
+    assert.equal(commits.length, 0);
+
+    controller.begin('scale', point, options);
+    move({ movementX: 90, movementY: 0 });
+    key('Enter');
+    assert.equal(document.pointerLockElement, null);
+    assert.equal(commits.length, 1);
+    controller.dispose();
+});

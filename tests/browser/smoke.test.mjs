@@ -22,6 +22,41 @@ after(async () => {
     await installation?.cleanup();
 });
 
+test('status menu opens after replacing an animated inspector', { timeout: 30000 }, async () => {
+    const audit = { requests: [], blockedWrites: [], errors: [] };
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'no-preference' });
+    try {
+        await installTransport(context, installation.app, audit);
+        const page = await context.newPage();
+        const floor = installation.fixture.home_floor;
+        const [first, second] = installation.fixture.exhibits.filter(row => row.floor_id === floor);
+        const row = exhibit => page.locator('[data-select=' + JSON.stringify(exhibit.id) + ']');
+        await page.goto(`${TEST_ORIGIN}/index.html?webgl=1&floor=${floor}`);
+        await row(first).click();
+
+        // Check inside the click's browser task, before the spring removes the outgoing copy.
+        const copiedPicker = await row(second).evaluate(button => {
+            button.click();
+            return Boolean(document.querySelector('#inspector-underlays .status-picker'));
+        });
+        assert.equal(copiedPicker, true);
+
+        const toggle = page.locator('#inspector .status-toggle');
+        await toggle.click();
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+        const choice = page.locator('#inspector .status-choice[aria-checked=true]');
+        assert.equal(await choice.getAttribute('data-status-choice'), second.status);
+        assert.equal(await choice.evaluate(button => button === document.activeElement), true);
+        await page.keyboard.press('Escape');
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+        assert.equal(await toggle.evaluate(button => button === document.activeElement), true);
+        assert.deepEqual(audit.errors, []);
+        assert.deepEqual(audit.blockedWrites, []);
+    } finally {
+        await context.close();
+    }
+});
+
 for (const [name, viewport] of [
     ['desktop', { width: 1440, height: 1000 }],
     ['mobile', { width: 390, height: 844 }]

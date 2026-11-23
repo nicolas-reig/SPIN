@@ -57,7 +57,8 @@ The [content format reference](backend/content-format.md) covers JSON fields and
 
 - **Find an exhibit.** Search by name, post text, or documentation title and URL. Filter by floor, **Unplaced**, group, or status. Expand or collapse groups in the exhibit list.
 - **Explore the map.** Pick a floor and select an exhibit from the list or its hardware on the map. Switch between the default top-down **2D** view and the **3D** perspective. Pan, orbit, zoom, use the compass to return north-up, or use **Focus** to frame a selection. With the map focused, the arrow keys pan. Moving the elevation slider to the top switches to 2D. Share the page URL to open the same floor, map mode, and placed exhibit.
-- **Choose your display.** Switch between German and English. Drag the inspector edge to resize it on desktop. On a narrow screen, use the navigation bar to switch between Exhibits, Map, and Details. The **Accessibility** page offers four color-vision palettes alongside the default. The browser remembers your language and palette.
+- **Choose your display.** Switch between German and English. Drag the inspector edge to resize it on desktop. On a narrow screen, use the navigation bar to switch between Exhibits, Map, and Details. Open **Settings** from the three-dot menu for the accessibility palettes, **Top Circle** exhibit markers in the 2D service view, and **Group labels** centered on prefix groups on the current floor. These preferences are stored in the browser.
+- **Clear browser data.** Use **Settings → Clear browser data** to reset this site's browser settings, drafts, and accessible cookies and storage. On supported secure connections the browser also receives a request to remove its HTTP cache and protected cookies for the site. On plain HTTP, use the browser's site settings to remove data that the page cannot clear.
 
 ### Work with service records
 

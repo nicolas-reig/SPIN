@@ -17,6 +17,7 @@ import { TopView } from './top-view.js';
 import { dispose, disposeMaterials, replaceMaterials } from './model-resources.js';
 import { boundsScale, boundsCorners, aimCamera, frameBounds, controlLimits, clippingPlanes, clearViewport } from './camera-framing.js';
 import { focusGeometry, nextBestView, birdFocusView } from './camera-focus.js';
+import { MapOverlays } from './map-overlays.js';
 
 const radians = v => v * Math.PI / 180;
 const perspectiveFocusPadding = .72;
@@ -46,6 +47,7 @@ function smoothNormals(object) {
 }
 export class MapView {
     constructor(container, {
+        overlayPreferences = {},
         onSelect = () => {},
         onTransform = () => {},
         onInvalidTransform = () => {},
@@ -55,6 +57,7 @@ export class MapView {
         onCamera = () => {}
     } = {}) {
         this.container = container;
+        this.overlayPreferences = overlayPreferences;
         this.onSelect = onSelect;
         this.onTransform = onTransform;
         this.onInvalidTransform = onInvalidTransform;
@@ -113,6 +116,9 @@ export class MapView {
         await this.renderer.init();
         this.renderer.domElement.dataset.renderer = this.renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
         this.container.append(this.renderer.domElement);
+        if (this.overlayPreferences.topCircle || this.overlayPreferences.groupLabels) {
+            this.overlays = new MapOverlays(this.container, (id, extend) => this.onSelect(id, 0, extend, false));
+        }
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;
         this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE };
@@ -232,6 +238,8 @@ export class MapView {
         const x = (event.clientX - rect.left) / rect.width;
         const y = (event.clientY - rect.top) / rect.height;
         if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return null;
+        const circle = this.mode === 'top' && !this.editing ? this.overlays?.pick(x * rect.width, y * rect.height) : null;
+        if (circle) return { exhibitId: circle };
         this.camera.updateMatrixWorld();
         this.exhibitRay.setFromCamera(this.pointerPosition.set(x * 2 - 1, 1 - y * 2), this.camera);
         for (const hit of this.exhibitRay.intersectObjects([...this.objects.values()], true)) {
@@ -282,6 +290,12 @@ export class MapView {
                 const offset = this.camera.position.clone().sub(this.controls.target);
                 this.renderer.domElement.dataset.cameraOffset = coordinateVector(offset.toArray()).join(',');
                 this.onCamera(this.navigationState());
+                if (this.overlays) this.overlays.render({
+                    camera: this.camera, width: this.width, height: this.height, viewport: this.cameraViewport,
+                    exhibits: this.data?.exhibits || [], objects: this.objects, selection: this.selection,
+                    circles: Boolean(this.overlayPreferences.topCircle && this.mode === 'top' && !this.editing),
+                    labels: this.overlayPreferences.groupLabels
+                });
                 const building = this.root.children.find(object => object.userData.floor);
                 if (this.mode === 'top' && building && this.topStyle !== 'shaded' && !this.topViewFailed && TopView.supported(this.renderer)) {
                     try {
@@ -579,6 +593,7 @@ export class MapView {
         if (this.boundsDirty || !this.bounds) {
             this.root.updateMatrixWorld(true);
             this.bounds = new THREE.Box3().setFromObject(this.root);
+            this.overlays?.invalidate();
             this.boundsDirty = false;
             this.cameraLimitsDirty = true;
         }
@@ -803,6 +818,7 @@ export class MapView {
     }
     updateCameraViewport(camera = this.camera) {
         const bounds = this.viewportBounds();
+        if (camera === this.camera) this.cameraViewport = bounds;
         const width = this.container.clientWidth || this.width, height = this.container.clientHeight || this.height;
         if (!width || !height) return;
         const x = (bounds.left + bounds.right) / 2, y = (bounds.top + bounds.bottom) / 2;
@@ -957,6 +973,7 @@ export class MapView {
         dispose(this.scene, this.sharedMaterials);
         disposeMaterials(this.sharedMaterials);
         this.topView?.dispose();
+        this.overlays?.destroy();
         this.renderer?.dispose();
         this.renderer?.domElement.remove();
     }

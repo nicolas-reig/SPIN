@@ -235,7 +235,7 @@ export class TransformController {
         if (drag) this.active.drag = null;
         this.cancel();
         if (!this.entries.length || !this.mode) { drag?.stop(); return false; }
-        const transaction = new TransformTransaction(this.entries);
+        const transaction = new TransformTransaction(this.entries, { grounded: true });
         const rect = this.canvas.getBoundingClientRect();
         const pointer = { x: event.clientX ?? this.pointer?.x ?? rect.left + rect.width / 2,
             y: event.clientY ?? this.pointer?.y ?? rect.top + rect.height / 2 };
@@ -376,7 +376,7 @@ export class TransformController {
             }
             const changes = transaction.apply(transformDelta(transaction.center, { translation, rotation, scale, orientation }), rotation);
             a.error = null;
-            this.group.position.copy(transaction.center).add(translation);
+            this.group.position.copy(selectionCenter(this.entries));
             this.group.quaternion.copy(rotation).multiply(orientation);
             this.onPreview(changes);
         } catch (error) { a.error = error.message; }

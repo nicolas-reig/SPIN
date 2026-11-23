@@ -257,6 +257,7 @@ test('automatic 3D exhibit focus reuses the search across recentering, resizing 
 test('signed placement save prepares a fresh direction and subsequent focus uses the persisted value', async () => {
     const { view } = makeView();
     const data = dataset();
+    data.exhibits[0].transform.position[1] = 3;
     data.exhibits[0].focusDirection = [0, .6, -.8];
     await view.setData(data, 'floor', 'first');
     let rays = 0;
@@ -288,6 +289,7 @@ test('signed placement save prepares a fresh direction and subsequent focus uses
 
 test('whole placement derives from loaded component centers and follows component edits before moving all hardware together', async () => {
     const { view } = makeView(); const data = dataset(6);
+    data.exhibits[0].transform.position[1] = 3;
     await view.setData(data, 'floor', 'first', true, { selection: ['first'] });
     const group = view.objects.get('first');
     const midpoint = () => group.children.reduce((sum, holder) => sum.add(geometryCenter(holder)), new THREE.Vector3()).divideScalar(group.children.length);
@@ -306,6 +308,56 @@ test('whole placement derives from loaded component centers and follows componen
     view.key = 'a pending model replacement';
     assert.equal(view.exhibitPlacement('first'), null);
     assert.throws(() => view.beginExhibitPlacement('first'), /mapLoading/);
+});
+
+test('numeric hardware and whole-exhibit edits respect the lowest geometry and validate signed placement', async () => {
+    const { view } = makeView();
+    const data = dataset(6);
+    const record = data.exhibits[0];
+    record.transform.position[1] = 6;
+    record.transform.rotation = [21, 33, -43];
+    record.transform.scale = [-1.2, .7, 1.3];
+    await view.setData(data, 'floor', record.id, true);
+    const group = view.objects.get(record.id);
+    const holder = group.children[0];
+    const minimum = object => new THREE.Box3().setFromObject(object, true).min.y;
+    const draft = structuredClone(data);
+    draft.exhibits[0].models[0].transform = transform([1, -90, 2], [110, 45, 65], [-2, .7, 1.4]);
+    await view.setData(draft, 'floor', record.id, true);
+    await assert.rejects(MapView.prepareFocusDirections(draft, data.exhibits, [draft.exhibits[0]], view), /placementBelowGround/);
+
+    const [change] = view.previewTransforms([{ exhibitId: record.id, instanceIndex: 0, transform: draft.exhibits[0].models[0].transform }], { grounded: true });
+    assert.ok(minimum(holder) >= -1e-9 && minimum(holder) < 1e-5, 'the rotated, mirrored component rests on the plane');
+    draft.exhibits[0].models[0].transform = change.transform;
+    await view.setData(draft, 'floor', record.id, true);
+    assert.ok(minimum(holder) >= -1e-9, 'reloading the six-decimal transform keeps the component above ground');
+    await MapView.prepareFocusDirections(draft, data.exhibits, [draft.exhibits[0]], view);
+
+    const locals = group.children.map(component => component.matrix.toArray());
+    const preview = view.beginExhibitPlacement(record.id);
+    view.previewExhibitPlacement(preview, 'position', 1, -100);
+    assert.ok(minimum(group) >= -1e-9 && minimum(group) < 1e-5);
+    assert.deepEqual(group.children.map(component => component.matrix.toArray()), locals);
+    view.restoreSelectionField(preview);
+    view.destroy();
+});
+
+test('a new hardware instance rests above ground before its placement is added to the scene', async t => {
+    const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+    const loader = t.mock.method(GLTFLoader.prototype, 'loadAsync', async () => ({ scene: sourceScene().scene }));
+    const data = dataset();
+    const record = data.exhibits[0];
+    const existing = structuredClone(record.models);
+    record.models.push({ model: existing[0].model, transform: transform([3, -4, 5]) });
+    await MapView.groundPlacement(data, record, 2);
+    assert.equal(loader.mock.callCount(), 1, 'placement loads only the new instance');
+    assert.deepEqual(record.models.slice(0, 2), existing);
+    const { view } = makeView();
+    await view.setData(data, record.floorId, record.id);
+    const holder = view.objects.get(record.id).children[2];
+    const minY = new THREE.Box3().setFromObject(holder, true).min.y;
+    assert.ok(minY >= -1e-9 && minY < 1e-6);
+    view.destroy();
 });
 
 test('exhibit and component rotations survive serialized edits, scene reload and movement undo without changing child coordinates', async () => {

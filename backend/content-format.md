@@ -252,6 +252,8 @@ Transform components and saved-camera positions, targets and spans use **at most
 
 Select an exhibit in the list or select specific hardware in the map or inspector. Use the placement fields or the Move, Rotate, and Scale tools to edit the selection. Press **G**, **R**, or **S** for a preview, **Enter** to confirm, or **Esc** to cancel. The toolbar switches between Local and Global axes and controls snapping. Each confirmed transform can be undone before the signed Save.
 
+Placement edits stop at the world XZ plane (`Y = 0`). The editor uses the lowest point of the selected geometry and lifts the selection together when needed.
+
 #### Saved views: 2D and 3D
 
 Floors and exhibits use the same `views` format, with the keys **`2D`** and **`3D`**. Either preset can be supplied independently. Omit a preset, or use `"views": {}`, to leave it automatic. Each preset contains only `position`, `target` and `span`; the key already identifies the camera type, so no `mode` field is needed.
@@ -265,6 +267,8 @@ Older files using `top` and `three` are still read as `2D` and `3D`. If both nam
 | `span` | Positive framing value. In 2D it is half the visible vertical extent in metres: `span: 5` shows 10 metres vertically before further zooming. 3D requires this field too, but its apparent size depends on camera distance and perspective. |
 
 `position` and `target` must be different, and each must contain three finite numbers with absolute values at most `100000`. `span` must be greater than zero and at most `100000`. For a 2D preset, put the camera above its target. The small Z offset in the examples keeps the viewing direction just clear of the vertical pole. Camera positions and targets are world coordinates; they are **not** transformed with an exhibit when its hardware moves.
+
+The map camera stays at or above world `Y = 0`, including when opening a saved view.
 
 The app ignores invalid individual presets and uses automatic framing instead. Selecting an exhibit that is outside the visible map uses its preset for the current mode, or calculates a view from its hardware if none is saved. The Focus control uses the same presets. Floor framing uses its saved view when available, otherwise the building bounds.
 
